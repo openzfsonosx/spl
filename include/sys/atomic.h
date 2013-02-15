@@ -25,9 +25,11 @@
 #ifndef _SPL_ATOMIC_H
 #define _SPL_ATOMIC_H
 
-#include <linux/module.h>
-#include <linux/spinlock.h>
+//#include <linux/module.h>
+//#include <linux/spinlock.h>
+#include <libkern/OSAtomic.h>
 #include <sys/types.h>
+#include <osx/atomic.h>
 
 #ifndef HAVE_ATOMIC64_CMPXCHG
 #define atomic64_cmpxchg(v, o, n)       (cmpxchg(&((v)->counter), (o), (n)))
@@ -37,260 +39,65 @@
 #define atomic64_xchg(v, n)             (xchg(&((v)->counter), n))
 #endif
 
+
+
 /*
- * Two approaches to atomic operations are implemented each with its
- * own benefits are drawbacks imposed by the Solaris API.  Neither
- * approach handles the issue of word breaking when using a 64-bit
- * atomic variable on a 32-bit arch.  The Solaris API would need to
- * add an atomic read call to correctly support this.
- *
- * When ATOMIC_SPINLOCK is defined all atomic operations will be
- * serialized through global spin locks.  This is bad for performance
- * but it does allow a simple generic implementation.
- *
- * When ATOMIC_SPINLOCK is not defined the Linux atomic operations
- * are used.  This is safe as long as the core Linux implementation
- * doesn't change because we are relying on the fact that an atomic
- * type is really just a uint32 or uint64.  If this changes at some
- * point in the future we need to fall-back to the spin approach.
+ * Increment target.
  */
-#ifdef ATOMIC_SPINLOCK
-extern spinlock_t atomic32_lock;
-extern spinlock_t atomic64_lock;
+#define atomic_inc_8(addr)  (void)OSIncrementAtomic8((volatile SInt8 *)addr)
+#define atomic_inc_16(addr) (void)OSIncrementAtomic16((volatile SInt16 *)addr)
+#define atomic_inc_32(addr) (void)OSIncrementAtomic((volatile SInt32 *)addr)
+#define atomic_inc_64(addr) (void)OSIncrementAtomic64((volatile SInt64 *)addr)
 
-static __inline__ void
-atomic_inc_32(volatile uint32_t *target)
-{
-	spin_lock(&atomic32_lock);
-	(*target)++;
-	spin_unlock(&atomic32_lock);
-}
-
-static __inline__ void
-atomic_dec_32(volatile uint32_t *target)
-{
-	spin_lock(&atomic32_lock);
-	(*target)--;
-	spin_unlock(&atomic32_lock);
-}
-
-static __inline__ void
-atomic_add_32(volatile uint32_t *target, int32_t delta)
-{
-	spin_lock(&atomic32_lock);
-	*target += delta;
-	spin_unlock(&atomic32_lock);
-}
-
-static __inline__ void
-atomic_sub_32(volatile uint32_t *target, int32_t delta)
-{
-	spin_lock(&atomic32_lock);
-	*target -= delta;
-	spin_unlock(&atomic32_lock);
-}
-
-static __inline__ uint32_t
-atomic_inc_32_nv(volatile uint32_t *target)
-{
-	uint32_t nv;
-
-	spin_lock(&atomic32_lock);
-	nv = ++(*target);
-	spin_unlock(&atomic32_lock);
-
-	return nv;
-}
-
-static __inline__ uint32_t
-atomic_dec_32_nv(volatile uint32_t *target)
-{
-	uint32_t nv;
-
-	spin_lock(&atomic32_lock);
-	nv = --(*target);
-	spin_unlock(&atomic32_lock);
-
-	return nv;
-}
-
-static __inline__ uint32_t
-atomic_add_32_nv(volatile uint32_t *target, uint32_t delta)
-{
-	uint32_t nv;
-
-	spin_lock(&atomic32_lock);
-	*target += delta;
-	nv = *target;
-	spin_unlock(&atomic32_lock);
-
-	return nv;
-}
-
-static __inline__ uint32_t
-atomic_sub_32_nv(volatile uint32_t *target, uint32_t delta)
-{
-	uint32_t nv;
-
-	spin_lock(&atomic32_lock);
-	*target -= delta;
-	nv = *target;
-	spin_unlock(&atomic32_lock);
-
-	return nv;
-}
-
-static __inline__ uint32_t
-atomic_cas_32(volatile uint32_t *target,  uint32_t cmp,
-              uint32_t newval)
-{
-	uint32_t rc;
-
-	spin_lock(&atomic32_lock);
-	rc = *target;
-	if (*target == cmp)
-		*target = newval;
-
-	spin_unlock(&atomic32_lock);
-
-	return rc;
-}
-
-static __inline__ void
-atomic_inc_64(volatile uint64_t *target)
-{
-	spin_lock(&atomic64_lock);
-	(*target)++;
-	spin_unlock(&atomic64_lock);
-}
-
-static __inline__ void
-atomic_dec_64(volatile uint64_t *target)
-{
-	spin_lock(&atomic64_lock);
-	(*target)--;
-	spin_unlock(&atomic64_lock);
-}
-
-static __inline__ void
-atomic_add_64(volatile uint64_t *target, uint64_t delta)
-{
-	spin_lock(&atomic64_lock);
-	*target += delta;
-	spin_unlock(&atomic64_lock);
-}
-
-static __inline__ void
-atomic_sub_64(volatile uint64_t *target, uint64_t delta)
-{
-	spin_lock(&atomic64_lock);
-	*target -= delta;
-	spin_unlock(&atomic64_lock);
-}
-
-static __inline__ uint64_t
-atomic_inc_64_nv(volatile uint64_t *target)
-{
-	uint64_t nv;
-
-	spin_lock(&atomic64_lock);
-	nv = ++(*target);
-	spin_unlock(&atomic64_lock);
-
-	return nv;
-}
-
-static __inline__ uint64_t
-atomic_dec_64_nv(volatile uint64_t *target)
-{
-	uint64_t nv;
-
-	spin_lock(&atomic64_lock);
-	nv = --(*target);
-	spin_unlock(&atomic64_lock);
-
-	return nv;
-}
-
-static __inline__ uint64_t
-atomic_add_64_nv(volatile uint64_t *target, uint64_t delta)
-{
-	uint64_t nv;
-
-	spin_lock(&atomic64_lock);
-	*target += delta;
-	nv = *target;
-	spin_unlock(&atomic64_lock);
-
-	return nv;
-}
-
-static __inline__ uint64_t
-atomic_sub_64_nv(volatile uint64_t *target, uint64_t delta)
-{
-	uint64_t nv;
-
-	spin_lock(&atomic64_lock);
-	*target -= delta;
-	nv = *target;
-	spin_unlock(&atomic64_lock);
-
-	return nv;
-}
-
-static __inline__ uint64_t
-atomic_cas_64(volatile uint64_t *target,  uint64_t cmp,
-              uint64_t newval)
-{
-	uint64_t rc;
-
-	spin_lock(&atomic64_lock);
-	rc = *target;
-	if (*target == cmp)
-		*target = newval;
-	spin_unlock(&atomic64_lock);
-
-	return rc;
-}
+extern SInt32 atomic_inc_32_nv(volatile SInt32 *);
 
 
-#else /* ATOMIC_SPINLOCK */
+/*
+ * Decrement target
+ */
+#define atomic_dec_8(addr)  (void)OSDecrementAtomic8((volatile SInt8 *)addr)
+#define atomic_dec_16(addr) (void)OSDecrementAtomic16((volatile SInt16 *)addr)
+#define atomic_dec_32(addr) (void)OSDecrementAtomic((volatile SInt32 *)addr)
+#define atomic_dec_64(addr) (void)OSDecrementAtomic64((volatile SInt64 *)addr)
 
-#define atomic_inc_32(v)	atomic_inc((atomic_t *)(v))
-#define atomic_dec_32(v)	atomic_dec((atomic_t *)(v))
-#define atomic_add_32(v, i)	atomic_add((i), (atomic_t *)(v))
-#define atomic_sub_32(v, i)	atomic_sub((i), (atomic_t *)(v))
-#define atomic_inc_32_nv(v)	atomic_inc_return((atomic_t *)(v))
-#define atomic_dec_32_nv(v)	atomic_dec_return((atomic_t *)(v))
-#define atomic_add_32_nv(v, i)	atomic_add_return((i), (atomic_t *)(v))
-#define atomic_sub_32_nv(v, i)	atomic_sub_return((i), (atomic_t *)(v))
-#define atomic_cas_32(v, x, y)	atomic_cmpxchg((atomic_t *)(v), x, y)
-#define atomic_inc_64(v)	atomic64_inc((atomic64_t *)(v))
-#define atomic_dec_64(v)	atomic64_dec((atomic64_t *)(v))
-#define atomic_add_64(v, i)	atomic64_add((i), (atomic64_t *)(v))
-#define atomic_sub_64(v, i)	atomic64_sub((i), (atomic64_t *)(v))
-#define atomic_inc_64_nv(v)	atomic64_inc_return((atomic64_t *)(v))
-#define atomic_dec_64_nv(v)	atomic64_dec_return((atomic64_t *)(v))
-#define atomic_add_64_nv(v, i)	atomic64_add_return((i), (atomic64_t *)(v))
-#define atomic_sub_64_nv(v, i)	atomic64_sub_return((i), (atomic64_t *)(v))
-#define atomic_cas_64(v, x, y)	atomic64_cmpxchg((atomic64_t *)(v), x, y)
+extern SInt32 atomic_dec_32_nv(volatile SInt32 *);
 
-#endif /* ATOMIC_SPINLOCK */
+/*
+ * Add delta to target
+ */
+#define atomic_add_8(addr,amt)  (void)OSAddAtomic8(amt, (volatile SInt8 *)addr)
+#define atomic_add_16(addr,amt) (void)OSAddAtomic16(amt, (volatile SInt16 *)addr)
+#define atomic_add_32(addr,amt) (void)OSAddAtomic(amt, (volatile SInt32 *)addr)
+#define atomic_add_64(addr,amt) (void)OSAddAtomic64(amt, (volatile SInt64 *)addr)
 
-#ifdef _LP64
-static __inline__ void *
-atomic_cas_ptr(volatile void *target,  void *cmp, void *newval)
-{
-	return (void *)atomic_cas_64((volatile uint64_t *)target,
-	                             (uint64_t)cmp, (uint64_t)newval);
-}
-#else /* _LP64 */
-static __inline__ void *
-atomic_cas_ptr(volatile void *target,  void *cmp, void *newval)
-{
-	return (void *)atomic_cas_32((volatile uint32_t *)target,
-	                             (uint32_t)cmp, (uint32_t)newval);
-}
-#endif /* _LP64 */
+extern SInt64 OSAddAtomic64_NV(SInt64 theAmount, volatile SInt64 *address);
+#define atomic_add_64_nv(addr, amt)     (uint64_t)OSAddAtomic64_NV(amt, (volatile SInt64 *)addr)
+
+/*
+ * logical OR bits with target
+ */
+#define atomic_or_8(addr, mask)  (void)OSBitOrAtomic8((UInt32)mask, (volatile UInt8 *)addr)
+#define atomic_or_16(addr, mask) (void)OSBitOrAtomic16((UInt32)mask, (volatile UInt16 *)addr)
+#define atomic_or_32(addr, mask) (void)OSBitOrAtomic((UInt32)mask, (volatile UInt32 *)addr)
+
+/*
+ * logical AND bits with target
+ */
+#define atomic_and_8(addr, mask)  (void)OSBitAndAtomic8((UInt32)mask, (volatile UInt8 *)addr)
+#define atomic_and_16(addr, mask) (void)OSBitAndAtomic16((UInt32)mask, (volatile UInt16 *)addr)
+#define atomic_and_32(addr, mask) (void)OSBitAndAtomic((UInt32)mask, (volatile UInt32 *)addr)
+
+/*
+ * *arg1 == arg2, set *arg1 = arg3; return old value
+ */
+extern uint8_t  atomic_cas_8(  volatile uint8_t *, uint8_t, uint8_t);
+extern uint16_t atomic_cas_16( volatile uint16_t *, uint16_t, uint16_t);
+extern uint32_t atomic_cas_32( volatile uint32_t *, uint32_t, uint32_t);
+extern uint64_t atomic_cas_64( volatile uint64_t *, uint64_t, uint64_t);
+extern void    *atomic_cas_ptr(volatile void *, void *, void *);
+
+
+
+
 
 #endif  /* _SPL_ATOMIC_H */

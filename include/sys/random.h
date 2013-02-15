@@ -25,20 +25,22 @@
 #ifndef _SPL_RANDOM_H
 #define	_SPL_RANDOM_H
 
-#include <linux/module.h>
-#include <linux/random.h>
+//#include <linux/module.h>
+//#include <linux/random.h>
+#include_next <sys/random.h>
+
 
 static __inline__ int
 random_get_bytes(uint8_t *ptr, size_t len)
 {
-	get_random_bytes((void *)ptr,(int)len);
+    read_random(ptr, len);
 	return 0;
 }
 
 static __inline__ int
 random_get_pseudo_bytes(uint8_t *ptr, size_t len)
 {
-	get_random_bytes((void *)ptr,(int)len);
+    read_random(ptr, len);
 	return 0;
 }
 

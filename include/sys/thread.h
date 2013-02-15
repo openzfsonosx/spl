@@ -25,37 +25,48 @@
 #ifndef _SPL_THREAD_H
 #define _SPL_THREAD_H
 
-#include <linux/module.h>
-#include <linux/mm.h>
-#include <linux/spinlock.h>
-#include <linux/kthread.h>
+//#include <linux/module.h>
+//#include <linux/mm.h>
+//#include <linux/spinlock.h>
+//#include <linux/kthread.h>
 #include <sys/types.h>
 #include <sys/sysmacros.h>
 #include <sys/tsd.h>
+#include <sys/condvar.h>
+
+
+typedef struct kthread kthread_t;
 
 /*
  * Thread interfaces
  */
 #define TP_MAGIC			0x53535353
 
-#define TS_SLEEP			TASK_INTERRUPTIBLE
-#define TS_RUN				TASK_RUNNING
-#define TS_ZOMB				EXIT_ZOMBIE
-#define TS_STOPPED			TASK_STOPPED
+#define TS_FREE         0x00    /* Thread at loose ends */
+#define TS_SLEEP        0x01    /* Awaiting an event */
+#define TS_RUN          0x02    /* Runnable, but not yet on a processor */
+#define TS_ONPROC       0x04    /* Thread is being run on a processor */
+#define TS_ZOMB         0x08    /* Thread has died but hasn't been reaped */
+#define TS_STOPPED      0x10    /* Stopped, initial state */
+#define TS_WAIT         0x20    /* Waiting to become runnable */
+
 
 typedef void (*thread_func_t)(void *);
 
-#define thread_create(stk, stksize, func, arg, len, pp, state, pri)      \
-	__thread_create(stk, stksize, (thread_func_t)func,               \
-	                #func, arg, len, pp, state, pri)
-#define thread_exit()			__thread_exit()
-#define thread_join(t)			VERIFY(0)
-#define curthread			current
 
-extern kthread_t *__thread_create(caddr_t stk, size_t  stksize,
-                                  thread_func_t func, const char *name,
-                                  void *args, size_t len, proc_t *pp,
-                                  int state, pri_t pri);
-extern void __thread_exit(void);
+#define curthread       ((void *)(uintptr_t)thr_self())
+
+#define thread_join(t)			VERIFY(0)
+
+extern kthread_t *thread_create(
+                                caddr_t         stk,
+                                size_t          stksize,
+                                void            (*proc)(),
+                                void            *arg,
+                                size_t          len,
+                                proc_t          *pp,
+                                int             state,
+                                pri_t           pri);
+extern void thread_exit(void);
 
 #endif  /* _SPL_THREAD_H */

@@ -25,4 +25,6 @@
 #ifndef _SPL_MOUNT_H
 #define _SPL_MOUNT_H
 
+#include_next <sys/mount.h>
+
 #endif /* SPL_MOUNT_H */

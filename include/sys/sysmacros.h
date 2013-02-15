@@ -25,12 +25,13 @@
 #ifndef _SPL_SYSMACROS_H
 #define _SPL_SYSMACROS_H
 
-#include <linux/module.h>
-#include <linux/cpumask.h>
+//#include <linux/module.h>
+//#include <linux/cpumask.h>
 #include <sys/debug.h>
 #include <sys/varargs.h>
 #include <sys/zone.h>
 #include <sys/signal.h>
+#include <sys/param.h>
 
 #ifndef _KERNEL
 #define _KERNEL				__KERNEL__
@@ -39,6 +40,7 @@
 #define FALSE				0
 #define TRUE				1
 
+#if 0
 #define INT8_MAX			(127)
 #define INT8_MIN			(-128)
 #define UINT8_MAX			(255)
@@ -60,18 +62,19 @@
 #define UINT64_MIN			ULLONG_MIN
 
 #define NBBY				8
-#define ENOTSUP				EOPNOTSUPP
+#define MAXBSIZE			8192
+#endif
+//#define ENOTSUP				EOPNOTSUPP
 
 #define MAXMSGLEN			256
 #define MAXNAMELEN			256
 #define MAXPATHLEN			PATH_MAX
 #define MAXOFFSET_T			LLONG_MAX
-#define MAXBSIZE			8192
 #define DEV_BSIZE			512
 #define DEV_BSHIFT			9 /* log2(DEV_BSIZE) */
 
 #define proc_pageout			NULL
-#define curproc				current
+#define curproc             current_proc()
 #define max_ncpus			num_possible_cpus()
 #define CPU_SEQID			smp_processor_id()
 #define _NOTE(x)
@@ -87,8 +90,10 @@
  *
  * Treat shim tasks as SCHED_NORMAL tasks
  */
-#define minclsyspri			(MAX_RT_PRIO)
-#define maxclsyspri			(MAX_PRIO-1)
+//#define minclsyspri			(MAX_RT_PRIO)
+//#define maxclsyspri			(MAX_PRIO-1)
+#define minclsyspri  0
+#define maxclsyspri  0
 
 #define NICE_TO_PRIO(nice)		(MAX_RT_PRIO + (nice) + 20)
 #define PRIO_TO_NICE(prio)		((prio) - MAX_RT_PRIO - 20)
@@ -161,9 +166,10 @@ extern void spl_cleanup(void);
 #ifndef DIV_ROUND_UP
 #define DIV_ROUND_UP(n,d)	(((n) + (d) - 1) / (d))
 #endif
-#ifndef roundup
-#define roundup(x, y)		((((x) + ((y) - 1)) / (y)) * (y))
-#endif
+
+//#ifndef roundup
+//#define roundup(x, y)		((((x) + ((y) - 1)) / (y)) * (y))
+//#endif
 
 /*
  * Compatibility macros/typedefs needed for Solaris -> Linux port

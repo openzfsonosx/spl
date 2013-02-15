@@ -25,7 +25,7 @@
 #ifndef _SPL_DEVICE_H
 #define _SPL_DEVICE_H
 
-#include <linux/device.h>
+//#include <linux/device.h>
 
 /*
  * Preferred API from 2.6.18 to 2.6.26+

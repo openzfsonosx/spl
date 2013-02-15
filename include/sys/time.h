@@ -29,10 +29,12 @@
  * Structure returned by gettimeofday(2) system call,
  * and used in other calls.
  */
-#include <linux/module.h>
-#include <linux/time.h>
+//#include <linux/module.h>
+//#include <linux/time.h>
 #include <sys/types.h>
+#include_next <sys/time.h>
 #include <sys/timer.h>
+#include <mach/mach_time.h>
 
 #if defined(CONFIG_64BIT)
 #define TIME_MAX			INT64_MAX
@@ -64,30 +66,20 @@ typedef enum clock_type {
 	CLOCK_PROF =			CLOCK_THREAD_CPUTIME_ID,/* alternate name */
 } clock_type_t;
 
+#if 0
 #define hz					\
 ({						\
         ASSERT(HZ >= 100 && HZ <= MICROSEC);	\
         HZ;					\
 })
-
-extern void __gethrestime(timestruc_t *);
-extern int __clock_gettime(clock_type_t, timespec_t *);
-extern hrtime_t __gethrtime(void);
-
-#define gethrestime(ts)			__gethrestime(ts)
-#define clock_gettime(fl, tp)		__clock_gettime(fl, tp)
-#define gethrtime()			__gethrtime()
-
-static __inline__ time_t
-gethrestime_sec(void)
-{
-        timestruc_t now;
-
-        __gethrestime(&now);
-        return now.tv_sec;
-}
+#endif
 
 #define TIMESPEC_OVERFLOW(ts)		\
 	((ts)->tv_sec < TIME_MIN || (ts)->tv_sec > TIME_MAX)
+
+typedef long long	hrtime_t;
+
+extern hrtime_t gethrtime(void);
+
 
 #endif  /* _SPL_TIME_H */

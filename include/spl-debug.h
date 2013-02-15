@@ -42,8 +42,10 @@
 #ifndef _SPL_DEBUG_INTERNAL_H
 #define _SPL_DEBUG_INTERNAL_H
 
-#include <linux/limits.h>
-#include <linux/sched.h>
+//#include <linux/limits.h>
+#include <machine/limits.h>
+//#include <linux/sched.h>
+#include <osx/sched.h>
 
 #define SS_UNDEFINED	0x00000001
 #define SS_ATOMIC	0x00000002
@@ -168,7 +170,7 @@ extern unsigned long spl_debug_get_subsys(void);
 extern int spl_debug_set_mb(int mb);
 extern int spl_debug_get_mb(void);
 extern int spl_debug_dumplog(int flags);
-extern void spl_debug_dumpstack(struct task_struct *tsk);
+//extern void spl_debug_dumpstack(struct task_struct *tsk);
 extern void spl_debug_bug(char *file, const char *fn, const int line, int fl);
 extern int spl_debug_msg(void *arg, int subsys, int mask, const char *file,
     const char *fn, const int line, const char *format, ...);
@@ -230,11 +232,11 @@ spl_debug_dumplog(int flags)
 	return (0);
 }
 
-static inline void
-spl_debug_dumpstack(struct task_struct *tsk)
-{
-	return;
-}
+//static inline void
+//spl_debug_dumpstack(struct task_struct *tsk)
+//{
+//	return;
+//}
 
 static inline void
 spl_debug_bug(char *file, const char *fn, const int line, int fl)

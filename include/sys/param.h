@@ -25,7 +25,9 @@
 #ifndef _SPL_PARAM_H
 #define _SPL_PARAM_H
 
-#include <asm/page.h>
+//#include <asm/page.h>
+#include_next <sys/param.h>
+#include <mach/vm_param.h>
 
 /* Pages to bytes and back */
 #define ptob(pages)			(pages << PAGE_SHIFT)

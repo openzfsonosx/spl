@@ -24,18 +24,18 @@
  *  Solaris Porting Layer (SPL) Debug Implementation.
 \*****************************************************************************/
 
-#include <linux/kmod.h>
-#include <linux/mm.h>
-#include <linux/vmalloc.h>
-#include <linux/pagemap.h>
-#include <linux/slab.h>
-#include <linux/ctype.h>
-#include <linux/kthread.h>
-#include <linux/hardirq.h>
-#include <linux/interrupt.h>
-#include <linux/spinlock.h>
-#include <linux/proc_compat.h>
-#include <linux/file_compat.h>
+//#include <linux/kmod.h>
+//#include <linux/mm.h>
+//#include <linux/vmalloc.h>
+//#include <linux/pagemap.h>
+//#include <linux/slab.h>
+//#include <linux/ctype.h>
+//#include <linux/kthread.h>
+//#include <linux/hardirq.h>
+//#include <linux/interrupt.h>
+//#include <linux/spinlock.h>
+//#include <linux/proc_compat.h>
+//#include <linux/file_compat.h>
 #include <sys/sysmacros.h>
 #include <spl-debug.h>
 #include <spl-trace.h>

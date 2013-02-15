@@ -56,6 +56,7 @@
 #include <sys/kmem.h>
 #include <sys/zmod.h>
 #include <spl-debug.h>
+#include <libkern/zlib.h>
 
 #ifdef DEBUG_SUBSYSTEM
 #undef DEBUG_SUBSYSTEM

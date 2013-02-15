@@ -25,22 +25,28 @@
 #ifndef _SPL_VNODE_H
 #define _SPL_VNODE_H
 
-#include <linux/module.h>
-#include <linux/syscalls.h>
-#include <linux/fcntl.h>
-#include <linux/buffer_head.h>
-#include <linux/dcache.h>
-#include <linux/namei.h>
-#include <linux/file.h>
-#include <linux/fs.h>
-#include <linux/fs_struct.h>
-#include <linux/mount.h>
+//#include <linux/module.h>
+//#include <linux/syscalls.h>
+//#include <linux/fcntl.h>
+#include <sys/fcntl.h>
+//#include <linux/buffer_head.h>
+//#include <linux/dcache.h>
+//#include <linux/namei.h>
+//#include <linux/file.h>
+//#include <linux/fs.h>
+//#include <linux/fs_struct.h>
+//#include <linux/mount.h>
+#include <sys/mount.h>
 #include <sys/kmem.h>
 #include <sys/mutex.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/uio.h>
 #include <sys/sunldi.h>
+#include <sys/cred.h>
+#define uio_t apple_uio_t
+#include_next <sys/vnode.h>
+#undef uio_t
 
 /*
  * Prior to linux-2.6.33 only O_DSYNC semantics were implemented and
@@ -51,6 +57,7 @@
 #define O_DSYNC		O_SYNC
 #endif
 
+#if 0
 #define FREAD		1
 #define FWRITE		2
 #define FCREAT		O_CREAT
@@ -67,8 +74,13 @@
 #define FNOFOLLOW	0x20000 /* don't follow symlinks */
 
 #define F_FREESP	11 	/* Free file space */
+#endif
 
 
+#define ATTR_XVATTR	(1 << 31)
+#define AT_XVATTR	ATTR_XVATTR
+
+#if 0
 /*
  * The vnode AT_ flags are mapped to the Linux ATTR_* flags.
  * This allows them to be used safely with an iattr structure.
@@ -110,7 +122,38 @@
 # define nd_dentry	dentry
 # define nd_mnt		mnt
 #endif
+#endif
 
+
+enum rm         { RMFILE, RMDIRECTORY };        /* rm or rmdir (remove) */
+enum create     { CRCREAT, CRMKNOD, CRMKDIR };  /* reason for create */
+
+#define va_mask         va_active
+#define va_nodeid   va_fileid
+#define va_nblocks  va_filerev
+
+
+/*
+ * vnode attr translations
+ */
+#define AT_TYPE         VNODE_ATTR_va_type
+#define AT_MODE         VNODE_ATTR_va_mode
+#define AT_UID          VNODE_ATTR_va_uid
+#define AT_GID          VNODE_ATTR_va_gid
+#define AT_ATIME        VNODE_ATTR_va_access_time
+#define AT_MTIME        VNODE_ATTR_va_modify_time
+#define AT_CTIME        VNODE_ATTR_va_change_time
+#define AT_SIZE         VNODE_ATTR_va_data_size
+
+
+#define va_size         va_data_size
+#define va_atime        va_access_time
+#define va_mtime        va_modify_time
+#define va_ctime        va_change_time
+
+
+
+#if 0
 typedef enum vtype {
 	VNON		= 0,
 	VREG		= 1,
@@ -125,7 +168,12 @@ typedef enum vtype {
 	VPORT		= 10,
 	VBAD		= 11
 } vtype_t;
+#endif
 
+typedef struct vnode_attr vattr;
+typedef struct vnode_attr vattr_t;
+
+#if 0
 typedef struct vattr {
 	enum vtype	va_type;	/* vnode type */
 	u_int		va_mask;	/* attribute bit-mask */
@@ -145,7 +193,9 @@ typedef struct vattr {
 	uint32_t	va_seq;		/* sequence */
 	struct dentry	*va_dentry;	/* dentry to wire */
 } vattr_t;
+#endif
 
+#if 0
 typedef struct vnode {
 	struct file	*v_file;
 	kmutex_t	v_lock;		/* protects vnode fields */
@@ -158,7 +208,9 @@ typedef struct vnode {
 	dev_t		v_rdev;		/* device (VCHR, VBLK) */
 	gfp_t		v_gfp_mask;	/* original mapping gfp mask */
 } vnode_t;
+#endif
 
+#if 0
 typedef struct vn_file {
 	int		f_fd;		/* linux fd for lookup */
 	struct task_struct *f_task;	/* linux task this fd belongs to */
@@ -169,23 +221,34 @@ typedef struct vn_file {
 	vnode_t		*f_vnode;	/* vnode */
 	struct list_head f_list;	/* list referenced file_t's */
 } file_t;
+#endif
 
 extern vnode_t *vn_alloc(int flag);
 void vn_free(vnode_t *vp);
-extern vtype_t vn_mode_to_vtype(mode_t);
-extern mode_t vn_vtype_to_mode(vtype_t);
-extern int vn_open(const char *path, uio_seg_t seg, int flags, int mode,
-		   vnode_t **vpp, int x1, void *x2);
-extern int vn_openat(const char *path, uio_seg_t seg, int flags, int mode,
-		     vnode_t **vpp, int x1, void *x2, vnode_t *vp, int fd);
-extern int vn_rdwr(uio_rw_t uio, vnode_t *vp, void *addr, ssize_t len,
-		   offset_t off, uio_seg_t seg, int x1, rlim64_t x2,
-		   void *x3, ssize_t *residp);
+
+extern int vn_open(char *pnamep, enum uio_seg seg, int filemode,
+                   int createmode,
+                   struct vnode **vpp, enum create crwhy, mode_t umask);
+
+extern int vn_openat(char *pnamep, enum uio_seg seg, int filemode,
+                     int createmode, struct vnode **vpp, enum create crwhy,
+                     mode_t umask, struct vnode *startvp);
+
+// OSX kernel has a vn_rdwr, let's work around it.
+extern int  zfs_vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base,
+                        ssize_t len, offset_t offset, enum uio_seg seg,
+                        int ioflag, rlim64_t ulimit, cred_t *cr,
+                        ssize_t *residp);
+
+#define vn_rdwr(rw, vp, base, len, off, seg, flg, limit, cr, resid)     \
+    zfs_vn_rdwr((rw), (vp), (base), (len), (off), (seg), (flg), (limit), (cr), (resid))
+
+
 extern int vn_close(vnode_t *vp, int flags, int x1, int x2, void *x3, void *x4);
 extern int vn_seek(vnode_t *vp, offset_t o, offset_t *op, void *ct);
 
-extern int vn_remove(const char *path, uio_seg_t seg, int flags);
-extern int vn_rename(const char *path1, const char *path2, int x1);
+extern int vn_remove(char *fnamep, enum uio_seg seg, enum rm dirflag);
+extern int vn_rename(char *from, char *to, enum uio_seg seg);
 extern int vn_getattr(vnode_t *vp, vattr_t *vap, int flags, void *x3, void *x4);
 extern int vn_fsync(vnode_t *vp, int flags, void *x3, void *x4);
 extern int vn_space(vnode_t *vp, int cmd, struct flock *bfp, int flag,

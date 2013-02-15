@@ -25,26 +25,37 @@
 #ifndef _SPL_TYPES_H
 #define	_SPL_TYPES_H
 
-#include <linux/types.h>
+// Linux kernel optimization
+#define unlikely
+#define likely
+
+#include_next <sys/types.h>
+#include <string.h>
 #include <sys/sysmacros.h>
+#include <libkern/libkern.h>
 
-#include <linux/uaccess_compat.h>
-#include <linux/file_compat.h>
-#include <linux/list_compat.h>
-#include <linux/time_compat.h>
-#include <linux/bitops_compat.h>
-#include <linux/smp_compat.h>
-#include <linux/workqueue_compat.h>
-#include <linux/kallsyms_compat.h>
-#include <linux/mutex_compat.h>
-#include <linux/module_compat.h>
-#include <linux/sysctl_compat.h>
-#include <linux/proc_compat.h>
-#include <linux/math64_compat.h>
-#include <linux/zlib_compat.h>
+//#include <linux/uaccess_compat.h>
+//#include <linux/file_compat.h>
+//#include <linux/list_compat.h>
+//#include <linux/time_compat.h>
+//#include <linux/bitops_compat.h>
+//#include <linux/smp_compat.h>
+//#include <linux/workqueue_compat.h>
+//#include <linux/kallsyms_compat.h>
+//#include <linux/mutex_compat.h>
+//#include <linux/module_compat.h>
+//#include <linux/sysctl_compat.h>
+//#include <linux/proc_compat.h>
+//#include <linux/math64_compat.h>
+//#include <linux/zlib_compat.h>
 
+
+
+
+#if 0
 #ifndef HAVE_UINTPTR_T
 typedef unsigned long			uintptr_t;
+#endif
 #endif
 
 #ifndef ULLONG_MAX
@@ -55,35 +66,64 @@ typedef unsigned long			uintptr_t;
 #define LLONG_MAX			((long long)(~0ULL>>1))
 #endif
 
-typedef enum { B_FALSE=0, B_TRUE=1 }	boolean_t;
+#if 0
 typedef unsigned long			intptr_t;
-typedef unsigned long			ulong_t;
-typedef unsigned int			uint_t;
-typedef unsigned char			uchar_t;
-typedef unsigned long long		u_longlong_t;
 typedef unsigned long long		u_offset_t;
-typedef unsigned long long		rlim64_t;
-typedef long long			longlong_t;
-typedef long long			offset_t;
 typedef struct task_struct		kthread_t;
 typedef struct task_struct		proc_t;
 typedef struct vmem { }			vmem_t;
-typedef short				pri_t;
 typedef struct timespec			timestruc_t; /* definition per SVr4 */
 typedef struct timespec			timespec_t;
-typedef longlong_t			hrtime_t;
-typedef unsigned short			ushort_t;
 typedef u_longlong_t			len_t;
 typedef longlong_t			diskaddr_t;
 typedef ushort_t			o_mode_t;
 typedef uint_t				major_t;
 typedef uint_t				minor_t;
 typedef ulong_t				pfn_t;
-typedef ulong_t				pgcnt_t;
 typedef long				spgcnt_t;
 typedef short				index_t;
 typedef int				id_t;
 
 extern proc_t p0;
+typedef enum { B_FALSE=0, B_TRUE=1 }	boolean_t;
+#endif
+
+enum { B_FALSE=0, B_TRUE=1 };
+typedef short				pri_t;
+typedef unsigned long			ulong_t;
+typedef unsigned long long		u_longlong_t;
+typedef unsigned long long		rlim64_t;
+typedef unsigned long long		loff_t;
+typedef long long			longlong_t;
+typedef unsigned char			uchar_t;
+typedef unsigned int			uint_t;
+typedef unsigned short			ushort_t;
+typedef void *spinlock_t;
+typedef long long			offset_t;
+typedef struct timespec			timestruc_t; /* definition per SVr4 */
+typedef struct timespec			timespec_t;
+typedef ulong_t				pgcnt_t;
+
+
+#define EBADE EBADMACHO
+
+#include  <sys/fcntl.h>
+#define FCREAT          O_CREAT
+#define FTRUNC          O_TRUNC
+#define FEXCL           O_EXCL
+#define FNOCTTY         O_NOCTTY
+//#define       FASYNC          O_SYNC
+#define FNOFOLLOW       O_NOFOLLOW
+
+#define FSYNC           0x10    /* file (data+inode) integrity while writing */
+#define FDSYNC          0x40    /* file data only integrity while writing */
+#define FRSYNC          0x8000  /* sync read operations at same level of */
+                                /* integrity as specified for writes by */
+                                /* FSYNC and FDSYNC flags */
+#define FOFFMAX         0x2000  /* large file */
+
+#define EXPORT_SYMBOL(X)
+#define module_param(X,Y,Z)
+#define MODULE_PARM_DESC(X,Y)
 
 #endif	/* _SPL_TYPES_H */

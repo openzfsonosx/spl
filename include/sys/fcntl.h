@@ -24,7 +24,8 @@
 #ifndef _SPL_FCNTL_H
 #define _SPL_FCNTL_H
 
-#include <asm/fcntl.h>
+#include <sys/types.h>
+#include_next <sys/fcntl.h>
 
 #define F_FREESP 11
 

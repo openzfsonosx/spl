@@ -26,14 +26,15 @@
 #define _SPL_SUNLDI_H
 
 #include <sys/types.h>
-#include <linux/fs.h>
-#include <linux/genhd.h>
-#include <linux/hdreg.h>
-#include <linux/bio.h>
-#include <linux/blkdev.h>
+//#include <linux/fs.h>
+//#include <linux/genhd.h>
+//#include <linux/hdreg.h>
+//#include <linux/bio.h>
+//#include <linux/blkdev.h>
 
 #define SECTOR_SIZE 512
 
+#if 0
 typedef struct modlinkage {
 	int ml_rev;
 	struct modlfs *ml_modlfs;
@@ -52,5 +53,6 @@ typedef struct block_device *ldi_handle_t;
 
 extern int ldi_ident_from_mod(struct modlinkage *modlp, ldi_ident_t *lip);
 extern void ldi_ident_release(ldi_ident_t li);
+#endif
 
 #endif /* SPL_SUNLDI_H */

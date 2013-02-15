@@ -25,10 +25,16 @@
 #ifndef _SPL_UTSNAME_H
 #define _SPL_UTSNAME_H
 
-#include <linux/utsname.h>
+//#include <linux/utsname.h>
 
-extern struct new_utsname *__utsname(void);
+struct utsname {
+        char    sysname[_SYS_NMLN];
+        char    nodename[_SYS_NMLN];
+        char    release[_SYS_NMLN];
+        char    version[_SYS_NMLN];
+        char    machine[_SYS_NMLN];
+};
 
-#define utsname			(*__utsname())
+extern struct utsname utsname;
 
 #endif /* SPL_UTSNAME_H */

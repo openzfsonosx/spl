@@ -25,7 +25,7 @@
 #ifndef _SPL_BYTEORDER_H
 #define _SPL_BYTEORDER_H
 
-#include <asm/byteorder.h>
+#include <machine/byte_order.h>
 
 #define LE_16(x)	cpu_to_le16(x)
 #define LE_32(x)	cpu_to_le32(x)
@@ -33,5 +33,14 @@
 #define BE_16(x)	cpu_to_be16(x)
 #define BE_32(x)	cpu_to_be32(x)
 #define BE_64(x)	cpu_to_be64(x)
+
+
+#ifdef __LITTLE_ENDIAN__
+#define _LITTLE_ENDIAN
+#endif
+
+#ifdef __BIG_ENDIAN__
+#define _BIG_ENDIAN
+#endif
 
 #endif /* SPL_BYTEORDER_H */

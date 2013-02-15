@@ -25,72 +25,126 @@
 \*****************************************************************************/
 
 #include <sys/rwlock.h>
+#include <kern/debug.h>
 
-#ifdef DEBUG_SUBSYSTEM
-#undef DEBUG_SUBSYSTEM
-#endif
+extern lck_attr_t *zfs_lock_attr;
+static lck_grp_t  *zfs_rwlock_group = NULL;
 
-#define DEBUG_SUBSYSTEM S_RWLOCK
 
-#ifdef CONFIG_RWSEM_GENERIC_SPINLOCK
+void
+rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
+{
+    ASSERT(type != RW_DRIVER);
+
+    lck_rw_init((lck_rw_t *)&rwlp->rw_lock[0],
+                zfs_rwlock_group, zfs_lock_attr);
+    rwlp->rw_owner = NULL;
+    rwlp->rw_readers = 0;
+}
+
+void
+rw_destroy(krwlock_t *rwlp)
+{
+    lck_rw_destroy((lck_rw_t *)&rwlp->rw_lock[0], zfs_rwlock_group);
+}
+
+void
+rw_enter(krwlock_t *rwlp, krw_t rw)
+{
+    if (rw == RW_READER) {
+        lck_rw_lock_shared((lck_rw_t *)&rwlp->rw_lock[0]);
+        OSIncrementAtomic((volatile SInt32 *)&rwlp->rw_readers);
+    } else {
+        if (rwlp->rw_owner == current_thread())
+            panic("rw_enter: locking against myself!");
+        lck_rw_lock_exclusive((lck_rw_t *)&rwlp->rw_lock[0]);
+        rwlp->rw_owner = current_thread();
+    }
+}
 
 /*
- * From lib/rwsem-spinlock.c but modified such that the caller is
- * responsible for acquiring and dropping the sem->wait_lock.
+ * kernel private from osfmk/kern/locks.h
  */
-struct rwsem_waiter {
-        struct list_head list;
-        struct task_struct *task;
-        unsigned int flags;
-#define RWSEM_WAITING_FOR_READ  0x00000001
-#define RWSEM_WAITING_FOR_WRITE 0x00000002
-};
+extern boolean_t lck_rw_try_lock(lck_rw_t *lck, lck_rw_type_t lck_rw_type);
 
-/* wake a single writer */
-static struct rw_semaphore *
-__rwsem_wake_one_writer_locked(struct rw_semaphore *sem)
-{
-        struct rwsem_waiter *waiter;
-        struct task_struct *tsk;
-
-        sem->activity = -1;
-
-        waiter = list_entry(sem->wait_list.next, struct rwsem_waiter, list);
-        list_del(&waiter->list);
-
-        tsk = waiter->task;
-        smp_mb();
-        waiter->task = NULL;
-        wake_up_process(tsk);
-        put_task_struct(tsk);
-        return sem;
-}
-
-/* release a read lock on the semaphore */
-void
-__up_read_locked(struct rw_semaphore *sem)
-{
-        if (--sem->activity == 0 && !list_empty(&sem->wait_list))
-                (void)__rwsem_wake_one_writer_locked(sem);
-}
-EXPORT_SYMBOL(__up_read_locked);
-
-/* trylock for writing -- returns 1 if successful, 0 if contention */
 int
-__down_write_trylock_locked(struct rw_semaphore *sem)
+rw_tryenter(krwlock_t *rwlp, krw_t rw)
 {
-        int ret = 0;
+    int held = 0;
 
-        if (sem->activity == 0 && list_empty(&sem->wait_list)) {
-                sem->activity = -1;
-                ret = 1;
-        }
+    if (rw == RW_READER) {
+        held = lck_rw_try_lock((lck_rw_t *)&rwlp->rw_lock[0],
+                               LCK_RW_TYPE_SHARED);
+        if (held)
+            OSIncrementAtomic((volatile SInt32 *)&rwlp->rw_readers);
+    } else {
+        if (rwlp->rw_owner == current_thread())
+            panic("rw_tryenter: locking against myself!");
+        held = lck_rw_try_lock((lck_rw_t *)&rwlp->rw_lock[0],
+                               LCK_RW_TYPE_EXCLUSIVE);
+        if (held)
+            rwlp->rw_owner = current_thread();
+    }
 
-        return ret;
+    return (held);
 }
-EXPORT_SYMBOL(__down_write_trylock_locked);
 
-#endif
 
-int spl_rw_init(void) { return 0; }
-void spl_rw_fini(void) { }
+/*
+ * Not supported in Mac OS X kernel.
+ */
+int
+rw_tryupgrade(krwlock_t *rwlp)
+{
+    return (0);
+}
+
+void
+rw_exit(krwlock_t *rwlp)
+{
+    if (rwlp->rw_owner == current_thread()) {
+        rwlp->rw_owner = NULL;
+        lck_rw_unlock_exclusive((lck_rw_t *)&rwlp->rw_lock[0]);
+    } else {
+        OSDecrementAtomic((volatile SInt32 *)&rwlp->rw_readers);
+        lck_rw_unlock_shared((lck_rw_t *)&rwlp->rw_lock[0]);
+    }
+}
+
+
+int
+rw_lock_held(krwlock_t *rwlp)
+{
+    /*
+     * ### not sure about this one ###
+     */
+    return (rwlp->rw_owner == current_thread() || rwlp->rw_readers > 0);
+}
+
+int
+rw_write_held(krwlock_t *rwlp)
+{
+    return (rwlp->rw_owner == current_thread());
+}
+
+void
+rw_downgrade(krwlock_t *rwlp)
+{
+    rwlp->rw_owner = NULL;
+    lck_rw_lock_exclusive_to_shared((lck_rw_t *)&rwlp->rw_lock[0]);
+    OSIncrementAtomic((volatile SInt32 *)&rwlp->rw_readers);
+}
+
+
+int spl_rwlock_init(void)
+{
+    zfs_rwlock_group = lck_grp_alloc_init("zfs-rwlock", zfs_group_attr);
+    return 0;
+}
+
+void spl_rwlock_fini(void)
+{
+    lck_grp_free(zfs_rwlock_group);
+    zfs_rwlock_group = NULL;
+}
+

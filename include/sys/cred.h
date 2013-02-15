@@ -25,25 +25,16 @@
 #ifndef _SPL_CRED_H
 #define _SPL_CRED_H
 
-#include <linux/module.h>
+//#include <linux/module.h>
 #include <sys/types.h>
 #include <sys/vfs.h>
+#include <sys/kauth.h>
 
-#ifdef HAVE_CRED_STRUCT
+//typedef struct task_struct cred_t;
+typedef struct opaque_cred_t  cred_t;
 
-typedef struct cred cred_t;
-
-#define kcred		((cred_t *)(init_task.cred))
-#define CRED()		((cred_t *)current_cred())
-
-#else
-
-typedef struct task_struct cred_t;
-
-#define kcred		((cred_t *)&init_task)
-#define CRED()		((cred_t *)current)
-
-#endif /* HAVE_CRED_STRUCT */
+#define kcred   (cred_t *)NOCRED
+#define CRED()          (cred_t *)kauth_cred_get()
 
 extern void crhold(cred_t *cr);
 extern void crfree(cred_t *cr);
@@ -57,6 +48,5 @@ extern gid_t crgetsgid(const cred_t *cr);
 extern gid_t crgetfsgid(const cred_t *cr);
 extern int crgetngroups(const cred_t *cr);
 extern gid_t * crgetgroups(const cred_t *cr);
-extern int groupmember(gid_t gid, const cred_t *cr);
 
 #endif  /* _SPL_CRED_H */

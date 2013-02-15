@@ -25,6 +25,7 @@
 #ifndef _SPL_RESOURCE_H
 #define _SPL_RESOURCE_H
 
-#include <linux/resource.h>
+//#include <linux/resource.h>
+#include_next <sys/resource.h>
 
 #endif /* SPL_RESOURCE_H */

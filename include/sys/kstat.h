@@ -25,8 +25,8 @@
 #ifndef _SPL_KSTAT_H
 #define _SPL_KSTAT_H
 
-#include <linux/module.h>
-#include <linux/proc_compat.h>
+//#include <linux/module.h>
+//#include <linux/proc_compat.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/kmem.h>
@@ -42,7 +42,8 @@
 #define KSTAT_TYPE_INTR         2       /* interrupt stats; ks_ndata == 1 */
 #define KSTAT_TYPE_IO           3       /* I/O stats; ks_ndata == 1 */
 #define KSTAT_TYPE_TIMER        4       /* event timer; ks_ndata >= 1 */
-#define KSTAT_NUM_TYPES         5
+#define KSTAT_TYPE_TXG          5       /* txg sync; ks_ndata >= 1 */
+#define KSTAT_NUM_TYPES         6
 
 #define KSTAT_DATA_CHAR         0
 #define KSTAT_DATA_INT32        1
@@ -68,7 +69,7 @@
 #define KSTAT_FLAG_DORMANT      0x10
 #define KSTAT_FLAG_UNSUPPORTED  (KSTAT_FLAG_VAR_SIZE | KSTAT_FLAG_WRITABLE | \
 				 KSTAT_FLAG_PERSISTENT | KSTAT_FLAG_DORMANT)
-
+#define KSTAT_FLAG_INVALID      0x20
 
 #define KS_MAGIC                0x9d9d9d9d
 
@@ -99,7 +100,7 @@ typedef struct kstat_s {
         kstat_update_t   *ks_update;                /* dynamic updates */
         void             *ks_private;               /* private data */
         spinlock_t       ks_lock;                   /* kstat data lock */
-        struct list_head ks_list;                   /* kstat linkage */
+    //        struct list_head ks_list;                   /* kstat linkage */
 } kstat_t;
 
 typedef struct kstat_named_s {
@@ -158,9 +159,9 @@ typedef struct kstat_timer {
 int spl_kstat_init(void);
 void spl_kstat_fini(void);
 
-extern kstat_t *__kstat_create(const char *ks_module, int ks_instance,
-			     const char *ks_name, const char *ks_class,
-			     uchar_t ks_type, uint_t ks_ndata,
+extern kstat_t *__kstat_create(char *ks_module, int ks_instance,
+			     char *ks_name, char *ks_class,
+			     uchar_t ks_type, ulong_t ks_ndata,
 			     uchar_t ks_flags);
 extern void __kstat_install(kstat_t *ksp);
 extern void __kstat_delete(kstat_t *ksp);

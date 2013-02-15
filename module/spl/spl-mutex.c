@@ -26,52 +26,99 @@
 
 #include <sys/mutex.h>
 
-#ifdef DEBUG_SUBSYSTEM
-#undef DEBUG_SUBSYSTEM
-#endif
 
-#define DEBUG_SUBSYSTEM S_MUTEX
+#include <mach/mach_types.h>
+#include <mach/kern_return.h>
+#include <kern/thread.h>
+#include <sys/mutex.h>
+#include <string.h>
+#include <sys/debug.h>
+#include <kern/debug.h>
+#include <sys/thread.h>
 
-/*
- * While a standard mutex implementation has been available in the kernel
- * for quite some time.  It was not until 2.6.29 and latter kernels that
- * adaptive mutexs were embraced and integrated with the scheduler.  This
- * brought a significant performance improvement, but just as importantly
- * it added a lock owner to the generic mutex outside CONFIG_DEBUG_MUTEXES
- * builds.  This is critical for correctly supporting the mutex_owner()
- * Solaris primitive.  When the owner is available we use a pure Linux
- * mutex implementation.  When the owner is not available we still use
- * Linux mutexs as a base but also reserve space for an owner field right
- * after the mutex structure.
- *
- * In the case when HAVE_MUTEX_OWNER is not defined your code may
- * still me able to leverage adaptive mutexs.  As long as the task_curr()
- * symbol is exported this code will provide a poor mans adaptive mutex
- * implementation.  However, this is not required and if the symbol is
- * unavailable we provide a standard mutex.
- */
+// Not defined in headers
+extern boolean_t lck_mtx_try_lock(lck_mtx_t *lck);
 
-#if !defined(HAVE_MUTEX_OWNER) || !defined(CONFIG_SMP) || defined(CONFIG_DEBUG_MUTEXES)
-#ifdef HAVE_TASK_CURR
-/*
- * mutex_spin_max = { 0, -1, 1-MAX_INT }
- *  0:         Never spin when trying to acquire lock
- * -1:         Spin until acquired or holder yields without dropping lock
- *  1-MAX_INT: Spin for N attempts before sleeping for lock
- */
-int mutex_spin_max = 0;
-module_param(mutex_spin_max, int, 0644);
-MODULE_PARM_DESC(mutex_spin_max, "Spin a maximum of N times to acquire lock");
 
-int
-spl_mutex_spin_max(void)
+lck_attr_t       *zfs_lock_attr = NULL;
+lck_grp_attr_t   *zfs_group_attr = NULL;
+
+static lck_grp_t *zfs_mutex_group = NULL;
+
+
+int spl_mutex_init(void)
 {
-        return mutex_spin_max;
+    zfs_lock_attr = lck_attr_alloc_init();
+    zfs_group_attr = lck_grp_attr_alloc_init();
+    zfs_mutex_group  = lck_grp_alloc_init("zfs-mutex", zfs_group_attr);
+    return 0;
 }
-EXPORT_SYMBOL(spl_mutex_spin_max);
 
-#endif /* HAVE_TASK_CURR */
-#endif /* !HAVE_MUTEX_OWNER */
 
-int spl_mutex_init(void) { return 0; }
-void spl_mutex_fini(void) { }
+
+void spl_mutex_fini(void)
+{
+    lck_attr_free(zfs_lock_attr);
+    zfs_lock_attr = NULL;
+
+    lck_grp_attr_free(zfs_group_attr);
+    zfs_group_attr = NULL;
+
+    lck_grp_free(zfs_mutex_group);
+    zfs_mutex_group = NULL;
+}
+
+
+void mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
+{
+    ASSERT(type != MUTEX_SPIN);
+    ASSERT(ibc == NULL);
+
+    lck_mtx_init((lck_mtx_t *)&mp->m_lock[0],
+                 zfs_mutex_group, zfs_lock_attr);
+    mp->m_owner = NULL;
+}
+
+void mutex_destroy(kmutex_t *mp)
+{
+    lck_mtx_destroy((lck_mtx_t *)&mp->m_lock[0], zfs_mutex_group);
+}
+
+void mutex_enter(kmutex_t *mp)
+{
+    if (mp->m_owner == current_thread())
+        panic("mutex_enter: locking against myself!");
+
+    lck_mtx_lock((lck_mtx_t *)&mp->m_lock[0]);
+    mp->m_owner = current_thread();
+}
+
+void mutex_exit(kmutex_t *mp)
+{
+    mp->m_owner = NULL;
+    lck_mtx_unlock((lck_mtx_t *)&mp->m_lock[0]);
+}
+
+
+int mutex_tryenter(kmutex_t *mp)
+{
+    int held;
+
+    if (mp->m_owner == current_thread())
+        panic("mutex_tryenter: locking against myself!");
+
+    held = lck_mtx_try_lock((lck_mtx_t *)&mp->m_lock[0]);
+    if (held)
+        mp->m_owner = current_thread();
+    return (held);
+}
+
+int mutex_owned(kmutex_t *mp)
+{
+    return (mp->m_owner == current_thread());
+}
+
+struct thread *mutex_owner(kmutex_t *mp)
+{
+    return (mp->m_owner);
+}

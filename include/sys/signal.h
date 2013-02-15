@@ -25,10 +25,19 @@
 #ifndef _SPL_SIGNAL_H
 #define _SPL_SIGNAL_H
 
-#include <linux/sched.h>
+#include <osx/sched.h>
+#include <sys/vm.h>
+#include <sys/proc.h>
+#include_next <sys/signal.h>
+//#include <sys/signalvar.h>
 
 #define	FORREAL		0	/* Usual side-effects */
 #define	JUSTLOOKING	1	/* Don't stop the process */
+
+struct proc;
+
+extern int
+thread_issignal(struct proc *, thread_t, sigset_t);
 
 /* The "why" argument indicates the allowable side-effects of the call:
  *
@@ -39,12 +48,21 @@
  * JUSTLOOKING:  Don't stop the process, just indicate whether or not
  * a signal might be pending (FORREAL is needed to tell for sure).
  */
+#define threadmask (sigmask(SIGILL)|sigmask(SIGTRAP)|\
+                    sigmask(SIGIOT)|sigmask(SIGEMT)|\
+                    sigmask(SIGFPE)|sigmask(SIGBUS)|\
+                    sigmask(SIGSEGV)|sigmask(SIGSYS)|\
+                    sigmask(SIGPIPE)|sigmask(SIGKILL)|\
+                    sigmask(SIGTERM)|sigmask(SIGINT))
+
 static __inline__ int
 issig(int why)
 {
-	ASSERT(why == FORREAL || why == JUSTLOOKING);
-
-	return signal_pending(current);
+    if (why == JUSTLOOKING)
+        return (1);
+    else
+        return (thread_issignal(current_proc(), current_thread(),
+                                threadmask));
 }
 
 #endif /* SPL_SIGNAL_H */

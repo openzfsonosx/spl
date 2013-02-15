@@ -25,17 +25,38 @@
 #ifndef _SPL_TIMER_H
 #define _SPL_TIMER_H
 
-#include <linux/module.h>
-#include <linux/sched.h>
-#include <linux/timer.h>
+//#include <linux/module.h>
+#include <osx/sched.h>
+//#include <linux/timer.h>
 
-#define lbolt				((clock_t)jiffies)
-#define lbolt64				((int64_t)get_jiffies_64())
+//#define ddi_get_lbolt()			((clock_t)jiffies)
+//#define ddi_get_lbolt64()		((int64_t)get_jiffies_64())
 
-#define ddi_get_lbolt()			((clock_t)jiffies)
-#define ddi_get_lbolt64()		((int64_t)get_jiffies_64())
+//#define delay(ticks)			schedule_timeout((long)(ticks))
 
-#define delay(ticks)			schedule_timeout((long)(ticks))
+
+#define USEC_PER_SEC    1000000         /* microseconds per second */
+
+/* Open Solaris lbolt is in hz */
+static __inline uint64_t
+zfs_lbolt()
+{
+    struct timeval tv;
+    uint64_t lbolt_hz;
+    microuptime(&tv);
+    lbolt_hz = ((uint64_t)tv.tv_sec * USEC_PER_SEC + tv.tv_usec) / 10000;
+    return (lbolt_hz);
+}
+
+
+#define lbolt zfs_lbolt()
+#define lbolt64 zfs_lbolt()
+
+#define        ddi_get_lbolt()         (gethrtime() >> 23)
+#define        ddi_get_lbolt64()       (gethrtime() >> 23)
+
+extern void delay(clock_t ticks);
+
 
 #endif  /* _SPL_TIMER_H */
 

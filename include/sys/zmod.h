@@ -56,7 +56,8 @@
 #define _SPL_ZMOD_H
 
 #include <sys/types.h>
-#include <linux/zlib.h>
+//#include <linux/zlib.h>
+#include <libkern/zlib.h>
 
 extern int z_compress_level(void *dest, size_t *destLen, const void *source,
     size_t sourceLen, int level);

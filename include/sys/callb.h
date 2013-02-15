@@ -25,7 +25,7 @@
 #ifndef _SPL_CALLB_H
 #define _SPL_CALLB_H
 
-#include <linux/module.h>
+//#include <linux/module.h>
 #include <sys/mutex.h>
 
 #define CALLB_CPR_ASSERT(cp)		ASSERT(MUTEX_HELD((cp)->cc_lockp));

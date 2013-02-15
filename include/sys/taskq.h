@@ -25,13 +25,14 @@
 #ifndef _SPL_TASKQ_H
 #define _SPL_TASKQ_H
 
-#include <linux/module.h>
-#include <linux/gfp.h>
-#include <linux/slab.h>
-#include <linux/interrupt.h>
-#include <linux/kthread.h>
+//#include <linux/module.h>
+//#include <linux/gfp.h>
+//#include <linux/slab.h>
+//#include <linux/interrupt.h>
+//#include <linux/kthread.h>
 #include <sys/types.h>
 #include <sys/thread.h>
+#include <sys/rwlock.h>
 
 #define TASKQ_NAMELEN           31
 
@@ -41,17 +42,10 @@
 #define TASKQ_THREADS_CPU_PCT   0x00000008
 #define TASKQ_DC_BATCH          0x00000010
 
+typedef struct taskq taskq_t;
+
 typedef unsigned long taskqid_t;
 typedef void (task_func_t)(void *);
-
-typedef struct taskq_ent {
-        spinlock_t              tqent_lock;
-        struct list_head        tqent_list;
-        taskqid_t               tqent_id;
-        task_func_t             *tqent_func;
-        void                    *tqent_arg;
-        uintptr_t               tqent_flags;
-} taskq_ent_t;
 
 #define TQENT_FLAG_PREALLOC     0x1
 
@@ -69,65 +63,99 @@ typedef struct taskq_ent {
 #define TQ_FRONT                0x08000000
 #define TQ_ACTIVE               0x80000000
 
-typedef struct taskq {
-        spinlock_t              tq_lock;       /* protects taskq_t */
-        unsigned long           tq_lock_flags; /* interrupt state */
-	const char              *tq_name;      /* taskq name */
-        struct list_head        tq_thread_list;/* list of all threads */
-	struct list_head        tq_active_list;/* list of active threads */
-        int                     tq_nactive;    /* # of active threads */
-        int                     tq_nthreads;   /* # of total threads */
-	int                     tq_pri;        /* priority */
-        int                     tq_minalloc;   /* min task_t pool size */
-        int                     tq_maxalloc;   /* max task_t pool size */
-	int                     tq_nalloc;     /* cur task_t pool size */
-        uint_t                  tq_flags;      /* flags */
-	taskqid_t               tq_next_id;    /* next pend/work id */
-	taskqid_t               tq_lowest_id;  /* lowest pend/work id */
-	struct list_head        tq_free_list;  /* free task_t's */
-	struct list_head        tq_pend_list;  /* pending task_t's */
-	struct list_head        tq_prio_list;  /* priority pending task_t's */
-	wait_queue_head_t       tq_work_waitq; /* new work waitq */
-	wait_queue_head_t       tq_wait_waitq; /* wait waitq */
-} taskq_t;
-
-typedef struct taskq_thread {
-	struct list_head       tqt_thread_list;
-	struct list_head       tqt_active_list;
-	struct task_struct     *tqt_thread;
-	taskq_t                *tqt_tq;
-	taskqid_t              tqt_id;
-        uintptr_t              tqt_flags;
-} taskq_thread_t;
-
-/* Global system-wide dynamic task queue available for all consumers */
-extern taskq_t *system_taskq;
-
-extern taskqid_t __taskq_dispatch(taskq_t *, task_func_t, void *, uint_t);
-extern void __taskq_dispatch_ent(taskq_t *, task_func_t, void *, uint_t, taskq_ent_t *);
-extern int __taskq_empty_ent(taskq_ent_t *);
-extern void __taskq_init_ent(taskq_ent_t *);
-extern taskq_t *__taskq_create(const char *, int, pri_t, int, int, uint_t);
-extern void __taskq_destroy(taskq_t *);
-extern void __taskq_wait_id(taskq_t *, taskqid_t);
-extern void __taskq_wait(taskq_t *);
-extern int __taskq_member(taskq_t *, void *);
-
 int spl_taskq_init(void);
 void spl_taskq_fini(void);
 
-#define taskq_member(tq, t)                __taskq_member(tq, t)
-#define taskq_wait_id(tq, id)              __taskq_wait_id(tq, id)
-#define taskq_wait(tq)                     __taskq_wait(tq)
-#define taskq_dispatch(tq, f, p, fl)       __taskq_dispatch(tq, f, p, fl)
-#define taskq_dispatch_ent(tq, f, p, fl, t) __taskq_dispatch_ent(tq, f, p, fl, t)
-#define taskq_empty_ent(t)                 __taskq_empty_ent(t)
-#define taskq_init_ent(t)                  __taskq_init_ent(t)
-#define taskq_create(n, th, p, mi, ma, fl) __taskq_create(n, th, p, mi, ma, fl)
-#define taskq_create_proc(n, th, p, mi, ma, pr, fl)	\
-	__taskq_create(n, th, p, mi, ma, fl)
-#define taskq_create_sysdc(n, th, mi, ma, pr, dc, fl)	\
-	__taskq_create(n, th, maxclsyspri, mi, ma, fl)
-#define taskq_destroy(tq)                  __taskq_destroy(tq)
+typedef struct taskq_bucket taskq_bucket_t;
+
+typedef struct taskq_ent {
+        struct taskq_ent        *tqent_next;
+        struct taskq_ent        *tqent_prev;
+        task_func_t             *tqent_func;
+        void                    *tqent_arg;
+        taskq_bucket_t          *tqent_bucket;
+        kthread_t               *tqent_thread;
+        kcondvar_t              tqent_cv;
+        kmutex_t                tqent_thread_lock;
+        kcondvar_t              tqent_thread_cv;
+} taskq_ent_t;
+
+/*
+ * Per-CPU hash bucket manages taskq_bent_t structures using freelist.
+ */
+struct taskq_bucket {
+        kmutex_t        tqbucket_lock;
+        taskq_t         *tqbucket_taskq;        /* Enclosing taskq */
+        taskq_ent_t     tqbucket_freelist;
+        uint_t          tqbucket_nalloc;        /* # of allocated entries */
+        uint_t          tqbucket_nfree;         /* # of free entries */
+        kcondvar_t      tqbucket_cv;
+        ushort_t        tqbucket_flags;
+        hrtime_t        tqbucket_totaltime;
+};
+
+/*
+ * Bucket flags.
+ */
+#define TQBUCKET_CLOSE          0x01
+#define TQBUCKET_SUSPEND        0x02
+
+/*
+ * taskq implementation flags: bit range 16-31
+ */
+#define TASKQ_ACTIVE            0x00010000
+#define TASKQ_SUSPENDED         0x00020000
+#define TASKQ_NOINSTANCE        0x00040000
+
+struct taskq {
+        char            tq_name[TASKQ_NAMELEN + 1];
+        kmutex_t        tq_lock;
+        krwlock_t       tq_threadlock;
+        kcondvar_t      tq_dispatch_cv;
+        kcondvar_t      tq_wait_cv;
+        uint_t          tq_flags;
+        int             tq_active;
+        int             tq_nthreads;
+        int             tq_nalloc;
+        int             tq_minalloc;
+        int             tq_maxalloc;
+        taskq_ent_t     *tq_freelist;
+        taskq_ent_t     tq_task;
+        int             tq_maxsize;
+        pri_t           tq_pri;         /* Scheduling priority      */
+        taskq_bucket_t  *tq_buckets;    /* Per-cpu array of buckets */
+#ifndef __APPLE__
+        int             tq_instance;
+#endif /*!__APPLE__*/
+        uint_t          tq_nbuckets;    /* # of buckets (2^n)       */
+        union {
+                kthread_t *_tq_thread;
+                kthread_t **_tq_threadlist;
+        }               tq_thr;
+        /*
+         * Statistics.
+         */
+        hrtime_t        tq_totaltime;   /* Time spent processing tasks */
+        int             tq_tasks;       /* Total # of tasks posted */
+        int             tq_executed;    /* Total # of tasks executed */
+        int             tq_maxtasks;    /* Max number of tasks in the queue */
+        int             tq_tcreates;
+        int             tq_tdeaths;
+};
+
+#define tq_thread tq_thr._tq_thread
+#define tq_threadlist tq_thr._tq_threadlist
+
+extern taskq_t *system_taskq;
+
+extern taskq_t  *taskq_create(const char *, int, pri_t, int, int, uint_t);
+extern taskqid_t taskq_dispatch(taskq_t *, task_func_t, void *, uint_t);
+extern void     nulltask(void *); // Maybe we don't need this?
+extern void     taskq_destroy(taskq_t *);
+extern void     taskq_wait(taskq_t *);
+extern void     taskq_suspend(taskq_t *);
+extern int      taskq_suspended(taskq_t *);
+extern void     taskq_resume(taskq_t *);
+extern int      taskq_member(taskq_t *, kthread_t *);
 
 #endif  /* _SPL_TASKQ_H */

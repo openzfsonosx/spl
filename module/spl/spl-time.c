@@ -26,68 +26,84 @@
 
 #include <sys/sysmacros.h>
 #include <sys/time.h>
+#include <kern/clock.h>
 
-#ifdef HAVE_MONOTONIC_CLOCK
-extern unsigned long long monotonic_clock(void);
-#endif
 
-#ifdef DEBUG_SUBSYSTEM
-#undef DEBUG_SUBSYSTEM
-#endif
 
-#define DEBUG_SUBSYSTEM S_TIME
+/*
+ * gethrtime() provides high-resolution timestamps with machine-dependent origin
+.
+ * Hence its primary use is to specify intervals.
+ */
+
+static hrtime_t
+zfs_abs_to_nano(uint64_t elapsed)
+{
+    static mach_timebase_info_data_t    sTimebaseInfo = { 0, 0 };
+
+    /*
+     * If this is the first time we've run, get the timebase.
+     * We can use denom == 0 to indicate that sTimebaseInfo is
+     * uninitialised because it makes no sense to have a zero
+     * denominator in a fraction.
+     */
+
+    if ( sTimebaseInfo.denom == 0 ) {
+        (void) clock_timebase_info(&sTimebaseInfo);
+    }
+
+    /*
+     * Convert to nanoseconds.
+     * return (elapsed * (uint64_t)sTimebaseInfo.numer)/(uint64_t)sTimebaseInfo.denom;
+     *
+     * Provided the final result is representable in 64 bits the following maneuver will
+     * deliver that result without intermediate overflow.
+     */
+    if (sTimebaseInfo.denom == sTimebaseInfo.numer)
+        return elapsed;
+    else if (sTimebaseInfo.denom == 1)
+        return elapsed * (uint64_t)sTimebaseInfo.numer;
+    else {
+        /* Decompose elapsed = eta32 * 2^32 + eps32: */
+        uint64_t eta32 = elapsed >> 32;
+        uint64_t eps32 = elapsed & 0x00000000ffffffffLL;
+
+        uint32_t numer = sTimebaseInfo.numer, denom = sTimebaseInfo.denom;
+
+        /* Form product of elapsed64 (decomposed) and numer: */
+        uint64_t mu64 = numer * eta32;
+        uint64_t lambda64 = numer * eps32;
+
+        /* Divide the constituents by denom: */
+        uint64_t q32 = mu64/denom;
+        uint64_t r32 = mu64 - (q32 * denom); /* mu64 % denom */
+
+        return (q32 << 32) + ((r32 << 32) + lambda64)/denom;
+    }
+}
+
+
+hrtime_t gethrtime(void)
+{
+    static uint64_t start = 0;
+    if (start == 0)
+        start = mach_absolute_time();
+    return zfs_abs_to_nano(mach_absolute_time() - start);
+}
+
 
 void
-__gethrestime(timestruc_t *ts)
+gethrestime(struct timespec *ts)
 {
-        struct timeval tv;
-
-	do_gettimeofday(&tv);
-	ts->tv_sec = tv.tv_sec;
-	ts->tv_nsec = tv.tv_usec * NSEC_PER_USEC;
+    nanotime(ts);
 }
-EXPORT_SYMBOL(__gethrestime);
 
-/* Use monotonic_clock() by default. It's faster and is available on older
- * kernels, but few architectures have them, so we must fallback to
- * do_posix_clock_monotonic_gettime().
- */
-hrtime_t
-__gethrtime(void) {
-#ifdef HAVE_MONOTONIC_CLOCK
-        unsigned long long res = monotonic_clock();
-
-        /* Deal with signed/unsigned mismatch */
-        return (hrtime_t)(res & ~(1ULL << 63));
-#else
-        struct timespec ts;
-
-        do_posix_clock_monotonic_gettime(&ts);
-        return (((hrtime_t)ts.tv_sec * NSEC_PER_SEC) + ts.tv_nsec);
-#endif
-}
-EXPORT_SYMBOL(__gethrtime);
-
-/* set_normalized_timespec() API changes
- * 2.6.0  - 2.6.15: Inline function provided by linux/time.h
- * 2.6.16 - 2.6.25: Function prototype defined but not exported
- * 2.6.26 - 2.6.x:  Function defined and exported
- */
-#if !defined(HAVE_SET_NORMALIZED_TIMESPEC_INLINE) && \
-    !defined(HAVE_SET_NORMALIZED_TIMESPEC_EXPORT)
-void
-set_normalized_timespec(struct timespec *ts, time_t sec, long nsec)
+time_t
+gethrestime_sec(void)
 {
-	while (nsec >= NSEC_PER_SEC) {
-	        nsec -= NSEC_PER_SEC;
-	        ++sec;
-	}
-	while (nsec < 0) {
-	        nsec += NSEC_PER_SEC;
-	        --sec;
-	}
-	ts->tv_sec = sec;
-	ts->tv_nsec = nsec;
+    struct timeval tv;
+
+    microtime(&tv);
+    return (tv.tv_sec);
 }
-EXPORT_SYMBOL(set_normalized_timespec);
-#endif
+

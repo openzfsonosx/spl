@@ -27,13 +27,18 @@
 
 #include <sys/vnode.h>
 
-typedef struct _buf {
-	vnode_t *vp;
-} _buf_t;
 
-typedef struct _buf buf_t;
+struct _buf {
+    intptr_t        _fd;
+};
 
-extern struct _buf *kobj_open_file(const char *name);
+struct bootstat {
+        uint64_t st_size;
+};
+
+//typedef struct _buf buf_t;
+
+extern struct _buf *kobj_open_file(char *name);
 extern void kobj_close_file(struct _buf *file);
 extern int kobj_read_file(struct _buf *file, char *buf,
 			  ssize_t size, offset_t off);

@@ -25,12 +25,28 @@
 #ifndef _SPL_UIO_H
 #define _SPL_UIO_H
 
-#include <linux/uio.h>
-#include <asm/uaccess.h>
+//#include <linux/uio.h>
+
+
+#define uio_t apple_uio_t
+#include_next <sys/uio.h>
+#undef uio_t
+
+//#include <asm/uaccess.h>
 #include <sys/types.h>
 
 typedef struct iovec iovec_t;
 
+typedef enum uio_seg uio_seg_t;
+typedef enum uio_rw uio_rw_t;
+
+// OSX defines "uio_t" as "struct uio *"
+// ZFS defines "uio_t" as "struct uio"
+typedef struct uio uio_t;
+
+
+
+#if 0
 typedef enum uio_rw {
 	UIO_READ =	0,
 	UIO_WRITE =	1,
@@ -42,7 +58,10 @@ typedef enum uio_seg {
 	UIO_USERISPACE=	2,
 } uio_seg_t;
 
+
+
 typedef struct uio {
+    //struct uio {
 	struct iovec	*uio_iov;
 	int		uio_iovcnt;
 	offset_t	uio_loffset;
@@ -51,7 +70,10 @@ typedef struct uio {
 	uint16_t	uio_extflg;
 	offset_t	uio_limit;
 	ssize_t		uio_resid;
-} uio_t;
+    } uio_t;
+//} ;
+
+#endif
 
 typedef struct aio_req {
 	uio_t		*aio_uio;
@@ -74,7 +96,7 @@ typedef struct uioa_page_s {
 } uioa_page_t;
 
 typedef struct xuio {
-	uio_t xu_uio;
+	uio_t *xu_uio;
 	enum xuio_type xu_type;
 	union {
 		struct {
@@ -95,5 +117,10 @@ typedef struct xuio {
 
 #define XUIO_XUZC_PRIV(xuio)	xuio->xu_ext.xu_zc.xu_zc_priv
 #define XUIO_XUZC_RW(xuio)	xuio->xu_ext.xu_zc.xu_zc_rw
+
+
+// Apple's uiomove puts the uio_rw in uio_create
+#define uiomove(A,B,C,D) uiomove((A),(B),(D))
+
 
 #endif /* SPL_UIO_H */
