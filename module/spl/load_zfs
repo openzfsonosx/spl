@@ -1,0 +1,11 @@
+#!/bin/bash
+#tail -f /var/log/system.log &
+#sleep 1
+rsync -ar --delete spl.kext/ /tmp/spl.kext/
+chown -R root:wheel /tmp/spl.kext
+kextload -v /tmp/spl.kext/
+
+rsync -ar --delete ../splat/splat.kext/ /tmp/splat.kext/
+chown -R root:wheel /tmp/splat.kext
+echo kextload -r /tmp/ -v /tmp/splat.kext/
+
