@@ -36,11 +36,12 @@
 static inline void
 dnlc_reduce_cache(void *reduce_percent)
 {
+#if 0
 	int nr = (uintptr_t)reduce_percent * 10000;
-
 	shrink_dcache_memory(nr, GFP_KERNEL);
 	shrink_icache_memory(nr, GFP_KERNEL);
 	kmem_reap();
+#endif
 }
 
 #endif /* SPL_DNLC_H */

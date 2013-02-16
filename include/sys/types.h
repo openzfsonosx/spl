@@ -103,6 +103,7 @@ typedef long long			offset_t;
 typedef struct timespec			timestruc_t; /* definition per SVr4 */
 typedef struct timespec			timespec_t;
 typedef ulong_t				pgcnt_t;
+typedef unsigned int umode_t ;
 
 
 #define EBADE EBADMACHO
