@@ -97,7 +97,7 @@ kobj_read_file(struct _buf *file, char *buf, ssize_t size, offset_t off)
 {
     struct vnode *vp = (vnode_t)file->_fd;
     vfs_context_t vctx;
-    uio_t auio;
+    uio_t *auio;
     int count;
     int error;
 
