@@ -37,6 +37,7 @@
 #include <sys/types.h>
 #include <sys/vmsystm.h>
 #include <sys/kstat.h>
+#include <sys/malloc.h>
 
 
 extern uint64_t physmem;
