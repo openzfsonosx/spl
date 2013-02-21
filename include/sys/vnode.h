@@ -36,6 +36,7 @@
 //#include <linux/fs.h>
 //#include <linux/fs_struct.h>
 //#include <linux/mount.h>
+
 #include <sys/mount.h>
 #include <sys/kmem.h>
 #include <sys/mutex.h>
@@ -44,6 +45,10 @@
 #include <sys/uio.h>
 #include <sys/sunldi.h>
 #include <sys/cred.h>
+
+#include <kern/locks.h>
+// Be aware that Apple defines "typedef struct vnode *vnode_t" and
+// ZFS uses "typedef struct vnode vnode_t".
 #define uio_t apple_uio_t
 #include_next <sys/vnode.h>
 #undef uio_t
@@ -196,7 +201,7 @@ typedef struct vattr {
 #endif
 
 #if 0
-typedef struct vnode {
+struct vnode {
 	struct file	*v_file;
 	kmutex_t	v_lock;		/* protects vnode fields */
 	uint_t		v_flag;		/* vnode flags (see below) */
@@ -206,8 +211,8 @@ typedef struct vnode {
 	struct stdata	*v_stream;	/* associated stream */
 	enum vtype	v_type;		/* vnode type */
 	dev_t		v_rdev;		/* device (VCHR, VBLK) */
-	gfp_t		v_gfp_mask;	/* original mapping gfp mask */
-} vnode_t;
+	//gfp_t		v_gfp_mask;	/* original mapping gfp mask */
+};
 #endif
 
 #if 0
@@ -223,8 +228,9 @@ typedef struct vn_file {
 } file_t;
 #endif
 
-extern vnode_t *vn_alloc(int flag);
-void vn_free(vnode_t *vp);
+extern struct vnode *vn_alloc(int flag);
+//void vn_free(vnode_t *vp);
+void vn_free(struct vnode *vp);
 
 extern int vn_open(char *pnamep, enum uio_seg seg, int filemode,
                    int createmode,

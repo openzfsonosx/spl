@@ -127,4 +127,13 @@ typedef unsigned int umode_t ;
 #define module_param(X,Y,Z)
 #define MODULE_PARM_DESC(X,Y)
 
+#ifdef __GNUC__
+#define member_type(type, member) __typeof__ (((type *)0)->member)
+#else
+#define member_type(type, member) void
+#endif
+
+#define container_of(ptr, type, member) ((type *)(                      \
+      (char *)(member_type(type, member) *){ ptr } - offsetof(type, member)))
+
 #endif	/* _SPL_TYPES_H */

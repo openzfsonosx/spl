@@ -32,9 +32,6 @@
 #include <sys/sysmacros.h>
 #include <sys/debug.h>
 
-#define	list_d2l(a, obj) ((list_node_t *)(((char *)obj) + (a)->list_offset))
-#define	list_object(a, node) ((void *)(((char *)node) - (a)->list_offset))
-#define	list_empty(a) ((a)->list_head.list_next == &(a)->list_head)
 
 #define	list_insert_after_node(list, node, object) {	\
 	list_node_t *lnew = list_d2l(list, object);	\
@@ -115,6 +112,7 @@ list_remove(list_t *list, void *object)
 	lold->list_next->list_prev = lold->list_prev;
 	lold->list_next = lold->list_prev = NULL;
 }
+
 
 void *
 list_head(list_t *list)

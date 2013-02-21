@@ -158,4 +158,14 @@ extern int      taskq_suspended(taskq_t *);
 extern void     taskq_resume(taskq_t *);
 extern int      taskq_member(taskq_t *, kthread_t *);
 
+#define	taskq_create_proc(a, b, c, d, e, p, f) \
+	    (taskq_create(a, b, c, d, e, f))
+#define	taskq_create_sysdc(a, b, d, e, p, dc, f) \
+	    (taskq_create(a, b, maxclsyspri, d, e, f))
+extern void	taskq_dispatch_ent(taskq_t *, task_func_t, void *, uint_t,
+    taskq_ent_t *);
+extern int	taskq_empty_ent(taskq_ent_t *);
+extern void	taskq_init_ent(taskq_ent_t *);
+
+
 #endif  /* _SPL_TASKQ_H */
