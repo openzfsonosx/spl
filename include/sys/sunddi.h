@@ -32,6 +32,8 @@
 #include <sys/u8_textprep.h>
 #include <sys/vnode.h>
 #include <spl-device.h>
+#include <sys/file.h>
+#include <libkern/libkern.h>
 
 typedef int ddi_devid_t;
 
@@ -54,7 +56,28 @@ extern int ddi_strtol(const char *, char **, int, long *);
 extern int ddi_strtoull(const char *, char **, int, unsigned long long *);
 extern int ddi_strtoll(const char *, char **, int, long long *);
 
-extern int ddi_copyin(const void *from, void *to, size_t len, int flags);
-extern int ddi_copyout(const void *from, void *to, size_t len, int flags);
+#define  xcopyin( src, dst, size, flags)  copyin ((src), (dst), (size))
+#define  xcopyout(src, dst, size, flags)  copyout((src), (dst), (size))
+
+
+//extern int ddi_copyin(const void *from, void *to, size_t len, int flags);
+//extern int ddi_copyout(const void *from, void *to, size_t len, int flags);
+#if 0
+static inline int
+ddi_copyin(const void *buf, void *kernbuf, size_t size, int flags)
+{
+        if (flags & FKIOCTL)
+                return (kcopy(buf, kernbuf, size) ? -1 : 0);
+        return (copyin((const user_addr_t)buf, kernbuf, size));
+}
+
+static inline int
+ddi_copyout(const void *buf, void *kernbuf, size_t size, int flags)
+{
+        if (flags & FKIOCTL)
+                return (kcopy(buf, kernbuf, size) ? -1 : 0);
+        return (copyout(buf, (user_addr_t)kernbuf, size));
+}
+#endif
 
 #endif /* SPL_SUNDDI_H */

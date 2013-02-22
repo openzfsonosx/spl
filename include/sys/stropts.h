@@ -25,4 +25,52 @@
 #ifndef _SPL_STROPTS_H
 #define _SPL_STROPTS_H
 
+#include <sys/types.h>
+#include <string.h>
+
+extern void kmem_free(void *, size_t );
+
+static inline void
+strfree(char *str)
+{
+    kmem_free(str, strlen(str) + 1);
+}
+
+
+static inline char *
+strpbrk(const char *s, const char *b)
+{
+    const char *p;
+    do {
+        for (p = b; *p != '\0' && *p != *s; ++p)
+            ;
+        if (*p != '\0')
+            return ((char *)s);
+    } while (*s++);
+    return (NULL);
+}
+
+
+static inline char *
+strrchr(p, ch)
+     const char *p;
+     int ch;
+{
+    union {
+        const char *cp;
+        char *p;
+    } u;
+    char *save;
+
+    u.cp = p;
+    for (save = NULL;; ++u.p) {
+        if (*u.p == ch)
+            save = u.p;
+        if (*u.p == '\0')
+            return(save);
+    }
+    /* NOTREACHED */
+}
+
+
 #endif /* SPL_STROPTS_H */

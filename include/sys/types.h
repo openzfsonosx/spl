@@ -49,6 +49,7 @@
 //#include <linux/math64_compat.h>
 //#include <linux/zlib_compat.h>
 
+#include <sys/stropts.h>
 
 
 
