@@ -51,33 +51,46 @@ typedef int ddi_devid_t;
 #define	ddi_prop_free(x)			(void)0
 #define	ddi_root_node()				(void)0
 
-extern int ddi_strtoul(const char *, char **, int, unsigned long *);
-extern int ddi_strtol(const char *, char **, int, long *);
-extern int ddi_strtoull(const char *, char **, int, unsigned long long *);
-extern int ddi_strtoll(const char *, char **, int, long long *);
+//extern int ddi_strtoul(const char *, char **, int, unsigned long *);
+//extern int ddi_strtol(const char *, char **, int, long *);
+//extern int ddi_strtoull(const char *, char **, int, unsigned long long *);
+//extern int ddi_strtoll(const char *, char **, int, long long *);
 
 #define  xcopyin( src, dst, size, flags)  copyin ((src), (dst), (size))
 #define  xcopyout(src, dst, size, flags)  copyout((src), (dst), (size))
 
 
-//extern int ddi_copyin(const void *from, void *to, size_t len, int flags);
-//extern int ddi_copyout(const void *from, void *to, size_t len, int flags);
-#if 0
 static inline int
-ddi_copyin(const void *buf, void *kernbuf, size_t size, int flags)
+ddi_strtol(const char *str, char **nptr, int base, long *result)
 {
-        if (flags & FKIOCTL)
-                return (kcopy(buf, kernbuf, size) ? -1 : 0);
-        return (copyin((const user_addr_t)buf, kernbuf, size));
+    *result = strtol(str, nptr, base);
+    if (*result == 0)
+        return (EINVAL);
+    else if (*result == LONG_MIN || *result == LONG_MAX)
+        return (ERANGE);
+    return (0);
 }
 
 static inline int
-ddi_copyout(const void *buf, void *kernbuf, size_t size, int flags)
+ddi_strtoul(const char *str, char **nptr, int base, unsigned long *result)
 {
-        if (flags & FKIOCTL)
-                return (kcopy(buf, kernbuf, size) ? -1 : 0);
-        return (copyout(buf, (user_addr_t)kernbuf, size));
+    *result = strtoul(str, nptr, base);
+    if (*result == 0)
+        return (EINVAL);
+    else if (*result == ULONG_MAX)
+        return (ERANGE);
+    return (0);
 }
-#endif
+
+static inline int
+ddi_strtoull(const char *str, char **nptr, int base, unsigned long long *result)
+ {
+     *result = (unsigned long long)strtouq(str, nptr, base);
+     if (*result == 0)
+         return (EINVAL);
+     else if (*result == ULLONG_MAX)
+         return (ERANGE);
+     return (0);
+ }
 
 #endif /* SPL_SUNDDI_H */
