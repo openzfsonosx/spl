@@ -108,7 +108,7 @@ extern union trace_data_union (*trace_data[TCD_TYPE_MAX])[NR_CPUS];
 #define tcd_for_each(tcd, i, j)						\
     for (i = 0; i < TCD_TYPE_MAX && trace_data[i]; i++)			\
 	for (j = 0, ((tcd) = &(*trace_data[i])[j].tcd);			\
-	     j < num_possible_cpus(); j++, (tcd) = &(*trace_data[i])[j].tcd)
+	     j < max_ncpus; j++, (tcd) = &(*trace_data[i])[j].tcd)
 
 #define tcd_for_each_type_lock(tcd, i, cpu)				\
     for (i = 0; i < TCD_TYPE_MAX && trace_data[i] &&			\

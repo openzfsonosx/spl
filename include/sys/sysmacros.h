@@ -75,10 +75,12 @@
 
 #define proc_pageout			NULL
 #define curproc             current_proc()
-#define max_ncpus			num_possible_cpus()
+//#define max_ncpus			num_possible_cpus()
 #define CPU_SEQID			smp_processor_id()
 #define _NOTE(x)
 #define is_system_labeled()		0
+
+extern unsigned int max_ncpus;
 
 #ifndef RLIM64_INFINITY
 #define RLIM64_INFINITY			(~0ULL)

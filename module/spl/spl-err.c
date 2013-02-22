@@ -47,7 +47,7 @@ vpanic(const char *fmt, va_list ap)
 	vsnprintf(msg, MAXMSGLEN - 1, fmt, ap);
 	PANIC("%s", msg);
 } /* vpanic() */
-EXPORT_SYMBOL(vpanic);
+//EXPORT_SYMBOL(vpanic);
 
 void
 vcmn_err(int ce, const char *fmt, va_list ap)
@@ -67,16 +67,5 @@ vcmn_err(int ce, const char *fmt, va_list ap)
 			SERROR("%s%s%s", ce_prefix[ce], msg, ce_suffix[ce]);
 	}
 } /* vcmn_err() */
-EXPORT_SYMBOL(vcmn_err);
-
-void
-cmn_err(int ce, const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	vcmn_err(ce, fmt, ap);
-	va_end(ap);
-} /* cmn_err() */
-EXPORT_SYMBOL(cmn_err);
+//EXPORT_SYMBOL(vcmn_err);
 

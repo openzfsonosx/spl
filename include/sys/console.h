@@ -28,7 +28,7 @@
 void
 console_vprintf(const char *fmt, va_list args)
 {
-        vprintk(fmt, args);
+    vprintf(fmt, args);
 }
 
 void

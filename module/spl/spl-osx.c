@@ -41,17 +41,29 @@
 #include <sys/mutex.h>
 #include <sys/rwlock.h>
 #include <sys/utsname.h>
+#include <sys/ioctl.h>
+//#define MACH_KERNEL_PRIVATE
+
+#include <kern/processor.h>
 
 struct utsname utsname = {
         "OS-X", "", "1.0", "1.0", "i386"
 };
 
+//extern struct machine_info      machine_info;
+
+unsigned int max_ncpus = 1; // Filled in below.
+
+
+
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
+    //max_ncpus = processor_avail_count;
+
     spl_kmem_init();
     spl_mutex_init();
     spl_rwlock_init();
-    printf("SPL: Loaded module v0.01\n");
+    printf("SPL: Loaded module v0.01 (ncpu %d)\n", max_ncpus);
     return KERN_SUCCESS;
 }
 

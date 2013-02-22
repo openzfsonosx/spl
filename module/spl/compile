@@ -11,6 +11,7 @@ CFLAGS="-Wall -nostdinc -mkernel -D_KERNEL -DKERNEL -DKERNEL_PRIVATE -DDRIVER_PR
 gcc $CFLAGS -o spl-atomic.o -c spl-atomic.c
 gcc $CFLAGS -o spl-condvar.o -c spl-condvar.c
 gcc $CFLAGS -o spl-cred.o -c spl-cred.c
+gcc $CFLAGS -o spl-err.o -c spl-err.c
 ##gcc $CFLAGS -o spl-debug.o -c spl-debug.c
 gcc $CFLAGS -o spl-kmem.o -c spl-kmem.c
 gcc $CFLAGS -o spl-kobj.o -c spl-kobj.c
