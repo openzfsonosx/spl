@@ -53,17 +53,27 @@ struct utsname utsname = {
 //extern struct machine_info      machine_info;
 
 unsigned int max_ncpus = 1; // Filled in below.
+uint64_t  total_memory = 4 * 1024 * 1024 * 1024; // Filled in below;
 
+
+#include <sys/types.h>
+#include <sys/sysctl.h>
 
 
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
     //max_ncpus = processor_avail_count;
+    int ncpus;
+    size_t len = sizeof(ncpus);
+    sysctlbyname("hw.logicalcpu_max", &max_ncpus, &len, NULL, 0);
+    len = sizeof(total_memory);
+    sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
 
     spl_kmem_init();
     spl_mutex_init();
     spl_rwlock_init();
-    printf("SPL: Loaded module v0.01 (ncpu %d)\n", max_ncpus);
+    printf("SPL: Loaded module v0.01 (ncpu %d, memsize %llu)\n",
+           max_ncpus, total_memory);
     return KERN_SUCCESS;
 }
 
