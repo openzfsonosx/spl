@@ -42,6 +42,7 @@
 
 extern uint64_t physmem;
 
+#define KERN_MAP_MIN_SIZE (8192+1)
 
 /*
  * Used internally, the kernel does not need to support this flag

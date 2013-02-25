@@ -73,6 +73,8 @@ extern SInt32 atomic_dec_32_nv(volatile SInt32 *);
 extern SInt64 OSAddAtomic64_NV(SInt64 theAmount, volatile SInt64 *address);
 #define atomic_add_64_nv(addr, amt)     (uint64_t)OSAddAtomic64_NV(amt, (volatile SInt64 *)addr)
 
+#define atomic_sub_64(addr,amt) (void)OSAddAtomic64(-(amt), (volatile SInt64 *)addr)
+
 /*
  * logical OR bits with target
  */

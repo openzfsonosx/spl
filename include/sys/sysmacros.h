@@ -148,7 +148,7 @@ extern unsigned long spl_hostid;
 extern char hw_serial[11];
 
 /* Missing misc functions */
-extern int highbit(unsigned long i);
+//extern int highbit(unsigned long long i);
 extern uint32_t zone_get_hostid(void *zone);
 extern void spl_setup(void);
 extern void spl_cleanup(void);

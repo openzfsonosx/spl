@@ -161,3 +161,44 @@ int zfs_vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base, ssize_t len,
 }
 
 
+int
+VOP_SPACE(struct vnode *vp, int cmd, void *fl, int flags, offset_t off,
+          cred_t *cr, void *ctx)
+{
+    return (0);
+}
+
+int
+VOP_CLOSE(struct vnode *vp, int flag, int count, offset_t off, void *cr, void *k)
+{
+    vfs_context_t vctx;
+    int error;
+
+    vctx = vfs_context_create((vfs_context_t)0);
+    error = vnode_close(vp, flag & FWRITE, vctx);
+    (void) vfs_context_rele(vctx);
+    return (error);
+}
+
+int
+VOP_FSYNC(struct vnode *vp, int flags, void* unused, void *uused2)
+{
+    vfs_context_t vctx;
+    int error;
+
+    vctx = vfs_context_create((vfs_context_t)0);
+    error = VNOP_FSYNC(vp, (flags == FSYNC), vctx);
+    (void) vfs_context_rele(vctx);
+    return (error);
+}
+
+int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
+{
+    vfs_context_t vctx;
+    int error;
+    vctx = vfs_context_create((vfs_context_t)0);
+    error= vnode_getattr(vp, vap, vctx);
+    (void) vfs_context_rele(vctx);
+    return error;
+}
+

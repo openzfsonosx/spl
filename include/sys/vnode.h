@@ -47,11 +47,15 @@
 #include <sys/cred.h>
 
 #include <kern/locks.h>
+
+
 // Be aware that Apple defines "typedef struct vnode *vnode_t" and
 // ZFS uses "typedef struct vnode vnode_t".
-#define uio_t apple_uio_t
-#include_next <sys/vnode.h>
 #undef uio_t
+#undef vnode_t
+#include_next <sys/vnode.h>
+#define vnode_t struct vnode
+#define uio_t struct uio
 
 /*
  * Prior to linux-2.6.33 only O_DSYNC semantics were implemented and
@@ -84,6 +88,12 @@
 
 #define ATTR_XVATTR	(1 << 31)
 #define AT_XVATTR	ATTR_XVATTR
+
+#define B_INVAL		0x01
+#define B_TRUNC		0x02
+
+#define   DNLC_NO_VNODE (struct vnode *)(-1)
+
 
 #if 0
 /*
@@ -223,13 +233,13 @@ typedef struct vn_file {
 	atomic_t	f_ref;		/* ref count */
 	kmutex_t	f_lock;		/* struct lock */
 	loff_t		f_offset;	/* offset */
-	vnode_t		*f_vnode;	/* vnode */
+	struct vnode		*f_vnode;	/* vnode */
 	struct list_head f_list;	/* list referenced file_t's */
 } file_t;
 #endif
 
 extern struct vnode *vn_alloc(int flag);
-//void vn_free(vnode_t *vp);
+//void vn_free(struct vnode *vp);
 void vn_free(struct vnode *vp);
 
 extern int vn_open(char *pnamep, enum uio_seg seg, int filemode,
@@ -250,14 +260,15 @@ extern int  zfs_vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base,
     zfs_vn_rdwr((rw), (vp), (base), (len), (off), (seg), (flg), (limit), (cr), (resid))
 
 
-extern int vn_close(vnode_t *vp, int flags, int x1, int x2, void *x3, void *x4);
-extern int vn_seek(vnode_t *vp, offset_t o, offset_t *op, void *ct);
+#ifndef _KERNEL
+extern int vn_close(struct vnode *vp, int flags, int x1, int x2, void *x3, void *x4);
+extern int vn_seek(struct vnode *vp, offset_t o, offset_t *op, void *ct);
 
 extern int vn_remove(char *fnamep, enum uio_seg seg, enum rm dirflag);
 extern int vn_rename(char *from, char *to, enum uio_seg seg);
-extern int vn_getattr(vnode_t *vp, vattr_t *vap, int flags, void *x3, void *x4);
-extern int vn_fsync(vnode_t *vp, int flags, void *x3, void *x4);
-extern int vn_space(vnode_t *vp, int cmd, struct flock *bfp, int flag,
+extern int vn_getattr(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4);
+extern int vn_fsync(struct vnode *vp, int flags, void *x3, void *x4);
+extern int vn_space(struct vnode *vp, int cmd, struct flock *bfp, int flag,
     offset_t offset, void *x6, void *x7);
 extern file_t *vn_getf(int fd);
 extern void vn_releasef(int fd);
@@ -277,6 +288,34 @@ void spl_vn_fini(void);
 #define getf					vn_getf
 #define releasef				vn_releasef
 
-extern vnode_t *rootdir;
+#else
+
+// KERNEL
+#define VN_HOLD(vp)     vnode_getwithref(vp)
+
+#define VN_RELE(vp)                                 \
+    do {                                            \
+        if ((vp) && (vp) != DNLC_NO_VNODE)          \
+            vnode_put(vp);                          \
+    } while (0)
+
+
+#define vn_exists(vp)
+#define vn_is_readonly(vp)  vnode_vfsisrdonly(vp)
+
+extern int
+VOP_CLOSE(struct vnode *vp, int flag, int count, offset_t off, void *cr, void *);
+extern int
+VOP_FSYNC(struct vnode *vp, int flags, void* unused, void *);
+extern int
+VOP_SPACE(struct vnode *vp, int cmd, void *fl, int flags, offset_t off,
+          cred_t *cr, void *ctx);
+
+extern int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4);
+
+
+#endif
+
+extern struct vnode *rootdir;
 
 #endif /* SPL_VNODE_H */

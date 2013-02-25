@@ -35,7 +35,13 @@ int  _cv_timedwait(kcondvar_t *cvp,kmutex_t *mp, clock_t tim, const char *msg);
  */
 #define cv_wait(cvp, mp)        \
         _cv_wait((cvp), (mp), #cvp)
+
 #define cv_timedwait(cvp, mp, tim)      \
+        _cv_timedwait((cvp), (mp), (tim), #cvp)
+
+#define cv_wait_interruptible(cv, mp)  cv_wait(cv, mp)
+
+#define cv_timedwait_interruptible(cvp, mp, tim)  \
         _cv_timedwait((cvp), (mp), (tim), #cvp)
 
 

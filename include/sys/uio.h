@@ -28,9 +28,11 @@
 //#include <linux/uio.h>
 
 
-#define uio_t apple_uio_t
-#include_next <sys/uio.h>
+// OSX defines "uio_t" as "struct uio *"
+// ZFS defines "uio_t" as "struct uio"
 #undef uio_t
+#include_next <sys/uio.h>
+#define uio_t struct uio
 
 //#include <asm/uaccess.h>
 #include <sys/types.h>
@@ -39,10 +41,6 @@ typedef struct iovec iovec_t;
 
 typedef enum uio_seg uio_seg_t;
 typedef enum uio_rw uio_rw_t;
-
-// OSX defines "uio_t" as "struct uio *"
-// ZFS defines "uio_t" as "struct uio"
-typedef struct uio uio_t;
 
 
 

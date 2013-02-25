@@ -59,7 +59,7 @@ kobj_close_file(struct _buf *file)
     vfs_context_t vctx;
 
     vctx = vfs_context_create((vfs_context_t)0);
-    (void) vnode_close((vnode_t)file->_fd, 0, vctx);
+    (void) vnode_close((struct vnode *)file->_fd, 0, vctx);
     (void) vfs_context_rele(vctx);
 
     zfs_kmem_free(file, sizeof (struct _buf));
@@ -95,7 +95,7 @@ kobj_fstat(struct vnode *vp, struct bootstat *buf)
 int
 kobj_read_file(struct _buf *file, char *buf, ssize_t size, offset_t off)
 {
-    struct vnode *vp = (vnode_t)file->_fd;
+    struct vnode *vp = (struct vnode *)file->_fd;
     vfs_context_t vctx;
     uio_t *auio;
     int count;
@@ -136,7 +136,7 @@ kobj_get_filesize(struct _buf *file, uint64_t *size)
      */
     struct bootstat bst;
 
-    if (kobj_fstat((vnode_t)file->_fd, &bst) != 0)
+    if (kobj_fstat((struct vnode *)file->_fd, &bst) != 0)
         return (EIO);
     *size = bst.st_size;
     return (0);
