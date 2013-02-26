@@ -99,7 +99,7 @@ static inline bool_t xdr_u_short(XDR *xdrs, unsigned short *usp)
 
 static inline bool_t xdr_short(XDR *xdrs, short *sp)
 {
-	BUILD_BUG_ON(sizeof(short) != 2);
+	//BUILD_BUG_ON(sizeof(short) != 2);
 	return xdrs->x_ops->xdr_u_short(xdrs, (unsigned short *) sp);
 }
 
@@ -110,7 +110,7 @@ static inline bool_t xdr_u_int(XDR *xdrs, unsigned *up)
 
 static inline bool_t xdr_int(XDR *xdrs, int *ip)
 {
-	BUILD_BUG_ON(sizeof(int) != 4);
+	//BUILD_BUG_ON(sizeof(int) != 4);
 	return xdrs->x_ops->xdr_u_int(xdrs, (unsigned *) ip);
 }
 
@@ -121,7 +121,7 @@ static inline bool_t xdr_u_longlong_t(XDR *xdrs, u_longlong_t *ullp)
 
 static inline bool_t xdr_longlong_t(XDR *xdrs, longlong_t *llp)
 {
-	BUILD_BUG_ON(sizeof(longlong_t) != 8);
+	//BUILD_BUG_ON(sizeof(longlong_t) != 8);
 	return xdrs->x_ops->xdr_u_longlong_t(xdrs, (u_longlong_t *) llp);
 }
 

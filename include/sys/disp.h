@@ -27,7 +27,7 @@
 
 //#include <linux/preempt.h>
 
-#define	kpreempt_disable()	preempt_disable()
-#define	kpreempt_enable()	preempt_enable()
+//#define	kpreempt_disable()	preempt_disable()
+//#define	kpreempt_enable()	preempt_enable()
 
 #endif /* SPL_DISP_H */

@@ -352,3 +352,54 @@ vmem_xalloc(vmem_t *vmp, size_t size, __unused size_t align_arg, __unused size_t
 {
     return vmem_alloc(vmp, size, vmflag);
 }
+
+
+char *kvasprintf(const char *fmt, va_list ap)
+{
+    unsigned int len;
+    char *p;
+    va_list aq;
+
+    va_copy(aq, ap);
+    len = vsnprintf(NULL, 0, fmt, aq);
+    va_end(aq);
+
+    p = OSMalloc(len+1, zfs_kmem_alloc_tag);
+    if (!p)
+        return NULL;
+
+    vsnprintf(p, len+1, fmt, ap);
+
+    return p;
+}
+
+char *
+kmem_vasprintf(const char *fmt, va_list ap)
+{
+    va_list aq;
+    char *ptr;
+
+    do {
+        va_copy(aq, ap);
+        ptr = kvasprintf(fmt, aq);
+        va_end(aq);
+    } while (ptr == NULL);
+
+    return ptr;
+}
+
+char *
+kmem_asprintf(const char *fmt, ...)
+{
+    va_list ap;
+    char *ptr;
+
+    do {
+        va_start(ap, fmt);
+        ptr = kvasprintf(fmt, ap);
+        va_end(ap);
+    } while (ptr == NULL);
+
+    return ptr;
+}
+

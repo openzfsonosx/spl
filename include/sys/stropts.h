@@ -106,5 +106,17 @@ strrchr(p, ch)
     /* NOTREACHED */
 }
 
+static inline int
+is_ascii_str(const char * str)
+{
+    unsigned char ch;
+
+    while ((ch = (unsigned char)*str++) != '\0') {
+        if (ch >= 0x80)
+            return (0);
+    }
+    return (1);
+}
+
 
 #endif /* SPL_STROPTS_H */
