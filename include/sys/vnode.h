@@ -318,4 +318,12 @@ extern int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void
 
 extern struct vnode *rootdir;
 
+static inline int
+chklock(struct vnode *vp, int iomode, unsigned long long offset, ssize_t len, int fmode, void *ct)
+{
+    return (0);
+}
+
+
+
 #endif /* SPL_VNODE_H */
