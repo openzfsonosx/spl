@@ -76,7 +76,8 @@
 #define proc_pageout			NULL
 #define curproc             current_proc()
 //#define max_ncpus			num_possible_cpus()
-#define CPU_SEQID			smp_processor_id()
+//#define CPU_SEQID			smp_processor_id()
+#define CPU_SEQID       (0)
 #define _NOTE(x)
 #define is_system_labeled()		0
 

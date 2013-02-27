@@ -324,6 +324,31 @@ chklock(struct vnode *vp, int iomode, unsigned long long offset, ssize_t len, in
     return (0);
 }
 
+/* Root directory vnode for the system a.k.a. '/' */
+/* Must use vfs_rootvnode() to acquire a reference, and
+ * vnode_put() to release it
+ */
+#if ZFS_LEOPARD_ONLY
+extern struct vnode *rootvnode;
+#define getrootdir()  rootvnode
+#else
+static inline struct vnode *getrootdir() {
+        struct vnode *rvnode = vfs_rootvnode();
+        if (rvnode)
+                vnode_put(rvnode);
+        return rvnode;
+}
+#endif
+
+#ifdef ZFS_LEOPARD_ONLY
+#define vn_has_cached_data(VP)  (VTOZ(VP)->z_mmapped)
+#else
+#define vn_has_cached_data(VP)  (VTOZ(VP)->z_mmapped || vnode_isswap(VP))
+#endif
+
+#define vn_ismntpt(vp)   (vnode_mountedhere(vp) != NULL)
+
+
 
 
 #endif /* SPL_VNODE_H */

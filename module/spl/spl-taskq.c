@@ -936,6 +936,111 @@ taskq_dispatch(taskq_t *tq, task_func_t func, void *arg, uint_t flags)
 	return ((taskqid_t)tqe);
 }
 
+int
+taskq_empty_ent(taskq_ent_t *t)
+{
+    return 0;
+}
+
+void
+taskq_init_ent(taskq_ent_t *t)
+{
+
+}
+
+
+void
+taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
+   taskq_ent_t *tqe)
+{
+	taskq_bucket_t *bucket = NULL;	/* Which bucket needs extension */
+	taskq_ent_t *tqe1;
+
+	ASSERT(tq != NULL);
+	ASSERT(func != NULL);
+
+	if (!(tq->tq_flags & TASKQ_DYNAMIC)) {
+		/*
+		 * TQ_NOQUEUE flag can't be used with non-dynamic task queues.
+		 */
+		ASSERT(! (flags & TQ_NOQUEUE));
+		/*
+		 * Enqueue the task to the underlying queue.
+		 */
+		mutex_enter(&tq->tq_lock);
+
+		TASKQ_S_RANDOM_DISPATCH_FAILURE(tq, flags);
+
+		TQ_ENQUEUE(tq, tqe, func, arg);
+		mutex_exit(&tq->tq_lock);
+		return ((taskqid_t)tqe);
+	}
+
+	/*
+	 * Dynamic taskq dispatching.
+	 */
+	ASSERT(!(flags & TQ_NOALLOC));
+	TASKQ_D_RANDOM_DISPATCH_FAILURE(tq, flags);
+
+	if ((tqe = taskq_bucket_dispatch(tq->tq_buckets, func, arg)) != NULL)
+		return ((taskqid_t)tqe);	/* Fastpath */
+	bucket = tq->tq_buckets;
+
+	/*
+	 * At this point we either scheduled a task and (tqe != NULL) or failed
+	 * (tqe == NULL). Try to recover from fails.
+	 */
+
+	/*
+	 * For KM_SLEEP dispatches, try to extend the bucket and retry dispatch.
+	 */
+	if ((tqe == NULL) && !(flags & TQ_NOSLEEP)) {
+		/*
+		 * taskq_bucket_extend() may fail to do anything, but this is
+		 * fine - we deal with it later. If the bucket was successfully
+		 * extended, there is a good chance that taskq_bucket_dispatch()
+		 * will get this new entry, unless someone is racing with us and
+		 * stealing the new entry from under our nose.
+		 * taskq_bucket_extend() may sleep.
+		 */
+		taskq_bucket_extend(bucket);
+		TQ_STAT(bucket, tqs_disptcreates);
+		if ((tqe = taskq_bucket_dispatch(bucket, func, arg)) != NULL)
+			return ((taskqid_t)tqe);
+	}
+
+	ASSERT(bucket != NULL);
+	/*
+	 * Since there are not enough free entries in the bucket, extend it
+	 * in the background using backing queue.
+	 */
+	mutex_enter(&tq->tq_lock);
+	if ((tqe1 = taskq_ent_alloc(tq, TQ_NOSLEEP)) != NULL) {
+		TQ_ENQUEUE(tq, tqe1, taskq_bucket_extend,
+		    bucket);
+	} else {
+		TQ_STAT(bucket, tqs_nomem);
+	}
+
+	/*
+	 * Dispatch failed and we can't find an entry to schedule a task.
+	 * Revert to the backing queue unless TQ_NOQUEUE was asked.
+	 */
+	if ((tqe == NULL) && !(flags & TQ_NOQUEUE)) {
+		if ((tqe = taskq_ent_alloc(tq, flags)) != NULL) {
+			TQ_ENQUEUE(tq, tqe, func, arg);
+		} else {
+			TQ_STAT(bucket, tqs_nomem);
+		}
+	}
+	mutex_exit(&tq->tq_lock);
+
+	return ((taskqid_t)tqe);
+}
+
+
+
+
 /*
  * Wait for all pending tasks to complete.
  * Calling taskq_wait from a task will cause deadlock.

@@ -21,13 +21,13 @@
  *  Solaris Porting Layer (SPL) XDR Implementation.
 \*****************************************************************************/
 
-#include <linux/string.h>
 #include <sys/kmem.h>
 #include <sys/debug.h>
 #include <sys/types.h>
 #include <rpc/types.h>
 #include <rpc/xdr.h>
 #include <spl-debug.h>
+#include <sys/byteorder.h>
 
 #ifdef SS_DEBUG_SUBSYS
 #undef SS_DEBUG_SUBSYS
@@ -247,7 +247,7 @@ xdrmem_enc_uint32(XDR *xdrs, uint32_t val)
 	if (xdrs->x_addr + sizeof(uint32_t) > xdrs->x_addr_end)
 		return FALSE;
 
-	*((uint32_t *) xdrs->x_addr) = cpu_to_be32(val);
+	*((uint32_t *) xdrs->x_addr) = BE_32(val);
 
 	xdrs->x_addr += sizeof(uint32_t);
 
@@ -260,7 +260,7 @@ xdrmem_dec_uint32(XDR *xdrs, uint32_t *val)
 	if (xdrs->x_addr + sizeof(uint32_t) > xdrs->x_addr_end)
 		return FALSE;
 
-	*val = be32_to_cpu(*((uint32_t *) xdrs->x_addr));
+	*val = BE_32(*((uint32_t *) xdrs->x_addr));
 
 	xdrs->x_addr += sizeof(uint32_t);
 
@@ -272,7 +272,7 @@ xdrmem_enc_char(XDR *xdrs, char *cp)
 {
 	uint32_t val;
 
-	BUILD_BUG_ON(sizeof(char) != 1);
+	//BUILD_BUG_ON(sizeof(char) != 1);
 	val = *((unsigned char *) cp);
 
 	return xdrmem_enc_uint32(xdrs, val);
@@ -283,7 +283,7 @@ xdrmem_dec_char(XDR *xdrs, char *cp)
 {
 	uint32_t val;
 
-	BUILD_BUG_ON(sizeof(char) != 1);
+	//BUILD_BUG_ON(sizeof(char) != 1);
 
 	if (!xdrmem_dec_uint32(xdrs, &val))
 		return FALSE;
@@ -304,7 +304,7 @@ xdrmem_dec_char(XDR *xdrs, char *cp)
 static bool_t
 xdrmem_enc_ushort(XDR *xdrs, unsigned short *usp)
 {
-	BUILD_BUG_ON(sizeof(unsigned short) != 2);
+	//BUILD_BUG_ON(sizeof(unsigned short) != 2);
 
 	return xdrmem_enc_uint32(xdrs, *usp);
 }
@@ -314,7 +314,7 @@ xdrmem_dec_ushort(XDR *xdrs, unsigned short *usp)
 {
 	uint32_t val;
 
-	BUILD_BUG_ON(sizeof(unsigned short) != 2);
+	//BUILD_BUG_ON(sizeof(unsigned short) != 2);
 
 	if (!xdrmem_dec_uint32(xdrs, &val))
 		return FALSE;
@@ -334,7 +334,7 @@ xdrmem_dec_ushort(XDR *xdrs, unsigned short *usp)
 static bool_t
 xdrmem_enc_uint(XDR *xdrs, unsigned *up)
 {
-	BUILD_BUG_ON(sizeof(unsigned) != 4);
+	//BUILD_BUG_ON(sizeof(unsigned) != 4);
 
 	return xdrmem_enc_uint32(xdrs, *up);
 }
@@ -342,7 +342,7 @@ xdrmem_enc_uint(XDR *xdrs, unsigned *up)
 static bool_t
 xdrmem_dec_uint(XDR *xdrs, unsigned *up)
 {
-	BUILD_BUG_ON(sizeof(unsigned) != 4);
+	//BUILD_BUG_ON(sizeof(unsigned) != 4);
 
 	return xdrmem_dec_uint32(xdrs, (uint32_t *) up);
 }
@@ -350,7 +350,7 @@ xdrmem_dec_uint(XDR *xdrs, unsigned *up)
 static bool_t
 xdrmem_enc_ulonglong(XDR *xdrs, u_longlong_t *ullp)
 {
-	BUILD_BUG_ON(sizeof(u_longlong_t) != 8);
+	//BUILD_BUG_ON(sizeof(u_longlong_t) != 8);
 
 	if (!xdrmem_enc_uint32(xdrs, *ullp >> 32))
 		return FALSE;
@@ -363,7 +363,7 @@ xdrmem_dec_ulonglong(XDR *xdrs, u_longlong_t *ullp)
 {
 	uint32_t low, high;
 
-	BUILD_BUG_ON(sizeof(u_longlong_t) != 8);
+	//BUILD_BUG_ON(sizeof(u_longlong_t) != 8);
 
 	if (!xdrmem_dec_uint32(xdrs, &high))
 		return FALSE;
@@ -418,7 +418,7 @@ xdr_dec_array(XDR *xdrs, caddr_t *arrp, uint_t *sizep, const uint_t maxsize,
 	 * xdr_array() allocates memory and *arrp points to it".
 	 */
 	if (*arrp == NULL) {
-		BUILD_BUG_ON(sizeof(uint_t) > sizeof(size_t));
+		//BUILD_BUG_ON(sizeof(uint_t) > sizeof(size_t));
 
 		*arrp = kmem_alloc(size * elsize, KM_NOSLEEP);
 		if (*arrp == NULL)
@@ -475,7 +475,7 @@ xdr_dec_string(XDR *xdrs, char **sp, const uint_t maxsize)
 	 * allocates memory and *sp points to it".
 	 */
 	if (*sp == NULL) {
-		BUILD_BUG_ON(sizeof(uint_t) > sizeof(size_t));
+		//BUILD_BUG_ON(sizeof(uint_t) > sizeof(size_t));
 
 		*sp = kmem_alloc(size + 1, KM_NOSLEEP);
 		if (*sp == NULL)

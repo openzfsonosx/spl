@@ -8,6 +8,8 @@ echo $ABS_PATH
 
 CFLAGS="-Wall -nostdinc -mkernel -D_KERNEL -DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE -DAPPLE -DNeXT -I$ABS_PATH/include -I/System/Library/Frameworks/Kernel.framework/PrivateHeaders -I/System/Library/Frameworks/Kernel.framework/Headers "
 
+gcc $CFLAGS -o spl-xdr.o -c spl-xdr.c
+
 gcc $CFLAGS -o spl-atomic.o -c spl-atomic.c
 gcc $CFLAGS -o spl-condvar.o -c spl-condvar.c
 gcc $CFLAGS -o spl-cred.o -c spl-cred.c
@@ -25,6 +27,7 @@ gcc $CFLAGS -o spl-taskq.o -c spl-taskq.c
 gcc $CFLAGS -o spl-thread.o -c spl-thread.c
 gcc $CFLAGS -o spl-time.o -c spl-time.c
 gcc $CFLAGS -o spl-vnode.o -c spl-vnode.c
+gcc $CFLAGS -o spl-xdr.o -c spl-xdr.c
 ##gcc $CFLAGS -o spl-zlib.o -c spl-zlib.c
 
 mkdir -p spl.kext/Contents/Resources/English.lproj spl.kext/Contents/MacOS

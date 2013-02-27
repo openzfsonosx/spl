@@ -202,3 +202,22 @@ int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
     return error;
 }
 
+
+
+int
+secpolicy_vnode_remove(const cred_t *cr)
+{
+    return (0);
+}
+int
+secpolicy_vnode_setid_retain(const cred_t *cred, boolean_t issuidroot)
+{
+    return (0);
+}
+
+int
+secpolicy_vnode_create_gid(const cred_t *cred)
+{
+    return (0);
+}
+

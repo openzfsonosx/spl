@@ -83,6 +83,8 @@ uint64_t    physmem;
 //extern uint64_t    max_mem;
 static OSMallocTag zfs_kmem_alloc_tag = NULL;
 
+vmem_t *zio_alloc_arena = NULL; /* arena for allocating zio memory */
+
 
 void
 strfree(char *str)
@@ -136,10 +138,10 @@ static uint64_t kmem_size_val;
 void
 spl_kmem_init(void)
 {
-    physmem = 0x20000000; // FIXME obviously
 
     zfs_kmem_alloc_tag = OSMalloc_Tagalloc("ZFS general purpose",
                                            OSMT_DEFAULT);
+
 }
 
 void

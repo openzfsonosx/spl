@@ -56,7 +56,6 @@ typedef void (*thread_func_t)(void *);
 
 //#define curthread       ((void *)(uintptr_t)thr_self())
 #define       curthread       (current_thread())    /* current thread pointer */
-#define       curproc         (ttoproc(curthread))    /* current process pointer */
 #define       curproj         (ttoproj(curthread))    /* current project pointer */
 
 #define thread_join(t)			VERIFY(0)

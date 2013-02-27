@@ -69,6 +69,8 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     len = sizeof(total_memory);
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
 
+    physmem = total_memory; // FIXME obviously
+
     spl_kmem_init();
     spl_mutex_init();
     spl_rwlock_init();

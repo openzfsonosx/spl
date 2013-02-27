@@ -142,6 +142,7 @@ void *calloc(size_t n, size_t s);
 
 #define kmem_cache_set_move(cache, movefunc)    do { } while (0)
 
+#define vmem_zalloc(sz, fl)   kmem_alloc((sz), (fl))
 
 extern void *zfs_kmem_zalloc(size_t size, int kmflags);
 
