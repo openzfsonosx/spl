@@ -36,6 +36,16 @@ typedef struct opaque_cred_t  cred_t;
 #define kcred   (cred_t *)NOCRED
 #define CRED()          (cred_t *)kauth_cred_get()
 
+#include <AvailabilityMacros.h>
+
+// Older OSX API
+#if !(MAC_OS_X_VERSION_MIN_REQUIRED >= 1070)
+#define kauth_cred_getruid(x) (x)->cr_ruid
+#define kauth_cred_getrgid(x) (x)->cr_rgid
+#define kauth_cred_getsvuid(x) (x)->cr_svuid
+#endif
+
+
 extern void crhold(cred_t *cr);
 extern void crfree(cred_t *cr);
 extern uid_t crgetuid(const cred_t *cr);
