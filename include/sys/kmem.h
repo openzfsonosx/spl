@@ -136,6 +136,8 @@ void kmem_reap(void);
 int kmem_debugging(void);
 void *calloc(size_t n, size_t s);
 
+#define	vmem_alloc(vmp, size, vmflag)	zfs_kmem_alloc((size), (vmflag))
+#define	vmem_free(vmp, vaddr, size)	zfs_kmem_free((vaddr), (size))
 #define kmem_alloc(size, kmflags)       zfs_kmem_alloc((size), (kmflags))
 #define kmem_zalloc(size, kmflags)      zfs_kmem_alloc((size), (kmflags) | M_ZERO)
 #define kmem_free(buf, size)            zfs_kmem_free((buf), (size))

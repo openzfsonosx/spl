@@ -383,9 +383,7 @@
 #include <sys/sysmacros.h>
 #include <sys/cpuvar.h>
 #include <sys/sdt.h>
-
-extern void delay(clock_t ticks);
-
+#include <kern/clock.h>
 
 static kmem_cache_t *taskq_ent_cache, *taskq_cache;
 
@@ -747,7 +745,7 @@ taskq_ent_alloc(taskq_t *tq, int flags)
 			 * the caller.  So, we just delay for one second
 			 * to throttle the allocation rate.
 			 */
-			delay(hz);
+			IODelay(hz);
 		}
 		tqe = kmem_cache_alloc(taskq_ent_cache, kmflags);
 		mutex_enter(&tq->tq_lock);

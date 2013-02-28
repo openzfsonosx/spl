@@ -282,6 +282,7 @@ zfs_kmem_zalloc(size_t size, int kmflags)
 }
 
 
+#if 0
 #undef kmem_alloc
 #undef kmem_free
 
@@ -354,6 +355,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, __unused size_t align_arg, __unused size_t
 {
     return vmem_alloc(vmp, size, vmflag);
 }
+#endif
 
 
 char *kvasprintf(const char *fmt, va_list ap)
