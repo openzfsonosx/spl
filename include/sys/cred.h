@@ -43,6 +43,7 @@ typedef struct opaque_cred_t  cred_t;
 #define kauth_cred_getruid(x) (x)->cr_ruid
 #define kauth_cred_getrgid(x) (x)->cr_rgid
 #define kauth_cred_getsvuid(x) (x)->cr_svuid
+#define kauth_cred_getsvgid(x) (x)->cr_svgid
 #endif
 
 
