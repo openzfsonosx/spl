@@ -4,7 +4,7 @@
 # Installation is handled by the custom install-data-local rule.
 noinst_HEADERS  = $(top_srcdir)/include/*.h
 noinst_HEADERS += $(top_srcdir)/include/fs/*.h
-noinst_HEADERS += $(top_srcdir)/include/linux/*.h
+noinst_HEADERS += $(top_srcdir)/include/osx/*.h
 noinst_HEADERS += $(top_srcdir)/include/rpc/*.h
 noinst_HEADERS += $(top_srcdir)/include/sharefs/*.h
 noinst_HEADERS += $(top_srcdir)/include/sys/fm/*.h
@@ -26,3 +26,4 @@ uninstall-local:
 	release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \
 	instdest=$(DESTDIR)/usr/src/spl-$$release/$(LINUX_VERSION); \
 	$(RM) -R $$instdest
+

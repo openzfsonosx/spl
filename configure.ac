@@ -38,12 +38,17 @@ AC_CONFIG_HEADERS([spl_config.h], [
 	rm spl_config.h.tmp) || exit 1])
 
 AC_PROG_INSTALL
-AC_PROG_CC
-AC_PROG_LIBTOOL
 
-SPL_AC_LICENSE
-SPL_AC_PACKAGE
-SPL_AC_CONFIG
+dnl save $CFLAGS since AC_PROG_CC likes to insert "-g -O2"
+dnl if $CFLAGS is blank
+cflags_save="$CFLAGS"
+AC_PROG_CC
+CFLAGS="$cflags_save"
+AC_PROG_LIBTOOL
+AM_PROG_CC_C_O
+
+AM_CONDITIONAL([CONFIG_KERNEL], [ true ])
+AM_CONDITIONAL([CONFIG_USER], [ true ])
 
 AC_CONFIG_FILES([
 	Makefile
