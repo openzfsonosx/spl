@@ -746,6 +746,7 @@ taskq_ent_alloc(taskq_t *tq, int flags)
 			 * to throttle the allocation rate.
 			 */
 			IODelay(hz);
+            // delay(hz);
 		}
 		tqe = kmem_cache_alloc(taskq_ent_cache, kmflags);
 		mutex_enter(&tq->tq_lock);
