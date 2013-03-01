@@ -385,6 +385,7 @@
 #include <sys/sdt.h>
 #include <kern/clock.h>
 
+
 static kmem_cache_t *taskq_ent_cache, *taskq_cache;
 
 /*
@@ -680,8 +681,8 @@ taskq_ent_destructor(void *buf, void *cdrarg)
 #endif /*__APPLE*/
 }
 
-void
-taskq_init(void)
+int
+spl_taskq_init(void)
 {
 	taskq_ent_cache = kmem_cache_create("taskq_ent_cache",
 	    sizeof (taskq_ent_t), 0, taskq_ent_constructor,
@@ -689,10 +690,12 @@ taskq_init(void)
 
 	taskq_cache = kmem_cache_create("taskq_cache", sizeof (taskq_t),
 	    0, taskq_constructor, taskq_destructor, NULL, NULL, NULL, 0);
+
+    return 0;
 }
 
 void
-taskq_fini(void)
+spl_taskq_fini(void)
 {
 	if (taskq_cache) {
 		kmem_cache_destroy(taskq_cache);
