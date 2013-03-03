@@ -124,7 +124,7 @@ zfs_kmem_alloc(size_t size, int kmflags)
 	}
 #endif
 
-    if (kmflags & KM_ZERO)
+    if (p && (kmflags & KM_ZERO))
         bzero(p, size);
 
 	return (p);
@@ -280,10 +280,8 @@ zfs_kmem_zalloc(size_t size, int kmflags)
     void *buf;
 
     buf = zfs_kmem_alloc(size, kmflags);
-    printf("allocated buf %p\n", buf);
 
     if (buf != NULL) {
-        printf("Calling bzero for %lu bytes\n", size);
         bzero(buf, size);
     }
     return(buf);
