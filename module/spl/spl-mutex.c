@@ -69,6 +69,7 @@ void spl_mutex_fini(void)
 }
 
 
+#ifndef __APPLE__
 void mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 {
     ASSERT(type != MUTEX_SPIN);
@@ -83,6 +84,7 @@ void mutex_destroy(kmutex_t *mp)
 {
     lck_mtx_destroy((lck_mtx_t *)&mp->m_lock[0], zfs_mutex_group);
 }
+#endif
 
 void mutex_enter(kmutex_t *mp)
 {

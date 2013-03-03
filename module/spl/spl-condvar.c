@@ -29,6 +29,7 @@
 #include <sys/errno.h>
 
 
+#ifndef __APPLE__
 void
 cv_init(kcondvar_t *cvp, char *name, kcv_type_t type, void *arg)
 {
@@ -76,6 +77,7 @@ _cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg)
     mp->m_owner = current_thread();
 }
 
+#endif
 
 /*
  * Same as cv_wait except the thread will unblock at 'tim'
