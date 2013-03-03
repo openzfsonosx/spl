@@ -24,7 +24,8 @@
 # with the SPL.  If not, see <http://www.gnu.org/licenses/>.
 ###############################################################################
 
-AC_INIT
+AC_INIT(m4_esyscmd([awk '/^Name:/ {print $2}' META | tr -d '\n']),
+	m4_esyscmd([awk '/^Version:/ {print $2}' META | tr -d '\n']))
 AC_LANG(C)
 SPL_AC_META
 SPL_AC_CONFIG
@@ -32,7 +33,8 @@ AC_CONFIG_AUX_DIR([config])
 AC_CANONICAL_SYSTEM
 AM_MAINTAINER_MODE
 AM_SILENT_RULES
-AM_INIT_AUTOMAKE([$SPL_META_NAME], [$SPL_META_VERSION])
+#AC_INIT([$SPL_META_NAME], [$SPL_META_VERSION])
+AM_INIT_AUTOMAKE
 AC_CONFIG_HEADERS([spl_config.h], [
 	(mv spl_config.h spl_config.h.tmp &&
 	awk -f ${ac_srcdir}/config/config.awk spl_config.h.tmp >spl_config.h &&
