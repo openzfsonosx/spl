@@ -49,6 +49,7 @@ Makefile.in
 /stamp-h1
 /aclocal.m4
 /autom4te.cache
+/config/compile
 
 #
 # Top level generic files
