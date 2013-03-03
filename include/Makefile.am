@@ -18,12 +18,11 @@ install-data-local:
 	release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \
 	instdest=$(DESTDIR)/usr/src/spl-$$release/$(LINUX_VERSION); \
 	instfiles=`find . -name '*.h'`; \
-        for instfile in $$instfiles; do \
+	for instfile in $$instfiles; do \
 		$(INSTALL) -D $$instfile $$instdest/$$instfile; \
-        done
+	done
 
 uninstall-local:
 	release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \
 	instdest=$(DESTDIR)/usr/src/spl-$$release/$(LINUX_VERSION); \
 	$(RM) -R $$instdest
-
