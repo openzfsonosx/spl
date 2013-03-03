@@ -147,6 +147,8 @@ void *calloc(size_t n, size_t s);
 #define vmem_zalloc(sz, fl)   kmem_alloc((sz), (fl))
 
 extern void *zfs_kmem_zalloc(size_t size, int kmflags);
+extern char *kmem_asprintf(const char *fmt, ...);
+extern void strfree(char *str);
 
 void spl_kmem_init(void);
 void spl_kmem_fini(void);
