@@ -59,17 +59,19 @@ spl.kext : spl $(PLIST_STRING) $(INFO_PLIST)
 	@cp -f $(INFO_PLIST) spl.kext/Contents/
 	@cp -f $(PLIST_STRING) spl.kext/Contents/Resources/English.lproj/
 	@cp -f spl spl.kext/Contents/MacOS/
-	@kextlibs -undef-symbols -xml spl.kext/ || echo "delay kmem_alloc kmem_free kernel_map are known missing symbols. Someone fix.."
-	@echo ""
-	@echo "To load module, use;"
-	@echo "    rsync -ar --delete module/spl/spl.kext/ /tmp/spl.kext/"
-	@echo "    chown -R root:wheel /tmp/spl.kext"
-	@echo "    kextload -v /tmp/spl.kext/"
-	@echo ""
+	@kextlibs -undef-symbols -xml spl.kext/
 
-install-exec-local :
-	echo "There is no install yet, don't do it."
-	exit 1
+install-exec-local: spl.kext
+	rm -rf /System/Library/Extensions/spl.kext
+	rsync -r spl.kext/ /System/Library/Extensions/spl.kext/
+	chown -R root:wheel /System/Library/Extensions/spl.kext/
+	@echo
+	@echo "To load module: kextload -v /System/Library/Extensions/spl.kext"
+	@echo "To uninstall module: rm -rf /System/Library/Extensions/spl.kext"
+	@echo
+
+uninstall-am:
+	rm -rf /System/Library/Extensions/spl.kext
 
 clean:
 	rm -rf spl.kext/
