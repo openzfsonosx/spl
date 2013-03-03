@@ -53,7 +53,7 @@ spl_LDFLAGS=$(LINKFLAGS_KMOD)
 
 dist_noinst_DATA = $(PLIST_STRING) $(INFO_PLIST)
 
-spl.kext : spl $(PLIST_STRING) $(INFO_PLIST)
+spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	@echo ""
 	@mkdir -p spl.kext/Contents/Resources/English.lproj spl.kext/Contents/MacOS
 	@cp -f $(INFO_PLIST) spl.kext/Contents/
@@ -75,4 +75,4 @@ uninstall-am:
 
 clean:
 	rm -rf spl.kext/
-	rm -f *.o *.lo
+	rm -f *.o *.lo spl
