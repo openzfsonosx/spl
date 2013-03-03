@@ -26,8 +26,8 @@
 
 #include <sys/vnode.h>
 #include <spl-debug.h>
-#include <libkern/libkern.h>
 #include <sys/malloc.h>
+#include <IOKit/IOLib.h>
 
 int
 vn_open(char *pnamep, enum uio_seg seg, int filemode, int createmode,
@@ -101,8 +101,8 @@ extern errno_t vnode_remove(const char *, int, enum vtype, vfs_context_t);
 errno_t
 vnode_remove(const char *name, int flag, enum vtype type, vfs_context_t vctx)
 {
-    printf("vnode_remove: \"%s\"\n", name);
-    printf("zfs: vnode_remove not yet supported\n");
+    IOLog("vnode_remove: \"%s\"\n", name);
+    IOLog("zfs: vnode_remove not yet supported\n");
     return (EPERM);
 }
 

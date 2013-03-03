@@ -83,8 +83,8 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     spl_rwlock_init();
     spl_taskq_init();
 
-    printf("SPL: Loaded module v0.01 (ncpu %d, memsize %llu)\n",
-           max_ncpus, total_memory);
+    IOLog("SPL: Loaded module v0.01 (ncpu %d, memsize %llu)\n",
+          max_ncpus, total_memory);
     return KERN_SUCCESS;
 }
 
@@ -95,7 +95,7 @@ kern_return_t spl_stop (kmod_info_t * ki, void * d)
     spl_rwlock_fini();
     spl_mutex_fini();
     spl_kmem_fini();
-    printf("SPL: Unloaded module\n");
+    IOLog("SPL: Unloaded module\n");
     return KERN_SUCCESS;
 }
 

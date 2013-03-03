@@ -664,6 +664,7 @@ int
 spl_debug_msg(void *arg, int subsys, int mask, const char *file,
     const char *fn, const int line, const char *format, ...)
 {
+#if 0
 	spl_debug_limit_state_t *cdls = arg;
         struct trace_cpu_data   *tcd = NULL;
         struct spl_debug_header header = { 0, };
@@ -832,6 +833,7 @@ console:
                 cdls->cdls_count = 0;
         }
 
+#endif
         return 0;
 }
 EXPORT_SYMBOL(spl_debug_msg);
