@@ -58,7 +58,14 @@ uint64_t  total_memory = 4 * 1024 * 1024 * 1024; // Filled in below;
 
 #include <sys/types.h>
 #include <sys/sysctl.h>
+#include <IOKit/IOLib.h>
 
+
+void
+osx_delay(int ticks)
+{
+	IODelay(ticks);
+}
 
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {

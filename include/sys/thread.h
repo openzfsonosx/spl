@@ -71,4 +71,7 @@ extern kthread_t *thread_create(
                                 pri_t           pri);
 extern void thread_exit(void);
 
+#define	delay osx_delay
+extern void osx_delay(int);
+
 #endif  /* _SPL_THREAD_H */
