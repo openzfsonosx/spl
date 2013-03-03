@@ -42,6 +42,7 @@
 #include <sys/rwlock.h>
 #include <sys/utsname.h>
 #include <sys/ioctl.h>
+#include <sys/taskq.h>
 //#define MACH_KERNEL_PRIVATE
 
 #include <kern/processor.h>
@@ -52,12 +53,17 @@ struct utsname utsname = {
 
 //extern struct machine_info      machine_info;
 
-unsigned int max_ncpus = 1; // Filled in below.
-uint64_t  total_memory = 4 * 1024 * 1024 * 1024; // Filled in below;
+unsigned int max_ncpus;
+uint64_t  total_memory;
 
 
 #include <sys/types.h>
 #include <sys/sysctl.h>
+/* protect against:
+ * /System/Library/Frameworks/Kernel.framework/Headers/mach/task.h:197: error: conflicting types for ‘spl_thread_create’
+ * ../../include/sys/thread.h:72: error: previous declaration of ‘spl_thread_create’ was here
+ */
+#define	_task_user_
 #include <IOKit/IOLib.h>
 
 

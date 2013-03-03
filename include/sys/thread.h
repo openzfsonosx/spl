@@ -60,7 +60,8 @@ typedef void (*thread_func_t)(void *);
 
 #define thread_join(t)			VERIFY(0)
 
-extern kthread_t *thread_create(
+#define	thread_create spl_thread_create
+extern kthread_t *spl_thread_create(
                                 caddr_t         stk,
                                 size_t          stksize,
                                 void            (*proc)(),
@@ -69,7 +70,8 @@ extern kthread_t *thread_create(
                                 proc_t          *pp,
                                 int             state,
                                 pri_t           pri);
-extern void thread_exit(void);
+#define	thread_exit spl_thread_exit
+extern void spl_thread_exit(void);
 
 #define	delay osx_delay
 extern void osx_delay(int);

@@ -33,7 +33,7 @@
 static uint32_t zfs_threads = 0;
 
 kthread_t *
-thread_create(
+spl_thread_create(
         caddr_t         stk,
         size_t          stksize,
         void            (*proc)(),
@@ -58,7 +58,7 @@ thread_create(
 }
 
 
-void thread_exit(void)
+void spl_thread_exit(void)
 {
         OSDecrementAtomic((SInt32 *)&zfs_threads);
 

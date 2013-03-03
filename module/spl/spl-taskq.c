@@ -390,7 +390,9 @@ static kmem_cache_t *taskq_ent_cache, *taskq_cache;
 /*
  * Pseudo instance numbers for taskqs without explicitely provided instance.
  */
+#ifndef __APPLE__
 static vmem_t *taskq_id_arena;
+#endif
 
 /* Global system task queue for common use */
 taskq_t	*system_taskq;
@@ -441,8 +443,6 @@ int taskq_search_depth = TASKQ_SEARCH_DEPTH;
 /*
  * Static functions.
  */
-static taskq_t	*taskq_create_common(const char *, int, int, pri_t, int,
-    int, uint_t);
 static void taskq_thread(void *);
 static void taskq_d_thread(taskq_ent_t *);
 static void taskq_bucket_extend(void *);
@@ -867,7 +867,7 @@ taskq_dispatch(taskq_t *tq, task_func_t func, void *arg, uint_t flags)
 
 		if ((tqe = taskq_ent_alloc(tq, flags)) == NULL) {
 			mutex_exit(&tq->tq_lock);
-			return (NULL);
+			return ((uintptr_t)NULL);
 		}
 		TQ_ENQUEUE(tq, tqe, func, arg);
 		mutex_exit(&tq->tq_lock);
@@ -953,6 +953,7 @@ void
 taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
    taskq_ent_t *tqe)
 {
+#ifdef NOTYET /* copied and pasted from taskq_dispatch */
 	taskq_bucket_t *bucket = NULL;	/* Which bucket needs extension */
 	taskq_ent_t *tqe1;
 
@@ -1036,6 +1037,7 @@ taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
 	mutex_exit(&tq->tq_lock);
 
 	return ((taskqid_t)tqe);
+#endif
 }
 
 
@@ -1602,7 +1604,6 @@ taskq_bucket_extend(void *arg)
 	taskq_ent_t *tqe;
 	taskq_bucket_t *b = (taskq_bucket_t *)arg;
 	taskq_t *tq = b->tqbucket_taskq;
-	int nthreads;
 #ifdef __APPLE__
 	kthread_t *thread;
 #endif
