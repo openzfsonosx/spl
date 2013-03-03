@@ -259,13 +259,16 @@ extern int  zfs_vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base,
 #define vn_rdwr(rw, vp, base, len, off, seg, flg, limit, cr, resid)     \
     zfs_vn_rdwr((rw), (vp), (base), (len), (off), (seg), (flg), (limit), (cr), (resid))
 
+extern int vn_remove(char *fnamep, enum uio_seg seg, enum rm dirflag);
+extern int vn_rename(char *from, char *to, enum uio_seg seg);
+extern int secpolicy_vnode_create_gid(const cred_t *cred);
+extern int secpolicy_vnode_setid_retain(const cred_t *cred, boolean_t issuidroot);
+extern int secpolicy_vnode_remove(const cred_t *cr);
 
 #ifndef _KERNEL
 extern int vn_close(struct vnode *vp, int flags, int x1, int x2, void *x3, void *x4);
 extern int vn_seek(struct vnode *vp, offset_t o, offset_t *op, void *ct);
 
-extern int vn_remove(char *fnamep, enum uio_seg seg, enum rm dirflag);
-extern int vn_rename(char *from, char *to, enum uio_seg seg);
 extern int vn_getattr(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4);
 extern int vn_fsync(struct vnode *vp, int flags, void *x3, void *x4);
 extern int vn_space(struct vnode *vp, int cmd, struct flock *bfp, int flag,
