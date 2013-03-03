@@ -80,6 +80,7 @@ typedef enum clock_type {
 typedef long long	hrtime_t;
 
 extern hrtime_t gethrtime(void);
-
+extern void gethrestime(struct timespec *);
+extern time_t gethrestime_sec(void);
 
 #endif  /* _SPL_TIME_H */
