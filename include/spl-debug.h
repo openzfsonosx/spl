@@ -46,6 +46,7 @@
 #include <machine/limits.h>
 //#include <linux/sched.h>
 #include <osx/sched.h>
+#include <kern/debug.h>
 
 #define SS_UNDEFINED	0x00000001
 #define SS_ATOMIC	0x00000002
