@@ -27,7 +27,7 @@
 
 //#include <linux/module.h>
 //#include <linux/cpumask.h>
-#include <sys/debug.h>
+#include <spl-debug.h>
 #include <sys/varargs.h>
 #include <sys/zone.h>
 #include <sys/signal.h>

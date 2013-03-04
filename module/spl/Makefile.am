@@ -3,6 +3,7 @@ INFO_PLIST = Info.plist
 PLIST_STRING = InfoPlist.strings
 
 CFLAGS_KMOD = \
+	${AM_CFLAGS} \
 	-Wall \
 	-nostdinc \
 	-mkernel \
