@@ -85,7 +85,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     physmem = total_memory; // FIXME obviously
 
     spl_kmem_init();
-    spl_mutex_init();
+    spl_mutex_subsystem_init();
     spl_rwlock_init();
     spl_taskq_init();
 
@@ -99,7 +99,7 @@ kern_return_t spl_stop (kmod_info_t * ki, void * d)
 {
     spl_taskq_fini();
     spl_rwlock_fini();
-    spl_mutex_fini();
+    spl_mutex_subsystem_fini();
     spl_kmem_fini();
     IOLog("SPL: Unloaded module\n");
     return KERN_SUCCESS;

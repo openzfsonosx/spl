@@ -46,7 +46,7 @@ lck_grp_attr_t   *zfs_group_attr = NULL;
 static lck_grp_t *zfs_mutex_group = NULL;
 
 
-int spl_mutex_init(void)
+int spl_mutex_subsystem_init(void)
 {
     zfs_lock_attr = lck_attr_alloc_init();
     zfs_group_attr = lck_grp_attr_alloc_init();
@@ -56,7 +56,7 @@ int spl_mutex_init(void)
 
 
 
-void spl_mutex_fini(void)
+void spl_mutex_subsystem_fini(void)
 {
     lck_attr_free(zfs_lock_attr);
     zfs_lock_attr = NULL;
@@ -69,8 +69,7 @@ void spl_mutex_fini(void)
 }
 
 
-#ifndef __APPLE__
-void mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
+void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 {
     ASSERT(type != MUTEX_SPIN);
     ASSERT(ibc == NULL);
@@ -80,11 +79,10 @@ void mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
     mp->m_owner = NULL;
 }
 
-void mutex_destroy(kmutex_t *mp)
+void spl_mutex_destroy(kmutex_t *mp)
 {
     lck_mtx_destroy((lck_mtx_t *)&mp->m_lock[0], zfs_mutex_group);
 }
-#endif
 
 void mutex_enter(kmutex_t *mp)
 {
@@ -95,14 +93,14 @@ void mutex_enter(kmutex_t *mp)
     mp->m_owner = current_thread();
 }
 
-void mutex_exit(kmutex_t *mp)
+void spl_mutex_exit(kmutex_t *mp)
 {
     mp->m_owner = NULL;
     lck_mtx_unlock((lck_mtx_t *)&mp->m_lock[0]);
 }
 
 
-int mutex_tryenter(kmutex_t *mp)
+int spl_mutex_tryenter(kmutex_t *mp)
 {
     int held;
 
@@ -115,12 +113,12 @@ int mutex_tryenter(kmutex_t *mp)
     return (held);
 }
 
-int mutex_owned(kmutex_t *mp)
+int spl_mutex_owned(kmutex_t *mp)
 {
     return (mp->m_owner == current_thread());
 }
 
-struct thread *mutex_owner(kmutex_t *mp)
+struct thread *spl_mutex_owner(kmutex_t *mp)
 {
     return (mp->m_owner);
 }

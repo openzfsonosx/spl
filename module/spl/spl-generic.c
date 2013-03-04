@@ -626,7 +626,7 @@ __init spl_init(void)
 	if ((rc = spl_kmem_init()))
 		SGOTO(out1, rc);
 
-	if ((rc = spl_mutex_init()))
+	if ((rc = spl_mutex_subsystem_init()))
 		SGOTO(out2, rc);
 
 	if ((rc = spl_rw_init()))
@@ -679,7 +679,7 @@ out5:
 out4:
 	spl_rw_fini();
 out3:
-	spl_mutex_fini();
+	spl_mutex_subsystem_fini();
 out2:
 	spl_kmem_fini();
 out1:
@@ -705,7 +705,7 @@ spl_fini(void)
 	spl_vn_fini();
 	spl_taskq_fini();
 	spl_rw_fini();
-	spl_mutex_fini();
+	spl_mutex_subsystem_fini();
 	spl_kmem_fini();
 	spl_debug_fini();
 }

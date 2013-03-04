@@ -38,16 +38,28 @@ extern lck_grp_attr_t *zfs_group_attr;
 #define MUTEX_HELD(x)           (mutex_owned(x))
 #define MUTEX_NOT_HELD(x)       (!mutex_owned(x))
 
-void mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc);
-void mutex_destroy(kmutex_t *mp);
-void mutex_enter(kmutex_t *mp);
-void mutex_exit(kmutex_t *mp);
-int  mutex_tryenter(kmutex_t *mp);
-int  mutex_owned(kmutex_t *mp);
-struct thread *mutex_owner(kmutex_t *mp);
+/*
+ * On OS X, CoreStorage provides these symbols, so we have to redefine them,
+ * preferably without having to modify SPL users.
+ */
+#define mutex_init spl_mutex_init
+#define	mutex_destroy spl_mutex_destroy
+#define mutex_enter spl_mutex_enter
+#define	mutex_exit spl_mutex_exit
+#define	mutex_tryenter spl_mutex_tryenter
+#define	mutex_owned spl_mutex_owned
+#define	mutex_owner spl_mutex_owner
 
-int  spl_mutex_init(void);
-void spl_mutex_fini(void);
+void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc);
+void spl_mutex_destroy(kmutex_t *mp);
+void spl_mutex_enter(kmutex_t *mp);
+void spl_mutex_exit(kmutex_t *mp);
+int  spl_mutex_tryenter(kmutex_t *mp);
+int  spl_mutex_owned(kmutex_t *mp);
+struct thread *spl_mutex_owner(kmutex_t *mp);
+
+int  spl_mutex_subsystem_init(void);
+void spl_mutex_subsystem_fini(void);
 
 #endif
 

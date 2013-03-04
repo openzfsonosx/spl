@@ -29,20 +29,19 @@
 #include <sys/errno.h>
 
 
-#ifndef __APPLE__
 void
-cv_init(kcondvar_t *cvp, char *name, kcv_type_t type, void *arg)
+spl_cv_init(kcondvar_t *cvp, char *name, kcv_type_t type, void *arg)
 {
     cvp->cv_waiters = 0;
 }
 
 void
-cv_destroy(kcondvar_t *cvp)
+spl_cv_destroy(kcondvar_t *cvp)
 {
 }
 
 void
-cv_signal(kcondvar_t *cvp)
+spl_cv_signal(kcondvar_t *cvp)
 {
     if (cvp->cv_waiters > 0) {
         wakeup_one((caddr_t)cvp);
@@ -51,7 +50,7 @@ cv_signal(kcondvar_t *cvp)
 }
 
 void
-cv_broadcast(kcondvar_t *cvp)
+spl_cv_broadcast(kcondvar_t *cvp)
 {
     if (cvp->cv_waiters > 0) {
         wakeup((caddr_t)cvp);
@@ -65,7 +64,7 @@ cv_broadcast(kcondvar_t *cvp)
  * release the associated mutex while blocked.
  */
 void
-_cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg)
+spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg)
 {
     if (msg != NULL && msg[0] == '&')
         ++msg;  /* skip over '&' prefixes */
@@ -77,8 +76,6 @@ _cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg)
     mp->m_owner = current_thread();
 }
 
-#endif
-
 /*
  * Same as cv_wait except the thread will unblock at 'tim'
  * (an absolute time) if it hasn't already unblocked.
@@ -87,7 +84,7 @@ _cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg)
  * when it was unblocked.
  */
 int
-_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, const char *msg)
+spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, const char *msg)
 {
     struct timespec ts;
     int result;
