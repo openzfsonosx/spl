@@ -378,7 +378,7 @@
 #include <sys/callb.h>
 #include <sys/systm.h>
 #include <sys/cmn_err.h>
-#include <sys/debug.h>
+#include <spl-debug.h>
 #include <sys/vmsystm.h>	/* For throttlefree */
 #include <sys/sysmacros.h>
 #include <sys/cpuvar.h>

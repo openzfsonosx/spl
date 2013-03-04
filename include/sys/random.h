@@ -30,14 +30,14 @@
 #include_next <sys/random.h>
 
 
-static __inline__ int
+static inline int
 random_get_bytes(uint8_t *ptr, size_t len)
 {
     read_random(ptr, len);
 	return 0;
 }
 
-static __inline__ int
+static inline int
 random_get_pseudo_bytes(uint8_t *ptr, size_t len)
 {
     read_random(ptr, len);

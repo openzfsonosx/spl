@@ -38,8 +38,8 @@
 #define USEC_PER_SEC    1000000         /* microseconds per second */
 
 /* Open Solaris lbolt is in hz */
-static __inline uint64_t
-zfs_lbolt()
+static inline uint64_t
+zfs_lbolt(void)
 {
     struct timeval tv;
     uint64_t lbolt_hz;

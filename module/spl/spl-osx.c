@@ -31,7 +31,7 @@
  */
 
 
-#include <sys/debug.h>
+#include <spl-debug.h>
 #include <sys/kmem.h>
 
 #include <sys/systm.h>

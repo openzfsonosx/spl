@@ -46,16 +46,19 @@
 
 #include <spl-debug.h>
 
-#ifdef NDEBUG /* Debugging Disabled */
+#ifndef DEBUG /* Debugging Disabled */
 
 /* Define SPL_DEBUG_STR to make clear which ASSERT definitions are used */
 #define SPL_DEBUG_STR	""
 
+#if 0
 #define PANIC(fmt, a...)						\
 do {									\
 	printk(KERN_EMERG fmt, ## a);					\
 	spl_debug_bug(__FILE__, __FUNCTION__, __LINE__, 0);		\
 } while (0)
+#endif
+#define	PANIC panic
 
 #define __ASSERT(x)			((void)0)
 #define ASSERT(x)			((void)0)
