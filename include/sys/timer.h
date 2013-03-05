@@ -52,8 +52,10 @@ zfs_lbolt(void)
 #define lbolt zfs_lbolt()
 #define lbolt64 zfs_lbolt()
 
-#define        ddi_get_lbolt()         (gethrtime() >> 23)
-#define        ddi_get_lbolt64()       (gethrtime() >> 23)
+//#define        ddi_get_lbolt()         (gethrtime() >> 23)
+//#define        ddi_get_lbolt64()       (gethrtime() >> 23)
+#define        ddi_get_lbolt()         (zfs_lbolt())
+#define        ddi_get_lbolt64()       (zfs_lbolt())
 
 extern void delay(clock_t ticks);
 
