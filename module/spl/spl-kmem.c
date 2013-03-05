@@ -126,6 +126,10 @@ zfs_kmem_alloc(size_t size, int kmflags)
     if (p && (kmflags & KM_ZERO))
         bzero(p, size);
 
+    if (!p) {
+        printf("[spl] kmem_alloc(%llu) failed: \n",size);
+    }
+
 	return (p);
 }
 

@@ -82,15 +82,15 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     len = sizeof(total_memory);
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
 
-    physmem = total_memory; // FIXME obviously
+    physmem = total_memory / PAGE_SIZE;
 
     spl_kmem_init();
     spl_mutex_subsystem_init();
     spl_rwlock_init();
     spl_taskq_init();
 
-    IOLog("SPL: Loaded module v0.01 (ncpu %d, memsize %llu)\n",
-          max_ncpus, total_memory);
+    IOLog("SPL: Loaded module v0.01 (ncpu %d, memsize %llu, pages %llu)\n",
+          max_ncpus, total_memory, physmem);
     return KERN_SUCCESS;
 }
 

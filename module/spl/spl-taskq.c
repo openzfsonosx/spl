@@ -949,11 +949,17 @@ taskq_init_ent(taskq_ent_t *t)
 }
 
 
+/*
+ *
+ * This function is broken, and is currently what fails when we
+ * try to create a pool
+ *
+ */
 void
 taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
    taskq_ent_t *tqe)
 {
-#ifdef NOTYET /* copied and pasted from taskq_dispatch */
+    //#ifdef NOTYET /* copied and pasted from taskq_dispatch */
 	taskq_bucket_t *bucket = NULL;	/* Which bucket needs extension */
 	taskq_ent_t *tqe1;
 
@@ -974,7 +980,7 @@ taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
 
 		TQ_ENQUEUE(tq, tqe, func, arg);
 		mutex_exit(&tq->tq_lock);
-		return ((taskqid_t)tqe);
+		return;
 	}
 
 	/*
@@ -984,7 +990,7 @@ taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
 	TASKQ_D_RANDOM_DISPATCH_FAILURE(tq, flags);
 
 	if ((tqe = taskq_bucket_dispatch(tq->tq_buckets, func, arg)) != NULL)
-		return ((taskqid_t)tqe);	/* Fastpath */
+		return;	/* Fastpath */
 	bucket = tq->tq_buckets;
 
 	/*
@@ -1007,7 +1013,7 @@ taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
 		taskq_bucket_extend(bucket);
 		TQ_STAT(bucket, tqs_disptcreates);
 		if ((tqe = taskq_bucket_dispatch(bucket, func, arg)) != NULL)
-			return ((taskqid_t)tqe);
+			return;
 	}
 
 	ASSERT(bucket != NULL);
@@ -1036,8 +1042,8 @@ taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
 	}
 	mutex_exit(&tq->tq_lock);
 
-	return ((taskqid_t)tqe);
-#endif
+	return;
+    //#endif
 }
 
 

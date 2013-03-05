@@ -99,11 +99,6 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, const char *msg)
         ts.tv_sec = 1;
 #endif
 
-    if (ts.tv_sec > 10) {
-        printf("[spl] spl_cv_timedwait silly wait %d ignored\n", ts.tv_sec);
-        ts.tv_sec = 10;
-    }
-
     ++cvp->cv_waiters;
 
     mp->m_owner = NULL;

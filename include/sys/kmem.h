@@ -137,14 +137,15 @@ int kmem_debugging(void);
 void *calloc(size_t n, size_t s);
 
 #define	vmem_alloc(size, vmflag)	zfs_kmem_alloc((size), (vmflag))
+#define vmem_zalloc(sz, fl)         zfs_kmem_alloc((sz), (fl)|M_ZERO)
 #define	vmem_free(vaddr, size)		zfs_kmem_free((vaddr), (size))
-#define kmem_alloc(size, kmflags)       zfs_kmem_alloc((size), (kmflags))
-#define kmem_zalloc(size, kmflags)      zfs_kmem_alloc((size), (kmflags) | M_ZERO)
-#define kmem_free(buf, size)            zfs_kmem_free((buf), (size))
+
+#define kmem_alloc(size, kmflags)   zfs_kmem_alloc((size), (kmflags))
+#define kmem_zalloc(size, kmflags)  zfs_kmem_alloc((size), (kmflags) | M_ZERO)
+#define kmem_free(buf, size)        zfs_kmem_free((buf), (size))
 
 #define kmem_cache_set_move(cache, movefunc)    do { } while (0)
 
-#define vmem_zalloc(sz, fl)   kmem_alloc((sz), (fl))
 
 extern void *zfs_kmem_zalloc(size_t size, int kmflags);
 extern char *kmem_asprintf(const char *fmt, ...);

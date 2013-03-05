@@ -30,6 +30,7 @@
 uid_t
 crgetuid(const cred_t *cr)
 {
+    if (!cr) return 0;
 	return kauth_cred_getuid((kauth_cred_t)cr);
 }
 
@@ -38,6 +39,7 @@ crgetuid(const cred_t *cr)
 uid_t
 crgetruid(const cred_t *cr)
 {
+    if (!cr) return 0;
 	return kauth_cred_getruid((kauth_cred_t)cr);
 }
 
@@ -45,6 +47,7 @@ crgetruid(const cred_t *cr)
 uid_t
 crgetsuid(const cred_t *cr)
 {
+    if (!cr) return 0;
 	return kauth_cred_getsvuid((kauth_cred_t)cr);
 }
 
@@ -52,6 +55,7 @@ crgetsuid(const cred_t *cr)
 uid_t
 crgetfsuid(const cred_t *cr)
 {
+    if (!cr) return 0;
 	return -1;
 }
 
@@ -59,6 +63,7 @@ crgetfsuid(const cred_t *cr)
 gid_t
 crgetgid(const cred_t *cr)
 {
+    if (!cr) return 0;
     return kauth_cred_getgid((kauth_cred_t)cr);
 }
 
@@ -66,6 +71,7 @@ crgetgid(const cred_t *cr)
 gid_t
 crgetrgid(const cred_t *cr)
 {
+    if (!cr) return 0;
     return kauth_cred_getrgid((kauth_cred_t)cr);
 }
 
@@ -73,6 +79,7 @@ crgetrgid(const cred_t *cr)
 gid_t
 crgetsgid(const cred_t *cr)
 {
+    if (!cr) return 0;
     return kauth_cred_getsvgid((kauth_cred_t)cr);
 }
 
