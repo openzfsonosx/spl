@@ -108,7 +108,7 @@ sanitize_flags(struct task_struct *p, gfp_t *flags)
 #define KM_NOSLEEP              M_NOWAIT
 #define KM_ZERO                 M_ZERO
 #define KM_NODEBUG              0
-#define KMC_NODEBUG             UMA_ZONE_NODUMP
+#define    KMC_NODEBUG     0x00020000
 #define KMC_NOTOUCH             0
 
 typedef struct kmem_cache {
