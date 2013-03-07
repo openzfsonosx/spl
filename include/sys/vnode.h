@@ -335,7 +335,9 @@ chklock(struct vnode *vp, int iomode, unsigned long long offset, ssize_t len, in
 extern struct vnode *rootvnode;
 #define getrootdir()  rootvnode
 #else
-static inline struct vnode *getrootdir() {
+static inline struct vnode *
+getrootdir(void)
+{
         struct vnode *rvnode = vfs_rootvnode();
         if (rvnode)
                 vnode_put(rvnode);

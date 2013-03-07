@@ -61,15 +61,8 @@ typedef void (*thread_func_t)(void *);
 #define thread_join(t)			VERIFY(0)
 
 #define	thread_create spl_thread_create
-extern kthread_t *spl_thread_create(
-                                caddr_t         stk,
-                                size_t          stksize,
-                                void            (*proc)(),
-                                void            *arg,
-                                size_t          len,
-                                proc_t          *pp,
-                                int             state,
-                                pri_t           pri);
+extern kthread_t *spl_thread_create(caddr_t stk, size_t stksize,
+    void (*proc)(void), void *arg, size_t len, proc_t *pp, int state, pri_t pri);
 #define	thread_exit spl_thread_exit
 extern void spl_thread_exit(void);
 

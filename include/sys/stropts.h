@@ -86,9 +86,7 @@ strpbrk(const char *s, const char *b)
 
 
 static inline char *
-strrchr(p, ch)
-     const char *p;
-     int ch;
+strrchr(const char *p, int ch)
 {
     union {
         const char *cp;
