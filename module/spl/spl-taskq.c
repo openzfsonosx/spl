@@ -383,6 +383,7 @@
 #include <sys/sysmacros.h>
 #include <sys/cpuvar.h>
 #include <sys/sdt.h>
+#include <libkern/libkern.h>
 
 
 static kmem_cache_t *taskq_ent_cache, *taskq_cache;
@@ -1142,12 +1143,20 @@ taskq_member(taskq_t *tq, kthread_t *thread)
 {
 	int i;
 
+    mutex_enter(&tq->tq_lock);
 	if (tq->tq_thread != NULL) /* nthreads==1 case */
-		return (tq->tq_thread == thread);
+		if (tq->tq_thread == thread) {
+            mutex_exit(&tq->tq_lock);
+            return 1;
+        }
 
 	for (i = 0;i < tq->tq_nthreads; i++)
-		if (tq->tq_threadlist[i] == thread)
+		if (tq->tq_threadlist[i] == thread) {
+            printf("[spl] member true %d\n", 1);
+            mutex_exit(&tq->tq_lock);
 			return (1);
+        }
+    mutex_exit(&tq->tq_lock);
 	return (0);
 }
 
@@ -1363,7 +1372,8 @@ taskq_create(const char *name, int nthreads, pri_t pri, int minalloc,
 	uint_t bsize;	/* # of buckets - always power of 2 */
 
 	tq = kmem_cache_alloc(taskq_cache, KM_SLEEP);
-	bzero(tq, sizeof(*tq));
+
+    tq->tq_thread = NULL;
 
 	bsize = 1;
 
