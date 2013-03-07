@@ -444,7 +444,7 @@ int taskq_search_depth = TASKQ_SEARCH_DEPTH;
  * Static functions.
  */
 static void taskq_thread(void *);
-static void taskq_d_thread(taskq_ent_t *);
+static void taskq_d_thread(void *);
 static void taskq_bucket_extend(void *);
 static int  taskq_constructor(void *, void *, int);
 static void taskq_destructor(void *, void *);
@@ -1140,12 +1140,12 @@ taskq_resume(taskq_t *tq)
 int
 taskq_member(taskq_t *tq, kthread_t *thread)
 {
-#ifdef __APPLE__
-	/* XXX - TBD... */
-	return (1);
-#else
-	return (thread->t_taskq == tq);
-#endif
+	int i;
+
+	for (i = 0;i < tq->tq_nthreads; i++)
+		if (tq->tq_threadlist[i] == thread)
+			return (1);
+	return (0);
 }
 
 /*
@@ -1202,8 +1202,9 @@ taskq_thread(void *arg)
  * Worker per-entry thread for dynamic dispatches.
  */
 static void
-taskq_d_thread(taskq_ent_t *tqe)
+taskq_d_thread(void *arg)
 {
+	taskq_ent_t	*tqe = (taskq_ent_t *)arg;
 	taskq_bucket_t	*bucket = tqe->tqent_bucket;
 	taskq_t		*tq = bucket->tqbucket_taskq;
 	kmutex_t	*lock = &bucket->tqbucket_lock;
@@ -1399,13 +1400,6 @@ taskq_create(const char *name, int nthreads, pri_t pri, int minalloc,
 	if (nthreads == 1) {
 		tq->tq_thread = thread_create(NULL, 0, taskq_thread, tq,
 		    0, &p0, TS_RUN, pri);
-		/*
-		 * No need to take thread_lock to change the field: no one can
-		 * reference it at this point.
-		 */
-#ifndef __APPLE__
-		tq->tq_thread->t_taskq = tq;
-#endif
 	} else {
 		kthread_t **tpp = kmem_alloc(sizeof (kthread_t *) * nthreads,
 		    KM_SLEEP);
@@ -1416,9 +1410,6 @@ taskq_create(const char *name, int nthreads, pri_t pri, int minalloc,
 		while (nthreads-- > 0) {
 			*tpp = thread_create(NULL, 0, taskq_thread, tq,
 			    0, &p0, TS_RUN, pri);
-#ifndef __APPLE__
-			(*tpp)->t_taskq = tq;
-#endif
 			tpp++;
 		}
 		mutex_exit(&tq->tq_lock);
