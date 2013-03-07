@@ -344,6 +344,18 @@ dnl # Enable if the SPL should be compiled with internal debugging enabled.
 dnl # By default this support is disabled.
 dnl #
 AC_DEFUN([SPL_AC_DEBUG], [
+	AC_MSG_CHECKING([whether strict compile is enabled])
+	AC_ARG_ENABLE([strict-compile],
+		[AS_HELP_STRING([--enable-strict-compile],
+		[Enable strict compile checking @<:@default=no@:>@])],
+		[strict_compile=yes],
+		[strict_compile=no])
+	AS_IF([test "x$strict_compile" = xyes],
+	[
+		DEBUG_CFLAGS="${DEBUG_CFLAGS} -Werror"
+	])
+	AC_MSG_RESULT([$strict_compile])
+
 	AC_MSG_CHECKING([whether debugging is enabled])
 	AC_ARG_ENABLE([debug],
 		[AS_HELP_STRING([--enable-debug],
@@ -353,8 +365,8 @@ AC_DEFUN([SPL_AC_DEBUG], [
 
 	AS_IF([test "x$enable_debug" = xyes],
 	[
-		KERNELCPPFLAGS="${KERNELCPPFLAGS} -DDEBUG -Werror"
-		DEBUG_CFLAGS="-DDEBUG -Werror"
+		KERNELCPPFLAGS="${KERNELCPPFLAGS} -DDEBUG"
+		DEBUG_CFLAGS="-DDEBUG"
 		DEBUG_SPL="_with_debug"
 	], [
 		DEBUG_CFLAGS=""
