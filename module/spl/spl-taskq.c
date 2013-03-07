@@ -1142,6 +1142,9 @@ taskq_member(taskq_t *tq, kthread_t *thread)
 {
 	int i;
 
+	if (tq->tq_thread != NULL) /* nthreads==1 case */
+		return (tq->tq_thread == thread);
+
 	for (i = 0;i < tq->tq_nthreads; i++)
 		if (tq->tq_threadlist[i] == thread)
 			return (1);
@@ -1356,10 +1359,11 @@ taskq_t *
 taskq_create(const char *name, int nthreads, pri_t pri, int minalloc,
     int maxalloc, uint_t flags)
 {
-	taskq_t *tq = kmem_cache_alloc(taskq_cache, KM_SLEEP);
+	taskq_t *tq;
 	uint_t bsize;	/* # of buckets - always power of 2 */
 
-	ASSERT(tq->tq_buckets == NULL);
+	tq = kmem_cache_alloc(taskq_cache, KM_SLEEP);
+	bzero(tq, sizeof(*tq));
 
 	bsize = 1;
 
