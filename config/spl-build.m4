@@ -61,7 +61,7 @@ AC_DEFUN([SPL_AC_KERNEL], [
 
 	AC_MSG_CHECKING([kernel source directory])
 	AS_IF([test -d "/System/Library/Frameworks/Kernel.framework"], [
-		kernelsrc="/System/Library/Frameworks/Kernel.framekwork"
+		kernelsrc="/System/Library/Frameworks/Kernel.framework"
 	], [
 		AC_MSG_RESULT([Not found])
 		AC_MSG_ERROR([
@@ -71,7 +71,7 @@ AC_DEFUN([SPL_AC_KERNEL], [
 	kernelbuild=${kernelsrc}
 
 	AC_MSG_CHECKING([kernel source version])
-	kenrsrcver=`uname -r`
+	kernsrcver=`uname -r`
 	AC_MSG_RESULT([$kernsrcver])
 
 	LINUX=${kernelsrc}
