@@ -9,9 +9,6 @@
 AC_DEFUN([SPL_AC_CONFIG_KERNEL], [
 	SPL_AC_KERNEL
 
-	if test "${LINUX_OBJ}" != "${LINUX}"; then
-		KERNELMAKE_PARAMS="$KERNELMAKE_PARAMS O=$LINUX_OBJ"
-	fi
 	AC_SUBST(KERNELMAKE_PARAMS)
 
 	KERNELCPPFLAGS="$KERNELCPPFLAGS -Wstrict-prototypes"
@@ -24,65 +21,41 @@ AC_DEFUN([SPL_AC_CONFIG_KERNEL], [
 	SPL_AC_TEST_MODULE
 ])
 
-AC_DEFUN([SPL_AC_MODULE_SYMVERS], [
-	modpost=$LINUX/scripts/Makefile.modpost
-	AC_MSG_CHECKING([kernel file name for module symbols])
-	if test "x$enable_linux_builtin" != xyes -a -f "$modpost"; then
-		if grep -q Modules.symvers $modpost; then
-			LINUX_SYMBOLS=Modules.symvers
-		else
-			LINUX_SYMBOLS=Module.symvers
-		fi
-
-		if ! test -f "$LINUX_OBJ/$LINUX_SYMBOLS"; then
-			AC_MSG_ERROR([
-	*** Please make sure the kernel devel package for your distribution
-	*** is installed.  If your building with a custom kernel make sure the
-	*** kernel is configured, built, and the '--with-linux=PATH' configure
-	*** option refers to the location of the kernel source.])
-		fi
-	else
-		LINUX_SYMBOLS=NONE
-	fi
-	AC_MSG_RESULT($LINUX_SYMBOLS)
-	AC_SUBST(LINUX_SYMBOLS)
-])
-
 AC_DEFUN([SPL_AC_KERNEL], [
-	AC_ARG_WITH([linux],
-		AS_HELP_STRING([--with-linux=PATH],
-		[Path to kernel source]),
-		[kernelsrc="$withval"])
-
-	AC_ARG_WITH([linux-obj],
-		AS_HELP_STRING([--with-linux-obj=PATH],
-		[Path to kernel build objects]),
-		[kernelbuild="$withval"])
-
-	AC_MSG_CHECKING([kernel source directory])
-	AS_IF([test -d "/System/Library/Frameworks/Kernel.framework"], [
-		kernelsrc="/System/Library/Frameworks/Kernel.framework"
-	], [
-		AC_MSG_RESULT([Not found])
-		AC_MSG_ERROR([
-	*** Your OS X install doesn't have Kernel.framework!])
+	AC_ARG_WITH([kernel-modprefix],
+		AS_HELP_STRING([--with-kernel-modprefix=PATH],
+		[Path to kernel module prefix]),
+		[KERNEL_MODPREFIX="$withval"])
+	AC_MSG_CHECKING([kernel module prefix])
+	AS_IF([test -z "$KERNEL_MODPREFIX"], [
+		KERNEL_MODPREFIX="/System/Library/Extensions"
 	])
-	AC_MSG_RESULT([$kernelsrc])
-	kernelbuild=${kernelsrc}
+	AC_MSG_RESULT([$KERNEL_MODPREFIX])
+
+	AC_ARG_WITH([kernel-headers],
+		AS_HELP_STRING([--with-kernel-headers=PATH],
+		[Path to kernel source]),
+		[KERNEL_HEADERS="$withval"])
+
+	AC_MSG_CHECKING([kernel header directory])
+	AS_IF([test -z "$KERNEL_HEADERS"], [
+		AS_IF([test -d "/System/Library/Frameworks/Kernel.framework"], [
+			KERNEL_HEADERS="/System/Library/Frameworks/Kernel.framework"
+		])
+	])
+	AS_IF([test ! -d "$KERNEL_HEADERS/Headers/IOKit"], [
+		AC_MSG_RESULT([Not found])
+		AC_MSG_ERROR([*** Kernel header directory not found!])
+	])
+	AC_MSG_RESULT([$KERNEL_HEADERS])
 
 	AC_MSG_CHECKING([kernel source version])
-	kernsrcver=`uname -r`
-	AC_MSG_RESULT([$kernsrcver])
+	KERNEL_VERSION=`uname -r`
+	AC_MSG_RESULT([$KERNEL_VERSION])
 
-	LINUX=${kernelsrc}
-	LINUX_OBJ=${kernelbuild}
-	LINUX_VERSION=${kernsrcver}
-
-	AC_SUBST(LINUX)
-	AC_SUBST(LINUX_OBJ)
-	AC_SUBST(LINUX_VERSION)
-
-	SPL_AC_MODULE_SYMVERS
+	AC_SUBST(KERNEL_HEADERS)
+	AC_SUBST(KERNEL_MODPREFIX)
+	AC_SUBST(KERNEL_VERSION)
 ])
 
 dnl #
@@ -479,7 +452,7 @@ AC_DEFUN([SPL_CHECK_SYMBOL_HEADER], [
 	AC_MSG_CHECKING([whether symbol $1 exists in header])
 	header=0
 	for file in $3; do
-		grep -q "$2" "$LINUX/$file" 2>/dev/null
+		grep -q "$2" "$KERNEL_HEADERS/$file" 2>/dev/null
 		rc=$?
 		if test $rc -eq 0; then
 			header=1

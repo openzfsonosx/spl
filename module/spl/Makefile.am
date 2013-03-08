@@ -14,8 +14,8 @@ CFLAGS_KMOD = \
 	-DAPPLE \
 	-DNeXT \
 	-I$(top_srcdir)/include \
-	-I/System/Library/Frameworks/Kernel.framework/PrivateHeaders \
-	-I/System/Library/Frameworks/Kernel.framework/Headers
+	-I@KERNEL_HEADERS@/PrivateHeaders \
+	-I@KERNEL_HEADERS@/Headers
 
 LINKFLAGS_KMOD = \
 	-Xlinker \
@@ -52,6 +52,8 @@ spl_SOURCES = \
 spl_CPPFLAGS=$(CFLAGS_KMOD)
 spl_LDFLAGS=$(LINKFLAGS_KMOD)
 
+KERNEL_MODDIR=	$(DESTDIR)@KERNEL_MODPREFIX@/spl.kext
+
 dist_noinst_DATA = $(PLIST_STRING) $(INFO_PLIST)
 
 spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
@@ -63,12 +65,13 @@ spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	@kextlibs -undef-symbols -xml spl.kext/
 
 install-exec-local: spl.kext
-	rm -rf /System/Library/Extensions/spl.kext
-	rsync -r spl.kext/ /System/Library/Extensions/spl.kext/
-	chown -R root:wheel /System/Library/Extensions/spl.kext/
+	rm -rf $(KERNEL_MODDIR)
+	mkdir -p $(KERNEL_MODDIR)
+	rsync -r spl.kext/ $(KERNEL_MODDIR)
+	chown -R root:wheel $(KERNEL_MODDIR)
 	@echo
-	@echo "To load module: kextload -v /System/Library/Extensions/spl.kext"
-	@echo "To uninstall module: rm -rf /System/Library/Extensions/spl.kext"
+	@echo "To load module: kextload -v $(KERNEL_MODDIR)"
+	@echo "To uninstall module: rm -rf $(KERNEL_MODDIR)"
 	@echo
 
 uninstall-am:

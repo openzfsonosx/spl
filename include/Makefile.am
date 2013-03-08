@@ -16,7 +16,7 @@ noinst_HEADERS += $(top_srcdir)/include/vm/*.h
 
 install-data-local:
 	release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \
-	instdest=$(DESTDIR)/usr/src/spl-$$release/$(LINUX_VERSION); \
+	instdest=$(DESTDIR)/usr/src/spl-$$release/$(KERNEL_VERSION); \
 	instfiles=`find . -name '*.h'`; \
 	for instfile in $$instfiles; do \
 		parentdir=`dirname $$instdest/$$instfile`; \
@@ -26,5 +26,5 @@ install-data-local:
 
 uninstall-local:
 	release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \
-	instdest=$(DESTDIR)/usr/src/spl-$$release/$(LINUX_VERSION); \
+	instdest=$(DESTDIR)/usr/src/spl-$$release/$(KERNEL_VERSION); \
 	$(RM) -R $$instdest
