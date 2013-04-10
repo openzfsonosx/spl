@@ -395,9 +395,6 @@ static kmem_cache_t *taskq_ent_cache, *taskq_cache;
 static vmem_t *taskq_id_arena;
 #endif
 
-/* Global system task queue for common use */
-taskq_t	*system_taskq;
-
 /*
  * Maxmimum number of entries in global system taskq is
  * 	system_taskq_size * max_ncpus
@@ -681,6 +678,7 @@ taskq_ent_destructor(void *buf, void *cdrarg)
 #endif /*__APPLE*/
 }
 
+
 int
 spl_taskq_init(void)
 {
@@ -690,7 +688,6 @@ spl_taskq_init(void)
 
 	taskq_cache = kmem_cache_create("taskq_cache", sizeof (taskq_t),
 	    0, taskq_constructor, taskq_destructor, NULL, NULL, NULL, 0);
-
     return 0;
 }
 
@@ -1152,7 +1149,6 @@ taskq_member(taskq_t *tq, kthread_t *thread)
 
 	for (i = 0;i < tq->tq_nthreads; i++)
 		if (tq->tq_threadlist[i] == thread) {
-            printf("[spl] member true %d\n", 1);
             mutex_exit(&tq->tq_lock);
 			return (1);
         }
@@ -1774,4 +1770,7 @@ taskq_d_kstat_update(kstat_t *ksp, int rw)
 	}
 return (0);
 }
+
+
+
 #endif
