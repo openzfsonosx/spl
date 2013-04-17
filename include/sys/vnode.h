@@ -188,6 +188,18 @@ typedef enum vtype {
 typedef struct vnode_attr vattr;
 typedef struct vnode_attr vattr_t;
 
+/* vsa_mask values */
+#define VSA_ACL                 0x0001
+#define VSA_ACLCNT              0x0002
+#define VSA_DFACL               0x0004
+#define VSA_DFACLCNT            0x0008
+#define VSA_ACE                 0x0010
+#define VSA_ACECNT              0x0020
+#define VSA_ACE_ALLTYPES        0x0040
+#define VSA_ACE_ACLFLAGS        0x0080  /* get/set ACE ACL flags */
+
+
+
 #if 0
 typedef struct vattr {
 	enum vtype	va_type;	/* vnode type */

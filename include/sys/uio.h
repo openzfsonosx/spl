@@ -117,8 +117,23 @@ typedef struct xuio {
 #define XUIO_XUZC_RW(xuio)	xuio->xu_ext.xu_zc.xu_zc_rw
 
 
+/*
+ * same as uiomove() but doesn't modify uio structure.
+ * return in cbytes how many bytes were copied.
+ */
+static inline int uiocopy(void *p, size_t n, enum uio_rw rw, struct uio *uio, size_t *cbytes) \
+{                                                \
+    int result;                                  \
+    struct uio *nuio = uio_duplicate(uio);       \
+    if (!nuio) return ENOMEM;                    \
+    result = uiomove(p,n,nuio);                  \
+    uio_free(nuio);                              \
+    return result;                               \
+}
+
+
 // Apple's uiomove puts the uio_rw in uio_create
 #define uiomove(A,B,C,D) uiomove((A),(B),(D))
-
+#define uioskip(A,B)     uio_update((A), (B))
 
 #endif /* SPL_UIO_H */
