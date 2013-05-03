@@ -46,6 +46,7 @@ struct krwlock {
     uint32_t   rw_lock[4];   /* opaque lck_rw_t data */
     void       *rw_owner;    /* writer (exclusive) lock only */
     int        rw_readers;   /* reader lock only */
+    int        rw_pad;       /* */
 };
 typedef struct krwlock  krwlock_t;
 

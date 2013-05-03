@@ -21,14 +21,22 @@ typedef enum {
 // Does anyone know where lck_mtx_t; is actually defined? Not just the opaque
 // typedef in i386/locks.h ?
 typedef struct {
-        unsigned long           opaque[3];
+        uint32_t  opaque[3];
 } mutex_t;
 
-
+/*
+ * Solaris kmutex defined.
+ *
+ * and is embedded into ZFS structures (see dbuf) so we need to match the
+ * size carefully. It appears to be 32 bytes. Or rather, it needs to be
+ * aligned.
+ */
 typedef struct kmutex {
     void           *m_owner;
     boolean_t       initialized;
-    mutex_t         m_lock[1];  // should be lck_mtx_t ?
+    //mutex_t         m_lock[1];  // should be lck_mtx_t ?
+    lck_mtx_t *m_lock;
+    uint8_t m_padding[6];
 } kmutex_t;
 
 extern lck_attr_t     *zfs_lock_attr;

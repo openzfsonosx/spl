@@ -114,29 +114,6 @@ OSIncrementAtomic64(volatile SInt64 *address)
 
 
 
-uint32_t
-atomic_cas_32(volatile uint32_t *target, uint32_t cmp, uint32_t new)
-{
-	uint32_t old = *target;
-
-	OSCompareAndSwap( cmp, new, (volatile UInt32 *)target );
-	return old;
-}
-
-/*
- * This operation is not thread-safe and the user must
- * protect it my some other means.  The only known caller
- * is zfs_vnop_write() and the value is protected by the
- * znode's mutex.
- */
-uint64_t
-atomic_cas_64(volatile uint64_t *target, uint64_t cmp, uint64_t new)
-{
-	uint64_t old = *target;
-	if (old == cmp)
-		*target = new;
-	return (old);
-}
 
 void *
 atomic_cas_ptr(volatile void *target, void *cmp, void *new)
@@ -152,7 +129,7 @@ atomic_cas_ptr(volatile void *target, void *cmp, void *new)
 }
 
 
-
+#if 0
 SInt32 atomic_inc_32_nv(volatile SInt32 *addr)
 {
 	SInt64 value = OSIncrementAtomic(addr);
@@ -164,7 +141,56 @@ SInt32 atomic_dec_32_nv(volatile SInt32 *addr)
 	SInt64 value = OSDecrementAtomic(addr);
     return value-1;
 }
+/*
+ * This operation is not thread-safe and the user must
+ * protect it my some other means.  The only known caller
+ * is zfs_vnop_write() and the value is protected by the
+ * znode's mutex.
+ */
+uint64_t
+atomic_cas_64(volatile uint64_t *target, uint64_t cmp, uint64_t new)
+{
+	uint64_t old = *target;
+	if (old == cmp)
+		*target = new;
+	return (old);
+}
 
+uint32_t
+atomic_cas_32(volatile uint32_t *target, uint32_t cmp, uint32_t new)
+{
+	uint32_t old = *target;
+
+	OSCompareAndSwap( cmp, new, (volatile UInt32 *)target );
+	return old;
+}
+
+
+#else
+
+
+SInt32 atomic_inc_32_nv(volatile SInt32 *addr)
+{
+    return __sync_add_and_fetch((volatile uint32_t *)(addr), 1);
+}
+SInt32 atomic_dec_32_nv(volatile SInt32 *addr)
+{
+    return __sync_add_and_fetch((volatile uint32_t *)(addr), -1);
+}
+
+uint64_t
+atomic_cas_64(volatile uint64_t *target, uint64_t cmp, uint64_t new)
+{
+    return __sync_val_compare_and_swap(target, cmp, new);
+}
+
+uint32_t
+atomic_cas_32(volatile uint32_t *target, uint32_t cmp, uint32_t new)
+{
+    return __sync_val_compare_and_swap(target, cmp, new);
+}
+
+#endif
 
 
 void

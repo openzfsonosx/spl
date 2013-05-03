@@ -74,29 +74,45 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
     ASSERT(type != MUTEX_SPIN);
     ASSERT(ibc == NULL);
 
-    lck_mtx_init((lck_mtx_t *)&mp->m_lock[0],
-                 zfs_mutex_group, zfs_lock_attr);
+    if (mp->initialized == 1)  // Already initialized, leave it.
+        return;
+
+    //lck_mtx_init((lck_mtx_t *)&mp->m_lock[0],
+    //           zfs_mutex_group, zfs_lock_attr);
+    mp->m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
     mp->m_owner = NULL;
+    mp->initialized = 1;
 }
 
 void spl_mutex_destroy(kmutex_t *mp)
 {
-    lck_mtx_destroy((lck_mtx_t *)&mp->m_lock[0], zfs_mutex_group);
+    if (mp->initialized)
+        lck_mtx_free(mp->m_lock, zfs_mutex_group);
+    mp->initialized = 0;
+    //lck_mtx_destroy((lck_mtx_t *)&mp->m_lock[0], zfs_mutex_group);
 }
 
 void mutex_enter(kmutex_t *mp)
 {
+    if (mp->initialized!=1) {
+        printf("mutex_enter: not initialized %p, I'll do it now.\n",
+               mp);
+        spl_mutex_init(mp, "AutoInit", 0, NULL);
+    }
+
     if (mp->m_owner == current_thread())
         panic("mutex_enter: locking against myself!");
 
-    lck_mtx_lock((lck_mtx_t *)&mp->m_lock[0]);
+    //lck_mtx_lock((lck_mtx_t *)&mp->m_lock[0]);
+    lck_mtx_lock(mp->m_lock);
     mp->m_owner = current_thread();
 }
 
 void spl_mutex_exit(kmutex_t *mp)
 {
     mp->m_owner = NULL;
-    lck_mtx_unlock((lck_mtx_t *)&mp->m_lock[0]);
+    //lck_mtx_unlock((lck_mtx_t *)&mp->m_lock[0]);
+    lck_mtx_unlock(mp->m_lock);
 }
 
 
@@ -104,10 +120,17 @@ int spl_mutex_tryenter(kmutex_t *mp)
 {
     int held;
 
+    if (mp->initialized!=1) {
+        printf("mutex_enter: not initialized %p, I'll do it now.\n",
+               mp);
+        spl_mutex_init(mp, "AutoInit", 0, NULL);
+    }
+
     if (mp->m_owner == current_thread())
         panic("mutex_tryenter: locking against myself!");
 
-    held = lck_mtx_try_lock((lck_mtx_t *)&mp->m_lock[0]);
+    //held = lck_mtx_try_lock((lck_mtx_t *)&mp->m_lock[0]);
+    held = lck_mtx_try_lock(mp->m_lock);
     if (held)
         mp->m_owner = current_thread();
     return (held);

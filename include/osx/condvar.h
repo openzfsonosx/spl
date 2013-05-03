@@ -12,7 +12,8 @@ typedef enum {
 
 
 struct cv {
-        uint32_t   cv_waiters;
+    uint32_t   cv_waiters;
+    uint32_t   pad;
 };
 
 typedef struct cv  kcondvar_t;

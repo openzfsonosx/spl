@@ -72,7 +72,8 @@ spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg)
     ++cvp->cv_waiters;
 
     mp->m_owner = NULL;
-    (void) msleep(cvp, (lck_mtx_t *)&mp->m_lock[0], PRIBIO, msg, 0);
+    (void) msleep(cvp, (lck_mtx_t *)mp->m_lock, PRIBIO, msg, 0);
+    //(void) msleep(cvp, (lck_mtx_t *)&mp->m_lock[0], PRIBIO, msg, 0);
     mp->m_owner = current_thread();
 }
 
@@ -98,11 +99,14 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, const char *msg)
     if (ts.tv_sec < 1)
         ts.tv_sec = 1;
 #endif
+    if (ts.tv_sec > 1000)
+        printf("cv_timedwait: will wait %ds\n", ts.tv_sec);
 
     ++cvp->cv_waiters;
 
     mp->m_owner = NULL;
-    result = msleep(cvp, (lck_mtx_t *)&mp->m_lock[0], PRIBIO, msg, &ts);
+    //result = msleep(cvp, (lck_mtx_t *)&mp->m_lock[0], PRIBIO, msg, &ts);
+    result = msleep(cvp, mp->m_lock, PRIBIO, msg, &ts);
     mp->m_owner = current_thread();
 
     return (result == EWOULDBLOCK ? -1 : 0);
