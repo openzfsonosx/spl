@@ -66,11 +66,14 @@ uint64_t  total_memory;
 #define	_task_user_
 #include <IOKit/IOLib.h>
 
-
+/*
+ * Solaris delay is in ticks (hz) and Darwin uses microsecs
+ * 1 HZ is 10 milliseconds
+ */
 void
 osx_delay(int ticks)
 {
-	IODelay(ticks);
+	IODelay(ticks * 10000);
 }
 
 kern_return_t spl_start (kmod_info_t * ki, void * d)
