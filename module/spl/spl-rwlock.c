@@ -26,6 +26,7 @@
 
 #include <sys/rwlock.h>
 #include <kern/debug.h>
+#include <sys/atomic.h>
 
 extern lck_attr_t *zfs_lock_attr;
 static lck_grp_t  *zfs_rwlock_group = NULL;
@@ -53,7 +54,7 @@ rw_enter(krwlock_t *rwlp, krw_t rw)
 {
     if (rw == RW_READER) {
         lck_rw_lock_shared((lck_rw_t *)&rwlp->rw_lock[0]);
-        OSIncrementAtomic((volatile SInt32 *)&rwlp->rw_readers);
+        atomic_inc_32((volatile uint32_t *)&rwlp->rw_readers);
     } else {
         if (rwlp->rw_owner == current_thread())
             panic("rw_enter: locking against myself!");
@@ -76,7 +77,7 @@ rw_tryenter(krwlock_t *rwlp, krw_t rw)
         held = lck_rw_try_lock((lck_rw_t *)&rwlp->rw_lock[0],
                                LCK_RW_TYPE_SHARED);
         if (held)
-            OSIncrementAtomic((volatile SInt32 *)&rwlp->rw_readers);
+            atomic_inc_32((volatile uint32_t *)&rwlp->rw_readers);
     } else {
         if (rwlp->rw_owner == current_thread())
             panic("rw_tryenter: locking against myself!");
@@ -106,7 +107,7 @@ rw_exit(krwlock_t *rwlp)
         rwlp->rw_owner = NULL;
         lck_rw_unlock_exclusive((lck_rw_t *)&rwlp->rw_lock[0]);
     } else {
-        OSDecrementAtomic((volatile SInt32 *)&rwlp->rw_readers);
+        atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
         lck_rw_unlock_shared((lck_rw_t *)&rwlp->rw_lock[0]);
     }
 }
@@ -132,7 +133,7 @@ rw_downgrade(krwlock_t *rwlp)
 {
     rwlp->rw_owner = NULL;
     lck_rw_lock_exclusive_to_shared((lck_rw_t *)&rwlp->rw_lock[0]);
-    OSIncrementAtomic((volatile SInt32 *)&rwlp->rw_readers);
+    atomic_inc_32((volatile uint32_t *)&rwlp->rw_readers);
 }
 
 
