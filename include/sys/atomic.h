@@ -26,15 +26,15 @@
 /*
  * Increment target
  */
-static inline void atomic_inc_8(volatile int8_t *target)
+static inline void atomic_inc_8(volatile uint8_t *target)
 {
     __sync_fetch_and_add(target, 1);
 }
-static inline void atomic_inc_16(volatile int16_t *target)
+static inline void atomic_inc_16(volatile uint16_t *target)
 {
     __sync_fetch_and_add(target, 1);
 }
-static inline void atomic_inc_32(volatile int32_t *target)
+static inline void atomic_inc_32(volatile uint32_t *target)
 {
     __sync_fetch_and_add(target, 1);
 }
@@ -42,11 +42,11 @@ static inline void atomic_inc_64(volatile uint64_t *target)
 {
     __sync_fetch_and_add(target, 1);
 }
-static inline int32_t atomic_inc_32_nv(volatile int32_t *target)
+static inline int32_t atomic_inc_32_nv(volatile uint32_t *target)
 {
     return __sync_add_and_fetch(target, 1);
 }
-static inline int64_t atomic_inc_64_nv(volatile int64_t *target)
+static inline int64_t atomic_inc_64_nv(volatile uint64_t *target)
 {
     return __sync_add_and_fetch(target, 1);
 }
@@ -56,27 +56,27 @@ static inline int64_t atomic_inc_64_nv(volatile int64_t *target)
 /*
  * Decrement target
  */
-static inline void atomic_dec_8(volatile int8_t *target)
+static inline void atomic_dec_8(volatile uint8_t *target)
 {
     __sync_fetch_and_sub(target, 1);
 }
-static inline void atomic_dec_16(volatile int16_t *target)
+static inline void atomic_dec_16(volatile uint16_t *target)
 {
     __sync_fetch_and_sub(target, 1);
 }
-static inline void atomic_dec_32(volatile int32_t *target)
+static inline void atomic_dec_32(volatile uint32_t *target)
 {
     __sync_fetch_and_sub(target, 1);
 }
-static inline void atomic_dec_64(volatile int64_t *target)
+static inline void atomic_dec_64(volatile uint64_t *target)
 {
     __sync_fetch_and_sub(target, 1);
 }
-static inline int32_t atomic_dec_32_nv(volatile int32_t *target)
+static inline int32_t atomic_dec_32_nv(volatile uint32_t *target)
 {
     return __sync_sub_and_fetch(target, 1);
 }
-static inline int64_t atomic_dec_64_nv(volatile int64_t *target)
+static inline int64_t atomic_dec_64_nv(volatile uint64_t *target)
 {
     return __sync_sub_and_fetch(target, 1);
 }
@@ -148,17 +148,17 @@ atomic_sub_64_nv(volatile uint64_t *target, int64_t delta)
  * logical OR bits with target
  */
 static inline void
-atomic_or_8(volatile uint8_t *target, int8_t mask)
+atomic_or_8(volatile uint8_t *target, uint8_t mask)
 {
     __sync_or_and_fetch(target, mask);
 }
 static inline void
-atomic_or_16(volatile uint16_t *target, int16_t mask)
+atomic_or_16(volatile uint16_t *target, uint16_t mask)
 {
     __sync_or_and_fetch(target, mask);
 }
 static inline void
-atomic_or_32(volatile uint32_t *target, int32_t mask)
+atomic_or_32(volatile uint32_t *target, uint32_t mask)
 {
     __sync_or_and_fetch(target, mask);
 }
@@ -168,17 +168,17 @@ atomic_or_32(volatile uint32_t *target, int32_t mask)
  * logical AND bits with target
  */
 static inline void
-atomic_and_8(volatile uint8_t *target, int8_t mask)
+atomic_and_8(volatile uint8_t *target, uint8_t mask)
 {
     __sync_and_and_fetch(target, mask);
 }
 static inline void
-atomic_and_16(volatile uint16_t *target, int16_t mask)
+atomic_and_16(volatile uint16_t *target, uint16_t mask)
 {
     __sync_and_and_fetch(target, mask);
 }
 static inline void
-atomic_and_32(volatile uint32_t *target, int32_t mask)
+atomic_and_32(volatile uint32_t *target, uint32_t mask)
 {
     __sync_and_and_fetch(target, mask);
 }
