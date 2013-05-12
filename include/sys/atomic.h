@@ -76,6 +76,10 @@ static inline int32_t atomic_dec_32_nv(volatile int32_t *target)
 {
     return __sync_sub_and_fetch(target, 1);
 }
+static inline int64_t atomic_dec_64_nv(volatile int64_t *target)
+{
+    return __sync_sub_and_fetch(target, 1);
+}
 
 
 
@@ -134,7 +138,7 @@ atomic_sub_64(volatile uint64_t *target, int64_t delta)
     __sync_sub_and_fetch(target, delta);
 }
 static inline uint64_t
-atomic_dec_64_nv(volatile uint64_t *target, int64_t delta)
+atomic_sub_64_nv(volatile uint64_t *target, int64_t delta)
 {
     return  __sync_sub_and_fetch(target, delta);
 }
@@ -182,7 +186,7 @@ atomic_and_32(volatile uint32_t *target, int32_t mask)
 
 /*
  * Compare And Set
- * *arg1 == arg2, set *arg1 = arg3; return old value
+ * if *arg1 == arg2, then set *arg1 = arg3; return old value.
  */
 
 static inline uint8_t
