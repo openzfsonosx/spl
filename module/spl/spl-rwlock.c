@@ -55,10 +55,13 @@ rw_enter(krwlock_t *rwlp, krw_t rw)
     if (rw == RW_READER) {
         lck_rw_lock_shared((lck_rw_t *)&rwlp->rw_lock[0]);
         atomic_inc_32((volatile uint32_t *)&rwlp->rw_readers);
+        ASSERT(rwlp->rw_owner == 0);
     } else {
         if (rwlp->rw_owner == current_thread())
             panic("rw_enter: locking against myself!");
         lck_rw_lock_exclusive((lck_rw_t *)&rwlp->rw_lock[0]);
+        ASSERT(rwlp->rw_owner == 0);
+        ASSERT(rwlp->rw_readers == 0);
         rwlp->rw_owner = current_thread();
     }
 }
@@ -105,9 +108,11 @@ rw_exit(krwlock_t *rwlp)
 {
     if (rwlp->rw_owner == current_thread()) {
         rwlp->rw_owner = NULL;
+        ASSERT(rwlp->rw_readers == 0);
         lck_rw_unlock_exclusive((lck_rw_t *)&rwlp->rw_lock[0]);
     } else {
         atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
+        ASSERT(rwlp->rw_owner == 0);
         lck_rw_unlock_shared((lck_rw_t *)&rwlp->rw_lock[0]);
     }
 }
