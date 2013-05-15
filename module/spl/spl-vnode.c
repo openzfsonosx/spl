@@ -204,13 +204,15 @@ int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
 
 
 
+
+
+/*
+ * Security Policy
+ */
+
+
 int
-secpolicy_vnode_remove(const cred_t *cr)
-{
-    return (0);
-}
-int
-secpolicy_vnode_setid_retain(const cred_t *cred, boolean_t issuidroot)
+secpolicy_vnode_remove(struct vnode *vp, const cred_t *cr)
 {
     return (0);
 }
@@ -220,4 +222,48 @@ secpolicy_vnode_create_gid(const cred_t *cred)
 {
     return (0);
 }
+
+int secpolicy_vnode_setids_setgids(struct vnode *vp, const cred_t *cr,
+                                          gid_t gid)
+{
+    return 0;
+}
+
+
+int secpolicy_vnode_setdac(struct vnode *vp, const cred_t *cr, uid_t u)
+{
+    return 0;
+}
+
+int secpolicy_vnode_chown( struct vnode *vp, const cred_t *cr, uid_t u)
+{
+    return 0;
+}
+
+int secpolicy_vnode_setid_retain( struct vnode *vp, const cred_t *cr,
+                                  int fal)
+{
+    return 0;
+}
+
+int secpolicy_xvattr(struct vnode *dvp, vattr_t *vap, uid_t uid,
+                     const cred_t *cr, enum vtype ty)
+{
+    return 0;
+}
+
+int secpolicy_setid_clear(vattr_t *vap, struct vnode *vp,
+                          const cred_t *cr)
+{
+    return 0;
+}
+
+int secpolicy_basic_link(struct vnode *svp, const cred_t *cr)
+{
+    return 0;
+}
+
+
+
+
 

@@ -66,6 +66,14 @@
 #define O_DSYNC		O_SYNC
 #endif
 
+
+struct caller_context;
+typedef struct caller_context caller_context_t;
+typedef int vcexcl_t;
+
+enum vcexcl	{ NONEXCL, EXCL };
+
+
 #if 0
 #define FREAD		1
 #define FWRITE		2
@@ -94,6 +102,9 @@
 
 #define   DNLC_NO_VNODE (struct vnode *)(-1)
 
+
+#define IS_DEVVP(vp)    \
+        (vnode_ischr(vp) || vnode_isblk(vp) || vnode_isfifo(vp))
 
 #if 0
 /*
@@ -165,6 +176,8 @@ enum create     { CRCREAT, CRMKNOD, CRMKDIR };  /* reason for create */
 #define va_atime        va_access_time
 #define va_mtime        va_modify_time
 #define va_ctime        va_change_time
+#define va_crtime       va_create_time
+#define va_bytes        va_data_size
 
 
 
@@ -274,8 +287,18 @@ extern int  zfs_vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base,
 extern int vn_remove(char *fnamep, enum uio_seg seg, enum rm dirflag);
 extern int vn_rename(char *from, char *to, enum uio_seg seg);
 extern int secpolicy_vnode_create_gid(const cred_t *cred);
-extern int secpolicy_vnode_setid_retain(const cred_t *cred, boolean_t issuidroot);
-extern int secpolicy_vnode_remove(const cred_t *cr);
+extern int secpolicy_vnode_setid_retain(struct vnode *vp, const cred_t *cred, boolean_t issuidroot);
+extern int secpolicy_vnode_remove(struct vnode *vp, const cred_t *cr);
+extern int secpolicy_vnode_setids_setgids(struct vnode *vp, const cred_t *cr,
+                                          gid_t gid);
+extern int secpolicy_vnode_setdac(struct vnode *vp, const cred_t *cr, uid_t u);
+extern int secpolicy_vnode_chown( struct vnode *vp, const cred_t *cr, uid_t u);
+extern int secpolicy_xvattr(struct vnode *dvp, vattr_t *vap,
+                            uid_t, const cred_t *cr, enum vtype);
+extern int secpolicy_setid_clear(vattr_t *vap, struct vnode *vp,
+                                 const cred_t *cr);
+extern int secpolicy_basic_link(struct vnode *svp, const cred_t *cr);
+
 
 #ifndef _KERNEL
 extern int vn_close(struct vnode *vp, int flags, int x1, int x2, void *x3, void *x4);

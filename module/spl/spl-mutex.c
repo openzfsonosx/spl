@@ -86,6 +86,7 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 
 void spl_mutex_destroy(kmutex_t *mp)
 {
+    if (!mp) return;
     if (mp->initialized)
         lck_mtx_free(mp->m_lock, zfs_mutex_group);
     mp->initialized = 0;
