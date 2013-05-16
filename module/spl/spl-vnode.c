@@ -263,6 +263,20 @@ int secpolicy_basic_link(struct vnode *svp, const cred_t *cr)
     return 0;
 }
 
+int secpolicy_fs_mount_clearopts(const cred_t *cr, struct mount *mp)
+{
+    return 0;
+}
+
+int secpolicy_fs_mount(const cred_t *cr, struct vnode *vp, struct mount *mp)
+{
+    return 0;
+}
+
+
+
+
+
 
 
 

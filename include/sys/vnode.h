@@ -265,7 +265,7 @@ typedef struct vn_file {
 
 extern struct vnode *vn_alloc(int flag);
 //void vn_free(struct vnode *vp);
-void vn_free(struct vnode *vp);
+//void vn_free(struct vnode *vp);
 
 extern int vn_open(char *pnamep, enum uio_seg seg, int filemode,
                    int createmode,
@@ -274,6 +274,14 @@ extern int vn_open(char *pnamep, enum uio_seg seg, int filemode,
 extern int vn_openat(char *pnamep, enum uio_seg seg, int filemode,
                      int createmode, struct vnode **vpp, enum create crwhy,
                      mode_t umask, struct vnode *startvp);
+
+#define vn_renamepath(tdvp, svp, tnm, lentnm)   do { } while (0)
+#define vn_free(vp)             do { } while (0)
+#define vn_pages_remove(vp,fl,op)       do { } while (0)
+
+#define LK_RETRY 0
+static inline int vn_lock(struct vnode *vp, int fl) { return 0; }
+
 
 // OSX kernel has a vn_rdwr, let's work around it.
 extern int  zfs_vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base,
@@ -298,7 +306,8 @@ extern int secpolicy_xvattr(struct vnode *dvp, vattr_t *vap,
 extern int secpolicy_setid_clear(vattr_t *vap, struct vnode *vp,
                                  const cred_t *cr);
 extern int secpolicy_basic_link(struct vnode *svp, const cred_t *cr);
-
+extern int secpolicy_fs_mount_clearopts(const cred_t *cr, struct mount *);
+extern int secpolicy_fs_mount(const cred_t *cr, struct vnode *,struct mount *);
 
 #ifndef _KERNEL
 extern int vn_close(struct vnode *vp, int flags, int x1, int x2, void *x3, void *x4);
@@ -337,9 +346,31 @@ void spl_vn_fini(void);
             vnode_put(vp);                          \
     } while (0)
 
+ /*
+  * FIX THIS, OSX
+  *
+  * Like vn_rele() except if we are going to call VOP_INACTIVE() then do it
+  * asynchronously using a taskq.This can avoid deadlocks caused by re-entering
+  * the file system as a result of releasing the vnode. Note, file systems
+  * already have to handle the race where the vnode is incremented before the
+  * inactive routine is called and does its locking.
+  *
+  * Warning: Excessive use of this routine can lead to performance problems.
+  * This is because taskqs throttle back allocation if too many are created.
+  */
+#define VN_RELE_ASYNC(vp,tq)                        \
+    do {                                            \
+        if ((vp) && (vp) != DNLC_NO_VNODE)          \
+            vnode_put(vp);                          \
+    } while (0)
+
 
 #define vn_exists(vp)
 #define vn_is_readonly(vp)  vnode_vfsisrdonly(vp)
+
+#define vnode_pager_setsize(vp, sz)  do { } while(0)
+
+#define VATTR_NULL(v) do { } while(0)
 
 extern int
 VOP_CLOSE(struct vnode *vp, int flag, int count, offset_t off, void *cr, void *);
@@ -350,6 +381,8 @@ VOP_SPACE(struct vnode *vp, int cmd, void *fl, int flags, offset_t off,
           cred_t *cr, void *ctx);
 
 extern int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4);
+
+#define VOP_UNLOCK(vp,fl)   	do { } while(0)
 
 
 #endif
