@@ -384,6 +384,7 @@ extern int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void
 
 #define VOP_UNLOCK(vp,fl)   	do { } while(0)
 
+void vfs_mountedfrom(struct mount *vfsp, char *osname);
 
 #endif
 
