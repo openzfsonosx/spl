@@ -38,6 +38,9 @@ typedef enum ksid_index {
 
 typedef int ksid_t;
 
+/* Should be in kidmap.h */
+typedef int32_t idmap_stat;
+
 static inline ksiddomain_t *
 ksid_lookupdomain(const char *dom)
 {
@@ -57,5 +60,32 @@ ksiddomain_rele(ksiddomain_t *ksid)
 	kmem_free(ksid->kd_name, strlen(ksid->kd_name) + 1);
         kmem_free(ksid, sizeof(ksiddomain_t));
 }
+
+#define         UID_NOBODY      65534
+#define         GID_NOBODY      65534
+
+static __inline uint_t
+ksid_getid(ksid_t *ks)
+{
+    panic("%s has been unexpectedly called", __func__);
+    return 0;
+}
+
+static __inline const char *
+ksid_getdomain(ksid_t *ks)
+{
+    panic("%s has been unexpectedly called", __func__);
+    return 0;
+}
+
+static __inline uint_t
+ksid_getrid(ksid_t *ks)
+{
+    panic("%s has been unexpectedly called", __func__);
+    return 0;
+}
+
+#define kidmap_getsidbyuid(zone, uid, sid_prefix, rid)  (1)
+#define kidmap_getsidbygid(zone, gid, sid_prefix, rid)  (1)
 
 #endif /* _SPL_SID_H */
