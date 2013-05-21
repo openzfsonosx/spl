@@ -44,6 +44,7 @@ vn_open(char *pnamep, enum uio_seg seg, int filemode, int createmode,
     vctx = vfs_context_create((vfs_context_t)0);
     error = vnode_open(pnamep, filemode, createmode, 0, vpp, vctx);
     (void) vfs_context_rele(vctx);
+    printf("vn_open '%s' -> %d (vp %p)\n", pnamep, error, *vpp);
     return (error);
 }
 
@@ -196,6 +197,11 @@ int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
 {
     vfs_context_t vctx;
     int error;
+
+    //vap->va_size = 134217728;
+    //return 0;
+
+    //    panic("take this");
     vctx = vfs_context_create((vfs_context_t)0);
     error= vnode_getattr(vp, vap, vctx);
     (void) vfs_context_rele(vctx);
@@ -203,6 +209,10 @@ int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
 }
 
 
+void vfs_mountedfrom(struct mount *vfsp, char *osname)
+{
+    (void) copystr(osname, vfs_statfs(vfsp)->f_mntfromname, MNAMELEN - 1, 0);
+}
 
 
 
@@ -281,3 +291,64 @@ int secpolicy_fs_mount(const cred_t *cr, struct vnode *vp, struct mount *mp)
 
 
 
+/*
+ * DNLC Name Cache Support
+ */
+struct vnode *
+dnlc_lookup(struct vnode *dvp, char *name)
+{
+    struct componentname cn;
+    //return DNLC_NO_VNODE;
+	bzero(&cn, sizeof (cn));
+	cn.cn_nameiop = LOOKUP;
+	cn.cn_flags = ISLASTCN;
+	cn.cn_nameptr = (char *)name;
+	cn.cn_namelen = strlen(name);
+
+	struct vnode *vp;
+
+	switch(cache_lookup(dvp, &vp, &cn)) {
+	case -1:
+		break;
+	case ENOENT:
+		vp = DNLC_NO_VNODE;
+		break;
+	default:
+		vp = NULLVP;
+	}
+	return (vp);
+}
+
+int dnlc_purge_vfsp(struct mount *mp, int flags)
+{
+    return 0;
+}
+
+void dnlc_remove(struct vnode *vp, char *name)
+{
+    cache_purge(vp);
+    return;
+}
+
+
+/*
+ *
+ *
+ */
+void dnlc_update(struct vnode *vp, char *name, struct vnode *tp)
+{
+    // If tp is NULL, it is a negative-cache entry
+    struct componentname cn;
+
+    // OSX panics if you give empty(non-NULL) name
+    if (!name || !*name || !strlen(name)) return;
+
+	bzero(&cn, sizeof (cn));
+	cn.cn_nameiop = CREATE;
+	cn.cn_flags = ISLASTCN;
+	cn.cn_nameptr = (char *)name;
+	cn.cn_namelen = strlen(name);
+
+    cache_enter(vp, tp==DNLC_NO_VNODE?NULL:tp, &cn);
+    return;
+}

@@ -46,6 +46,9 @@ lck_grp_attr_t   *zfs_group_attr = NULL;
 static lck_grp_t *zfs_mutex_group = NULL;
 
 
+#define MUTEX_INIT_VAL 0x0123456789abcdef
+
+
 int spl_mutex_subsystem_init(void)
 {
     zfs_lock_attr = lck_attr_alloc_init();
@@ -74,20 +77,20 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
     ASSERT(type != MUTEX_SPIN);
     ASSERT(ibc == NULL);
 
-    if (mp->initialized == 1)  // Already initialized, leave it.
+    if (mp->initialized == MUTEX_INIT_VAL)  // Already initialized, leave it.
         return;
 
     //lck_mtx_init((lck_mtx_t *)&mp->m_lock[0],
     //           zfs_mutex_group, zfs_lock_attr);
     mp->m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
     mp->m_owner = NULL;
-    mp->initialized = 1;
+    mp->initialized = MUTEX_INIT_VAL;
 }
 
 void spl_mutex_destroy(kmutex_t *mp)
 {
     if (!mp) return;
-    if (mp->initialized)
+    if (mp->initialized==MUTEX_INIT_VAL)
         lck_mtx_free(mp->m_lock, zfs_mutex_group);
     mp->initialized = 0;
     //lck_mtx_destroy((lck_mtx_t *)&mp->m_lock[0], zfs_mutex_group);
@@ -95,7 +98,7 @@ void spl_mutex_destroy(kmutex_t *mp)
 
 void mutex_enter(kmutex_t *mp)
 {
-    if (mp->initialized!=1) {
+    if (mp->initialized!=MUTEX_INIT_VAL) {
         printf("mutex_enter: not initialized %p, I'll do it now.\n",
                mp);
         spl_mutex_init(mp, "AutoInit", 0, NULL);
@@ -121,7 +124,7 @@ int spl_mutex_tryenter(kmutex_t *mp)
 {
     int held;
 
-    if (mp->initialized!=1) {
+    if (mp->initialized!=MUTEX_INIT_VAL) {
         printf("mutex_enter: not initialized %p, I'll do it now.\n",
                mp);
         spl_mutex_init(mp, "AutoInit", 0, NULL);

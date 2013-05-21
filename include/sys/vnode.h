@@ -170,6 +170,7 @@ enum create     { CRCREAT, CRMKNOD, CRMKDIR };  /* reason for create */
 #define AT_MTIME        VNODE_ATTR_va_modify_time
 #define AT_CTIME        VNODE_ATTR_va_change_time
 #define AT_SIZE         VNODE_ATTR_va_data_size
+#define	AT_NOSET        0
 
 
 #define va_size         va_data_size
@@ -309,6 +310,7 @@ extern int secpolicy_basic_link(struct vnode *svp, const cred_t *cr);
 extern int secpolicy_fs_mount_clearopts(const cred_t *cr, struct mount *);
 extern int secpolicy_fs_mount(const cred_t *cr, struct vnode *,struct mount *);
 
+// THIS FILE SHOULD HAVE NO NON-KERNEL PARTS, THAT LIVES IN LIBSPL/
 #ifndef _KERNEL
 extern int vn_close(struct vnode *vp, int flags, int x1, int x2, void *x3, void *x4);
 extern int vn_seek(struct vnode *vp, offset_t o, offset_t *op, void *ct);
@@ -385,6 +387,15 @@ extern int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void
 #define VOP_UNLOCK(vp,fl)   	do { } while(0)
 
 void vfs_mountedfrom(struct mount *vfsp, char *osname);
+
+extern struct vnode *dnlc_lookup     ( struct vnode *dvp, char *name );
+extern int           dnlc_purge_vfsp ( struct mount *mp, int flags );
+extern void          dnlc_remove     ( struct vnode *vp, char *name );
+extern void          dnlc_update     ( struct vnode *vp, char *name,
+                                       struct vnode *tp);
+
+
+
 
 #endif
 

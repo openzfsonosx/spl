@@ -33,7 +33,7 @@ typedef struct {
  */
 typedef struct kmutex {
     void           *m_owner;
-    boolean_t       initialized;
+    uint64_t      initialized;
     //mutex_t         m_lock[1];  // should be lck_mtx_t ?
     lck_mtx_t *m_lock;
     uint8_t m_padding[6];
