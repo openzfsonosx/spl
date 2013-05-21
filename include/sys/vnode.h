@@ -280,8 +280,6 @@ extern int vn_openat(char *pnamep, enum uio_seg seg, int filemode,
 #define vn_free(vp)             do { } while (0)
 #define vn_pages_remove(vp,fl,op)       do { } while (0)
 
-#define LK_RETRY 0
-static inline int vn_lock(struct vnode *vp, int fl) { return 0; }
 
 
 // OSX kernel has a vn_rdwr, let's work around it.
@@ -309,6 +307,12 @@ extern int secpolicy_setid_clear(vattr_t *vap, struct vnode *vp,
 extern int secpolicy_basic_link(struct vnode *svp, const cred_t *cr);
 extern int secpolicy_fs_mount_clearopts(const cred_t *cr, struct mount *);
 extern int secpolicy_fs_mount(const cred_t *cr, struct vnode *,struct mount *);
+
+#define LK_RETRY  0
+#define LK_SHARED 0
+#define VN_UNLOCK( vp )
+static inline int vn_lock(struct vnode *vp, int fl) { return 0; }
+
 
 // THIS FILE SHOULD HAVE NO NON-KERNEL PARTS, THAT LIVES IN LIBSPL/
 #ifndef _KERNEL
