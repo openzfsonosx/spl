@@ -122,13 +122,15 @@ typedef struct xuio {
  * return in cbytes how many bytes were copied.
  */
 static inline int uiocopy(void *p, size_t n, enum uio_rw rw, struct uio *uio, size_t *cbytes) \
-{                                                \
-    int result;                                  \
-    struct uio *nuio = uio_duplicate(uio);       \
-    if (!nuio) return ENOMEM;                    \
-    result = uiomove(p,n,nuio);                  \
-    uio_free(nuio);                              \
-    return result;                               \
+{                                                                       \
+    int result;                                                         \
+    struct uio *nuio = uio_duplicate(uio);                              \
+    unsigned long long x = uio_resid(uio);                              \
+    if (!nuio) return ENOMEM;                                           \
+    result = uiomove(p,n,nuio);                                         \
+    uio_free(nuio);                                                     \
+    *cbytes = x-uio_resid(nuio);                                        \
+    return result;                                                      \
 }
 
 
