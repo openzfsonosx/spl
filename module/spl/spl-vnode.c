@@ -202,6 +202,7 @@ int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
     //return 0;
 
     //    panic("take this");
+    printf("VOP_GETATTR(%p, %p, %d)\n", vp, vap, flags);
     vctx = vfs_context_create((vfs_context_t)0);
     error= vnode_getattr(vp, vap, vctx);
     (void) vfs_context_rele(vctx);
@@ -298,14 +299,14 @@ struct vnode *
 dnlc_lookup(struct vnode *dvp, char *name)
 {
     struct componentname cn;
+	struct vnode *vp;
+
     //return DNLC_NO_VNODE;
 	bzero(&cn, sizeof (cn));
 	cn.cn_nameiop = LOOKUP;
 	cn.cn_flags = ISLASTCN;
 	cn.cn_nameptr = (char *)name;
 	cn.cn_namelen = strlen(name);
-
-	struct vnode *vp;
 
 	switch(cache_lookup(dvp, &vp, &cn)) {
 	case -1:
@@ -339,6 +340,9 @@ void dnlc_update(struct vnode *vp, char *name, struct vnode *tp)
 {
     // If tp is NULL, it is a negative-cache entry
     struct componentname cn;
+
+    // Temporarily, no negative caching
+    if (!tp) return;
 
     // OSX panics if you give empty(non-NULL) name
     if (!name || !*name || !strlen(name)) return;
