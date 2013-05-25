@@ -44,7 +44,7 @@ vn_open(char *pnamep, enum uio_seg seg, int filemode, int createmode,
     vctx = vfs_context_create((vfs_context_t)0);
     error = vnode_open(pnamep, filemode, createmode, 0, vpp, vctx);
     (void) vfs_context_rele(vctx);
-    printf("vn_open '%s' -> %d (vp %p)\n", pnamep, error, *vpp);
+    //printf("vn_open '%s' -> %d (vp %p)\n", pnamep, error, *vpp);
     return (error);
 }
 
@@ -202,7 +202,7 @@ int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
     //return 0;
 
     //    panic("take this");
-    printf("VOP_GETATTR(%p, %p, %d)\n", vp, vap, flags);
+    //printf("VOP_GETATTR(%p, %p, %d)\n", vp, vap, flags);
     vctx = vfs_context_create((vfs_context_t)0);
     error= vnode_getattr(vp, vap, vctx);
     (void) vfs_context_rele(vctx);
