@@ -341,9 +341,6 @@ void dnlc_update(struct vnode *vp, char *name, struct vnode *tp)
     // If tp is NULL, it is a negative-cache entry
     struct componentname cn;
 
-    // Temporarily, no negative caching
-    if (!tp) return;
-
     // OSX panics if you give empty(non-NULL) name
     if (!name || !*name || !strlen(name)) return;
 
