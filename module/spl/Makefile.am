@@ -30,10 +30,11 @@ noinst_PROGRAMS = spl
 
 spl_kext_SOURCE =
 
-spl_SOURCES = \
+spl_SOURCES = 	\
 	spl-atomic.c \
 	spl-condvar.c \
 	spl-cred.c \
+	spl-ddi.c \
 	spl-err.c \
 	spl-kmem.c \
 	spl-kobj.c \

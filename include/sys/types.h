@@ -79,7 +79,6 @@ typedef u_longlong_t			len_t;
 typedef longlong_t			diskaddr_t;
 typedef ushort_t			o_mode_t;
 typedef uint_t				major_t;
-typedef uint_t				minor_t;
 typedef ulong_t				pfn_t;
 typedef long				spgcnt_t;
 typedef short				index_t;
@@ -107,6 +106,7 @@ typedef ulong_t				pgcnt_t;
 typedef unsigned int umode_t ;
 #define   NODEV32 (dev32_t)(-1)
 typedef   uint32_t        dev32_t;
+typedef uint_t				minor_t;
 
 #define EBADE EBADMACHO
 

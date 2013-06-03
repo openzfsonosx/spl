@@ -93,4 +93,83 @@ ddi_strtoull(const char *str, char **nptr, int base, unsigned long long *result)
      return (0);
  }
 
+
+#ifndef OTYPCNT
+#define	OTYPCNT		5
+#define	OTYP_BLK	0
+#define	OTYP_MNT	1
+#define	OTYP_CHR	2
+#define	OTYP_SWP	3
+#define	OTYP_LYR	4
+#endif
+
+#define	P2END(x, align)			(-(~(x) & -(align)))
+
+#define ddi_name_to_major(name) devsw_name2blk(name, NULL, 0)
+
+struct dev_info {
+    dev_t dev;   // Major / Minor
+    void *devc;
+    void *devb;
+};
+typedef struct dev_info dev_info_t;
+
+
+int	ddi_strtoul(const char *, char **, int, unsigned long *);
+int	ddi_strtol(const char *, char **, int, long *);
+int	ddi_soft_state_init(void **, size_t, size_t);
+int	ddi_soft_state_zalloc(void *, int);
+void	*ddi_get_soft_state(void *, int);
+void	ddi_soft_state_free(void *, int);
+void	ddi_soft_state_fini(void **);
+int	ddi_create_minor_node(dev_info_t *, char *, int,
+                              minor_t, char *, int);
+void	ddi_remove_minor_node(dev_info_t *, char *);
+
+int ddi_driver_major(dev_info_t *);
+
+typedef void 	*ldi_ident_t;
+
+#define	DDI_SUCCESS	0
+#define	DDI_FAILURE	-1
+
+#define	DDI_PSEUDO	""
+
+#define	ddi_prop_update_int64(a, b, c, d)	DDI_SUCCESS
+#define	ddi_prop_update_string(a, b, c, d)	DDI_SUCCESS
+
+#define	bioerror(bp, er)	(buf_seterror((bp), (er)))
+#define biodone(bp) buf_biodone(bp)
+
+#define ddi_ffs ffs
+static inline long ddi_fls(long mask) {      \
+    /*Algorithm courtesy of Steve Chessin.*/ \
+    while (mask) {                           \
+		long nx;                             \
+		if ((nx = (mask & (mask - 1))) == 0) \
+			break;                           \
+		mask = nx;                           \
+	}                                        \
+	return (ffs(mask));                      \
+}
+
+#define getminor(X) minor((X))
+
+
+
+/*
+ * This data structure is entirely private to the soft state allocator.
+ */
+struct i_ddi_soft_state {
+	void		**array;	/* the array of pointers */
+	kmutex_t	lock;	/* serialize access to this struct */
+	size_t		size;	/* how many bytes per state struct */
+	size_t		n_items;	/* how many structs herein */
+	struct i_ddi_soft_state *next;	/* 'dirty' elements */
+};
+
+#define	MIN_N_ITEMS	8	/* 8 void *'s == 32 bytes */
+
+
+
 #endif /* SPL_SUNDDI_H */
