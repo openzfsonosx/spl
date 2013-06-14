@@ -430,9 +430,9 @@ getrootdir(void)
 #endif
 
 #ifdef ZFS_LEOPARD_ONLY
-#define vn_has_cached_data(VP)  (VTOZ(VP)->z_mmapped)
+#define vn_has_cached_data(VP)  (VTOZ(VP)->z_is_mapped)
 #else
-#define vn_has_cached_data(VP)  (VTOZ(VP)->z_mmapped || vnode_isswap(VP))
+#define vn_has_cached_data(VP)  (VTOZ(VP)->z_is_mapped || vnode_isswap(VP))
 #endif
 
 #define vn_ismntpt(vp)   (vnode_mountedhere(vp) != NULL)
