@@ -37,6 +37,10 @@
 //#include <asm/uaccess.h>
 #include <sys/types.h>
 
+#ifdef  __cplusplus
+extern "C" {
+#endif
+
 typedef struct iovec iovec_t;
 
 typedef enum uio_seg uio_seg_t;
@@ -121,15 +125,15 @@ typedef struct xuio {
  * same as uiomove() but doesn't modify uio structure.
  * return in cbytes how many bytes were copied.
  */
-static inline int uiocopy(void *p, size_t n, enum uio_rw rw, struct uio *uio, size_t *cbytes) \
+static inline int uiocopy(const char *p, size_t n, enum uio_rw rw, struct uio *uio, size_t *cbytes) \
 {                                                                       \
     int result;                                                         \
     struct uio *nuio = uio_duplicate(uio);                              \
     unsigned long long x = uio_resid(uio);                              \
     if (!nuio) return ENOMEM;                                           \
     result = uiomove(p,n,nuio);                                         \
-    uio_free(nuio);                                                     \
     *cbytes = x-uio_resid(nuio);                                        \
+    uio_free(nuio);                                                     \
     return result;                                                      \
 }
 
@@ -138,4 +142,8 @@ static inline int uiocopy(void *p, size_t n, enum uio_rw rw, struct uio *uio, si
 #define uiomove(A,B,C,D) uiomove((A),(B),(D))
 #define uioskip(A,B)     uio_update((A), (B))
 
+
+#ifdef  __cplusplus
+}
+#endif
 #endif /* SPL_UIO_H */

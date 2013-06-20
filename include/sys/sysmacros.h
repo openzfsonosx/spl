@@ -111,11 +111,6 @@ extern unsigned int max_ncpus;
 #define BSWAP_32(x)	((BSWAP_16(x) << 16) | BSWAP_16((x) >> 16))
 #define BSWAP_64(x)	((BSWAP_32(x) << 32) | BSWAP_32((x) >> 32))
 
-/* Map some simple functions.
- */
-#define bzero(ptr,size)			memset(ptr,0,size)
-#define bcopy(src,dest,size)		memmove(dest,src,size)
-#define bcmp(src,dest,size)		memcmp((src), (dest), (size_t)(size))
 
 /* Dtrace probes do not exist in the linux kernel */
 #ifdef DTRACE_PROBE
