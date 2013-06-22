@@ -343,7 +343,7 @@ ddi_create_minor_node(dev_info_t *dip, char *name, int spec_type,
 void
 ddi_remove_minor_node(dev_info_t *dip, char *name)
 {
-    printf("zvol: remove minor\n");
+    printf("zvol: remove minor: '%s'\n", name ? name : "");
     if (dip->devc)
         devfs_remove(dip->devc);
     if (dip->devb)

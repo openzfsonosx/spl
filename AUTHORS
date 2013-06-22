@@ -1,10 +1,7 @@
-Brian Behlendorf <behlendorf1@llnl.gov>
-- Core Implementation.
+MacZFS Developers
+- Original Implementation
 
-Ricardo M. Correia <Ricardo.M.Correia@Sun.COM>
-- Bug Fixes
-- XDR Implementation.
+Jorgen Lundman <lundman@lundman.net>
+- Additional Implementation.
 
-Chris Dunlap <cdunlap@llnl.gov>
-- LSD-Tools List Implementation.
-- AutoConf META File Support.
+

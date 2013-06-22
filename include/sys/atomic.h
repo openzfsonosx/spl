@@ -13,6 +13,9 @@
 #include <sys/types.h>
 #include <osx/atomic.h>
 
+#ifdef	__cplusplus
+extern "C" {
+#endif
 
 
 /*
@@ -190,29 +193,32 @@ atomic_and_32(volatile uint32_t *target, uint32_t mask)
  */
 
 static inline uint8_t
-atomic_cas_8(volatile uint8_t *target, uint8_t cmp, uint8_t new)
+atomic_cas_8(volatile uint8_t *_target, uint8_t _cmp, uint8_t _new)
 {
-    return __sync_val_compare_and_swap(target, cmp, new);
+    return __sync_val_compare_and_swap(_target, _cmp, _new);
 }
 static inline uint16_t
-atomic_cas_16(volatile uint16_t *target, uint16_t cmp, uint16_t new)
+atomic_cas_16(volatile uint16_t *_target, uint16_t _cmp, uint16_t _new)
 {
-    return __sync_val_compare_and_swap(target, cmp, new);
+    return __sync_val_compare_and_swap(_target, _cmp, _new);
 }
 static inline uint32_t
-atomic_cas_32(volatile uint32_t *target, uint32_t cmp, uint32_t new)
+atomic_cas_32(volatile uint32_t *_target, uint32_t _cmp, uint32_t _new)
 {
-    return __sync_val_compare_and_swap(target, cmp, new);
+    return __sync_val_compare_and_swap(_target, _cmp, _new);
 }
 static inline uint64_t
-atomic_cas_64(volatile uint64_t *target, uint64_t cmp, uint64_t new)
+atomic_cas_64(volatile uint64_t *_target, uint64_t _cmp, uint64_t _new)
 {
-    return __sync_val_compare_and_swap(target, cmp, new);
+    return __sync_val_compare_and_swap(_target, _cmp, _new);
 }
 
-extern void *atomic_cas_ptr(volatile void *target, void *cmp, void *new);
+extern void *atomic_cas_ptr(volatile void *_target, void *_cmp, void *_new);
 
 static inline void membar_producer(void) { /* nothing */ }
 
+#ifdef	__cplusplus
+}
+#endif
 
 #endif  /* _SPL_ATOMIC_H */

@@ -39,6 +39,9 @@
 #include <sys/kstat.h>
 #include <sys/malloc.h>
 
+#ifdef	__cplusplus
+extern "C" {
+#endif
 
 extern uint64_t physmem;
 
@@ -127,7 +130,7 @@ uint64_t kmem_size(void);
 uint64_t kmem_used(void);
 kmem_cache_t *kmem_cache_create(char *name, size_t bufsize, size_t align,
     int (*constructor)(void *, void *, int), void (*destructor)(void *, void *),
-    void (*reclaim)(void *) __unused, void *private, vmem_t *vmp, int cflags);
+    void (*reclaim)(void *) __unused, void *_private, vmem_t *vmp, int cflags);
 void kmem_cache_destroy(kmem_cache_t *cache);
 void *kmem_cache_alloc(kmem_cache_t *cache, int flags);
 void kmem_cache_free(kmem_cache_t *cache, void *buf);
@@ -155,5 +158,8 @@ extern char *kmem_vasprintf(const char *fmt, va_list ap);
 void spl_kmem_init(void);
 void spl_kmem_fini(void);
 
+#ifdef	__cplusplus
+}
+#endif
 
 #endif	/* _SPL_KMEM_H */

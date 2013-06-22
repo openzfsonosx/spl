@@ -25,6 +25,11 @@
 #ifndef _SPL_SID_H
 #define _SPL_SID_H
 
+#ifdef	__cplusplus
+extern "C" {
+#endif
+
+
 typedef struct ksiddomain {
 	char		*kd_name;
 } ksiddomain_t;
@@ -44,21 +49,21 @@ typedef int32_t idmap_stat;
 static inline ksiddomain_t *
 ksid_lookupdomain(const char *dom)
 {
-        ksiddomain_t *kd;
-	int len = strlen(dom);
+    ksiddomain_t *kd;
+    int len = strlen(dom);
 
-        kd = kmem_zalloc(sizeof(ksiddomain_t), KM_SLEEP);
-        kd->kd_name = kmem_zalloc(len + 1, KM_SLEEP);
+    kd = (ksiddomain_t *)kmem_zalloc(sizeof(ksiddomain_t), KM_SLEEP);
+    kd->kd_name = (char *)kmem_zalloc(len + 1, KM_SLEEP);
 	memcpy(kd->kd_name, dom, len);
 
-        return (kd);
+    return (kd);
 }
 
 static inline void
 ksiddomain_rele(ksiddomain_t *ksid)
 {
 	kmem_free(ksid->kd_name, strlen(ksid->kd_name) + 1);
-        kmem_free(ksid, sizeof(ksiddomain_t));
+    kmem_free(ksid, sizeof(ksiddomain_t));
 }
 
 #define         UID_NOBODY      65534
@@ -87,5 +92,9 @@ ksid_getrid(ksid_t *ks)
 
 #define kidmap_getsidbyuid(zone, uid, sid_prefix, rid)  (1)
 #define kidmap_getsidbygid(zone, gid, sid_prefix, rid)  (1)
+
+#ifdef	__cplusplus
+}
+#endif
 
 #endif /* _SPL_SID_H */
