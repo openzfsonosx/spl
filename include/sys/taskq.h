@@ -34,6 +34,10 @@
 #include <sys/thread.h>
 #include <sys/rwlock.h>
 
+#ifdef	__cplusplus
+extern "C" {
+#endif
+
 #define TASKQ_NAMELEN           31
 
 #define TASKQ_PREPOPULATE       0x00000001
@@ -167,5 +171,8 @@ extern void	taskq_dispatch_ent(taskq_t *, task_func_t, void *, uint_t,
 extern int	taskq_empty_ent(taskq_ent_t *);
 extern void	taskq_init_ent(taskq_ent_t *);
 
+#ifdef	__cplusplus
+}
+#endif
 
 #endif  /* _SPL_TASKQ_H */
