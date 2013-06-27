@@ -10,6 +10,15 @@ Note MacZFS's wiki on kernel development and panic decoding.
 
 Please note that 'llvm-gcc' or 'clang' has to be used for compiling KEXTs.
 Pure 'gcc' will produce instable builds.
+<<<<<<< HEAD
+=======
+
+
+ # ./configure CC=clang CXX=clang++
+or
+ # ./configure CC=llvm-gcc CXX=llvm-g++
+
+>>>>>>> 3c06d21f12bddf2ada75824a8e0554c024750979
 
 ```
  # ./configure CC=clang CXX=clang++
