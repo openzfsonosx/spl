@@ -321,6 +321,9 @@ ddi_create_minor_node(dev_info_t *dip, char *name, int spec_type,
          (r=strchr(r, '/'));
          *r = '_') /* empty */ ;
 
+    dip->devc = NULL;
+    dip->devb = NULL;
+
 	if (spec_type == S_IFCHR)
         dip->devc = devfs_make_node(dev, DEVFS_CHAR,   /* Make the node */
                                     UID_ROOT, GID_OPERATOR,

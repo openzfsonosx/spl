@@ -8,19 +8,26 @@ the latest Macports.
 See https://github.com/zfs-osx/ and http://MacZFS.org/ for more information.
 Note MacZFS's wiki on kernel development and panic decoding.
 
-OSX claims that gcc has to be version 4.2
-Hopefully the path to /System/Library/Frameworks/Kernel.framework is universal.
+Please note that 'llvm-gcc' or 'clang' has to be used for compiling KEXTs.
+Pure 'gcc' will produce instable builds.
+
+
+ # ./configure CC=clang CXX=clang++
+or
+ # ./configure CC=llvm-gcc CXX=llvm-g++
+
 
 # git clone https://github.com/zfs-osx/spl.git
 
 ```
 
 # ./autogen.sh
-# ./configure --prefix=/usr/local
+# ./configure CC=clang CXX=clang++ --prefix=/usr/local
 # make
 
 # rsync -ar --delete module/spl/spl.kext/ /tmp/spl.kext/
 # chown -R root:wheel /tmp/spl.kext
 
 # kextload -r /tmp/ -v /tmp/spl.kext
+```
 
