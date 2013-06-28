@@ -298,7 +298,7 @@ ddi_create_minor_node(dev_info_t *dip, char *name, int spec_type,
 	int error=0;
     char *r, *dup;
 
-	printf("ddi_create_minor_node: name %s: %d,%d\n", name, flag, minor_num);
+	//printf("ddi_create_minor_node: name %s: %d,%d\n", name, flag, minor_num);
 
 	dev = makedev(flag, minor_num);
     dip->dev = dev;
@@ -335,7 +335,7 @@ ddi_create_minor_node(dev_info_t *dip, char *name, int spec_type,
                                     0600, "disk_%s", dup);
     //0600, "disk3", dup);
 
-    printf("ddi_create_minor: devfs_make_name '%s'\n", dup );
+    //printf("ddi_create_minor: devfs_make_name '%s'\n", dup );
 
     FREE(dup, M_TEMP);
 
@@ -346,10 +346,14 @@ ddi_create_minor_node(dev_info_t *dip, char *name, int spec_type,
 void
 ddi_remove_minor_node(dev_info_t *dip, char *name)
 {
-    printf("zvol: remove minor: '%s'\n", name ? name : "");
-    if (dip->devc)
+    //printf("zvol: remove minor: '%s'\n", name ? name : "");
+    if (dip->devc) {
         devfs_remove(dip->devc);
-    if (dip->devb)
+        dip->devc = NULL;
+    }
+    if (dip->devb) {
         devfs_remove(dip->devb);
+        dip->devb = NULL;
+    }
 }
 
