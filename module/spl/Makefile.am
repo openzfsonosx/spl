@@ -14,8 +14,8 @@ CFLAGS_KMOD = \
 	-DAPPLE \
 	-DNeXT \
 	-I$(top_srcdir)/include \
-	-I@KERNEL_HEADERS@/PrivateHeaders \
-	-I@KERNEL_HEADERS@/Headers
+	-I@KERNEL_HEADERS@/Headers \
+	-I@KERNEL_HEADERS@/PrivateHeaders
 
 LINKFLAGS_KMOD = \
 	-Xlinker \
