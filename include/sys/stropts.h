@@ -43,7 +43,7 @@ highbit(unsigned long long i)
 
     if (i == 0)
         return (0);
-    if (i & 0xffffffff00000000ul) {
+    if (i & 0xffffffff00000000ull) {
         h += 32; i >>= 32;
     }
     if (i & 0xffff0000) {
