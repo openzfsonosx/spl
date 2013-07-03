@@ -28,6 +28,9 @@
 #include <sys/types.h>
 #include <string.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define isprint(c)      ((c) >= ' ' && (c) <= '~')
 
@@ -43,7 +46,7 @@ highbit(unsigned long long i)
 
     if (i == 0)
         return (0);
-    if (i & 0xffffffff00000000ul) {
+    if (i & 0xffffffff00000000ull) {
         h += 32; i >>= 32;
     }
     if (i & 0xffff0000) {
@@ -129,4 +132,9 @@ memchr(const void *s, int c, size_t n)
     }
     return (NULL);
 }
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* SPL_STROPTS_H */
