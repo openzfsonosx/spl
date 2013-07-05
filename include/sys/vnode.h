@@ -374,7 +374,7 @@ void spl_vn_fini(void);
 #define vn_exists(vp)
 #define vn_is_readonly(vp)  vnode_vfsisrdonly(vp)
 
-#define vnode_pager_setsize(vp, sz)  do { } while(0)
+#define vnode_pager_setsize(vp, sz)  ubc_setsize((vp),(sz))
 
 #define VATTR_NULL(v) do { } while(0)
 
