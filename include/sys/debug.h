@@ -62,12 +62,19 @@ do {									\
 
 #define __ASSERT(x)			((void)0)
 #define ASSERT(x)			((void)0)
+#define ASSERT0(x)			((void)0)
 #define ASSERTF(x, y, z...)		((void)0)
 #define ASSERTV(x)
 #define VERIFY(cond)							\
 do {									\
 	if (unlikely(!(cond)))						\
 		PANIC("VERIFY(" #cond ") failed\n");			\
+} while (0)
+
+#define VERIFY0(cond)							\
+do {									\
+	if (unlikely((cond)!=0))						\
+		PANIC("VERIFY0(" #cond ") failed\n");			\
 } while (0)
 
 #define VERIFY3_IMPL(LEFT, OP, RIGHT, TYPE, FMT, CAST)			\
@@ -115,6 +122,12 @@ do {									\
 		PANIC("ASSERTION(" #cond ") failed\n");			\
 } while (0)
 
+#define ASSERT0(cond==0)							\
+do {									\
+	if (unlikely(!(cond)))						\
+		PANIC("ASSERTION(" #cond ") failed\n");			\
+} while (0)
+
 #define ASSERTF(cond, fmt, a...)					\
 do {									\
 	if (unlikely(!(cond)))						\
@@ -140,6 +153,7 @@ do {									\
 
 #define ASSERTV(x)	x
 #define VERIFY(x)	ASSERT(x)
+#define VERIFY0(x)	ASSERT((x)==0)
 
 #endif /* NDEBUG */
 #endif /* SPL_DEBUG_H */

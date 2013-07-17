@@ -934,6 +934,20 @@ taskq_dispatch(taskq_t *tq, task_func_t func, void *arg, uint_t flags)
 	return ((taskqid_t)tqe);
 }
 
+
+/*
+ * FIXME, Linux has added the ability to start taskq with a given
+ * delay.
+ */
+taskqid_t
+taskq_dispatch_delay(taskq_t *tq, task_func_t func, void *arg,
+    uint_t flags, clock_t expire_time)
+{
+    return taskq_dispatch(tq, func, arg, flags);
+}
+
+
+
 int
 taskq_empty_ent(taskq_ent_t *t)
 {

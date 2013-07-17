@@ -37,6 +37,12 @@ int  spl_cv_timedwait(kcondvar_t *cvp,kmutex_t *mp, clock_t tim, const char *msg
 #define cv_wait(cvp, mp)        \
         spl_cv_wait((cvp), (mp), #cvp)
 
+/* Linux provides a cv_wait_io so the schedular will know why we block.
+ * find OSX equivalent?
+ */
+#define cv_wait_io(cvp, mp)                     \
+    spl_cv_wait((cvp), (mp), #cvp)
+
 #define cv_timedwait(cvp, mp, tim)      \
         spl_cv_timedwait((cvp), (mp), (tim), #cvp)
 

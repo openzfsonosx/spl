@@ -36,6 +36,15 @@
 #define BE_32(x) OSSwapHostToBigInt32(x)
 #define BE_64(x) OSSwapHostToBigInt64(x)
 
+#define BE_IN8(xa)                              \
+    *((uint8_t *)(xa))
+
+#define BE_IN16(xa)                                             \
+    (((uint16_t)BE_IN8(xa) << 8) | BE_IN8((uint8_t *)(xa)+1))
+
+#define BE_IN32(xa)                                             \
+    (((uint32_t)BE_IN16(xa) << 16) | BE_IN16((uint8_t *)(xa)+2))
+
 
 
 #ifdef __LITTLE_ENDIAN__
