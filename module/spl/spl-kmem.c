@@ -97,15 +97,22 @@ void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
 	void *p;
+    uint64_t times = 0;
 #ifdef KMEM_DEBUG
 	struct kmem_item *i;
 
 	size += sizeof(struct kmem_item);
 #endif
 
+    do {
+
+        times++;
+
+#if 0
     if (kmflags & KM_NOSLEEP)
         p = OSMalloc_noblock(size, zfs_kmem_alloc_tag);
     else
+#endif
         p = OSMalloc(size, zfs_kmem_alloc_tag);
 
 #ifndef _KERNEL
@@ -125,6 +132,12 @@ zfs_kmem_alloc(size_t size, int kmflags)
 
     if (p && (kmflags & KM_ZERO))
         bzero(p, size);
+
+    } while(!p);
+
+    if (times > 1)
+        printf("[spl] kmem_alloc(%lu) took %d retries\n",
+               size, times);
 
     if (!p) {
         printf("[spl] kmem_alloc(%lu) failed: \n",size);
