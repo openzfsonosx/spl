@@ -114,11 +114,13 @@ sanitize_flags(struct task_struct *p, gfp_t *flags)
 #define    KMC_NODEBUG     0x00020000
 #define KMC_NOTOUCH             0
 
+
 typedef struct kmem_cache {
         char            kc_name[32];
         size_t          kc_size;
         int             (*kc_constructor)(void *, void *, int);
         void            (*kc_destructor)(void *, void *);
+        void            (*kc_reclaim)(void *);
         void            *kc_private;
 } kmem_cache_t;
 
@@ -130,7 +132,7 @@ uint64_t kmem_size(void);
 uint64_t kmem_used(void);
 kmem_cache_t *kmem_cache_create(char *name, size_t bufsize, size_t align,
     int (*constructor)(void *, void *, int), void (*destructor)(void *, void *),
-    void (*reclaim)(void *) __unused, void *_private, vmem_t *vmp, int cflags);
+    void (*reclaim)(void *), void *_private, vmem_t *vmp, int cflags);
 void kmem_cache_destroy(kmem_cache_t *cache);
 void *kmem_cache_alloc(kmem_cache_t *cache, int flags);
 void kmem_cache_free(kmem_cache_t *cache, void *buf);

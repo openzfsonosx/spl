@@ -101,27 +101,19 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     len = sizeof(utsname.sysname);
     sysctlbyname("kern.ostype", &utsname.sysname, &len, NULL, 0);
 
-    // For some reason, looking up hostname returns 1. So we set
-    // it to uuid just to give it any number. As it happens, ZFS
-    // sets the nodename on init.
+    /*
+     * For some reason, (CTLFLAG_KERN is not set) looking up hostname
+     * returns 1. So we set it to uuid just to give it *something*.
+     * As it happens, ZFS sets the nodename on init.
+     */
     len = sizeof(utsname.nodename);
     sysctlbyname("kern.uuid", &utsname.nodename, &len, NULL, 0);
-    //strcpy(utsname.nodename, "This.is.hard.to.get");
 
     len = sizeof(utsname.release);
     sysctlbyname("kern.osrelease", &utsname.release, &len, NULL, 0);
 
     len = sizeof(utsname.version);
     sysctlbyname("kern.version", &utsname.version, &len, NULL, 0);
-    // For some reason, looking up arch returns 1.
-    //len = sizeof(utsname.machine);
-    //sysctlbyname("hw.machine.arch", &utsname.machine, &len, NULL, 0);
-
-    printf("utsname nodename '%s'\n", utsname.nodename);
-    printf("utsname sysname '%s'\n", utsname.sysname);
-    printf("utsname release '%s'\n", utsname.release);
-    printf("utsname version '%s'\n", utsname.version);
-    //printf("utsname machine '%s'\n", utsname.machine);
 
     spl_kmem_init();
     spl_mutex_subsystem_init();

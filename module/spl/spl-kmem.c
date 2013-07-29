@@ -84,6 +84,7 @@ static OSMallocTag zfs_kmem_alloc_tag = NULL;
 
 vmem_t *zio_alloc_arena = NULL; /* arena for allocating zio memory */
 
+static uint64_t total_in_use = 0;
 
 void
 strfree(char *str)
@@ -141,15 +142,21 @@ zfs_kmem_alloc(size_t size, int kmflags)
 
     if (!p) {
         printf("[spl] kmem_alloc(%lu) failed: \n",size);
-    }
+    } else atomic_add_64(&total_in_use, size);
 
 	return (p);
 }
 
 void
-zfs_kmem_free(void *buf, size_t size __unused)
+zfs_kmem_free(void *buf, size_t size)
 {
     OSFree(buf, size, zfs_kmem_alloc_tag);
+    atomic_sub_64(&total_in_use, size);
+}
+
+void spl_total_in_use(void)
+{
+    printf("SPL: memory in use %llu\n", total_in_use);
 }
 
 static uint64_t kmem_size_val;
@@ -158,8 +165,9 @@ static uint64_t kmem_size_val;
 void
 spl_kmem_init(void)
 {
-
+    //OSMT_PAGEABLE
     zfs_kmem_alloc_tag = OSMalloc_Tagalloc("ZFS general purpose",
+                                           //OSMT_PAGEABLE);
                                            OSMT_DEFAULT);
 
 }
@@ -186,7 +194,7 @@ uint64_t
 kmem_size(void)
 {
 
-	return (kmem_size_val);
+	return (physmem * PAGE_SIZE);
 }
 
 uint64_t
@@ -215,7 +223,7 @@ kmem_std_destructor(void *mem, int size __unused, void *private)
 kmem_cache_t *
 kmem_cache_create(char *name, size_t bufsize, size_t align,
     int (*constructor)(void *, void *, int), void (*destructor)(void *, void *),
-    void (*reclaim)(void *) __unused, void *private, vmem_t *vmp, int cflags)
+    void (*reclaim)(void *), void *private, vmem_t *vmp, int cflags)
 {
 	kmem_cache_t *cache;
 
@@ -225,6 +233,7 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 	strlcpy(cache->kc_name, name, sizeof(cache->kc_name));
 	cache->kc_constructor = constructor;
 	cache->kc_destructor = destructor;
+	cache->kc_reclaim = reclaim;
 	cache->kc_private = private;
 	cache->kc_size = bufsize;
 
@@ -256,27 +265,23 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
 	kmem_free(buf, cache->kc_size);
 }
 
-#ifdef _KERNEL
+
+/*
+ * Call the registered reclaim function for a cache.  Depending on how
+ * many and which objects are released it may simply repopulate the
+ * local magazine which will then need to age-out.  Objects which cannot
+ * fit in the magazine we will be released back to their slabs which will
+ * also need to age out before being release.  This is all just best
+ * effort and we do not want to thrash creating and destroying slabs.
+ */
 void
-kmem_cache_reap_now(kmem_cache_t *cache)
+kmem_cache_reap_now(kmem_cache_t *skc)//, int count)
 {
 }
 
-void
-kmem_reap(void)
-{
-}
-#else
-void
-kmem_cache_reap_now(kmem_cache_t *cache __unused)
-{
-}
 
-void
-kmem_reap(void)
-{
-}
-#endif
+
+
 
 int
 kmem_debugging(void)
