@@ -31,4 +31,4 @@
 //#include <linux/proc_compat.h>
 #include <spl-debug.h>
 
-proc_t p0;              /* process 0 */
+proc_t p0 = { 0 };              /* process 0 */

@@ -77,7 +77,7 @@
 #endif
 
 extern uint64_t    max_mem;
-uint64_t    physmem;
+uint64_t    physmem = 0;
 
 //extern uint64_t    max_mem;
 static OSMallocTag zfs_kmem_alloc_tag = NULL;

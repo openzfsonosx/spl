@@ -51,8 +51,8 @@ struct utsname utsname = { 0 };
 
 //extern struct machine_info      machine_info;
 
-unsigned int max_ncpus;
-uint64_t  total_memory;
+unsigned int max_ncpus = 0;
+static uint64_t  total_memory = 0;
 
 
 #include <sys/types.h>

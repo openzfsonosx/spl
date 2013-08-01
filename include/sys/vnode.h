@@ -45,6 +45,7 @@
 #include <sys/uio.h>
 #include <sys/sunldi.h>
 #include <sys/cred.h>
+#include <sys/ubc.h>
 
 #include <kern/locks.h>
 
