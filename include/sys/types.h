@@ -1,31 +1,35 @@
-/*****************************************************************************\
- *  Copyright (C) 2007-2010 Lawrence Livermore National Security, LLC.
- *  Copyright (C) 2007 The Regents of the University of California.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Brian Behlendorf <behlendorf1@llnl.gov>.
- *  UCRL-CODE-235197
+/*
+ * CDDL HEADER START
  *
- *  This file is part of the SPL, Solaris Porting Layer.
- *  For details, see <http://github.com/behlendorf/spl/>.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
  *
- *  The SPL is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation; either version 2 of the License, or (at your
- *  option) any later version.
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
  *
- *  The SPL is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
  *
- *  You should have received a copy of the GNU General Public License along
- *  with the SPL.  If not, see <http://www.gnu.org/licenses/>.
-\*****************************************************************************/
+ * CDDL HEADER END
+ */
+
+/*
+ *
+ * Copyright (C) 2008 MacZFS
+ * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
+ *
+ */
 
 #ifndef _SPL_TYPES_H
 #define	_SPL_TYPES_H
 
-// Linux kernel optimization
+// Linux kernel optimization, ignore them for now on OSX.
 #define unlikely
 #define likely
 
@@ -34,20 +38,6 @@
 #include <sys/sysmacros.h>
 #include <libkern/libkern.h>
 
-//#include <linux/uaccess_compat.h>
-//#include <linux/file_compat.h>
-//#include <linux/list_compat.h>
-//#include <linux/time_compat.h>
-//#include <linux/bitops_compat.h>
-//#include <linux/smp_compat.h>
-//#include <linux/workqueue_compat.h>
-//#include <linux/kallsyms_compat.h>
-//#include <linux/mutex_compat.h>
-//#include <linux/module_compat.h>
-//#include <linux/sysctl_compat.h>
-//#include <linux/proc_compat.h>
-//#include <linux/math64_compat.h>
-//#include <linux/zlib_compat.h>
 
 #include <sys/stropts.h>
 

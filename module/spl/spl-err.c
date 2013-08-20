@@ -1,28 +1,29 @@
-/*****************************************************************************\
- *  Copyright (C) 2007-2010 Lawrence Livermore National Security, LLC.
- *  Copyright (C) 2007 The Regents of the University of California.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Brian Behlendorf <behlendorf1@llnl.gov>.
- *  UCRL-CODE-235197
+/*
+ * CDDL HEADER START
  *
- *  This file is part of the SPL, Solaris Porting Layer.
- *  For details, see <http://github.com/behlendorf/spl/>.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
  *
- *  The SPL is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation; either version 2 of the License, or (at your
- *  option) any later version.
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
  *
- *  The SPL is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
  *
- *  You should have received a copy of the GNU General Public License along
- *  with the SPL.  If not, see <http://www.gnu.org/licenses/>.
- *****************************************************************************
- *  Solaris Porting Layer (SPL) Error Implementation.
-\*****************************************************************************/
+ * CDDL HEADER END
+ */
+
+/*
+ *
+ * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
+ *
+ */
 
 #include <sys/sysmacros.h>
 #include <sys/cmn_err.h>
@@ -34,10 +35,6 @@
 
 #define SS_DEBUG_SUBSYS SS_GENERIC
 
-#ifdef DEBUG_LOG
-static char ce_prefix[CE_IGNORE][10] = { "", "NOTICE: ", "WARNING: ", "" };
-static char ce_suffix[CE_IGNORE][2] = { "", "\n", "\n", "" };
-#endif
 
 void
 vpanic(const char *fmt, va_list ap)
@@ -47,7 +44,6 @@ vpanic(const char *fmt, va_list ap)
 	vsnprintf(msg, MAXMSGLEN - 1, fmt, ap);
 	PANIC("%s", msg);
 } /* vpanic() */
-//EXPORT_SYMBOL(vpanic);
 
 void
 vcmn_err(int ce, const char *fmt, va_list ap)
@@ -67,5 +63,4 @@ vcmn_err(int ce, const char *fmt, va_list ap)
 			SERROR("%s%s%s", ce_prefix[ce], msg, ce_suffix[ce]);
 	}
 } /* vcmn_err() */
-//EXPORT_SYMBOL(vcmn_err);
 

@@ -55,11 +55,8 @@ AM_CONDITIONAL([CONFIG_USER], [ true ])
 
 AC_CONFIG_FILES([
 	Makefile
-	lib/Makefile
-	cmd/Makefile
 	module/Makefile
 	module/spl/Makefile
-	module/splat/Makefile
 	include/Makefile
 	scripts/Makefile
 	spl.spec

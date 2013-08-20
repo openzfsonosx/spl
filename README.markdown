@@ -1,6 +1,5 @@
-This is a very early alpha of ZFS on OSX, to be the next generation of MacZFS.
 
-This is spl.kext, the Solaris Portability Layer (SPL), a dependency of zfs.kext.
+This is spl.kext, the Solaris Portability Layer (SPL)
 
 It is tested primarily on Mac OS 10.8.2 and secondarily on 10.6.8, with
 the latest Macports.

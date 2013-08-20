@@ -1,62 +1,30 @@
-/*****************************************************************************\
- *  Copyright (C) 2010 Lawrence Livermore National Security, LLC.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Brian Behlendorf <behlendorf1@llnl.gov>.
- *  UCRL-CODE-235197
+/*
+ * CDDL HEADER START
  *
- *  This file is part of the SPL, Solaris Porting Layer.
- *  For details, see <http://github.com/behlendorf/spl/>.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
  *
- *  The SPL is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation; either version 2 of the License, or (at your
- *  option) any later version.
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
  *
- *  The SPL is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
  *
- *  You should have received a copy of the GNU General Public License along
- *  with the SPL.  If not, see <http://www.gnu.org/licenses/>.
- *****************************************************************************
- *  Solaris Porting Layer (SPL) Thread Specific Data Implementation.
+ * CDDL HEADER END
+ */
+
+/*
  *
- *  Thread specific data has implemented using a hash table, this avoids
- *  the need to add a member to the task structure and allows maximum
- *  portability between kernels.  This implementation has been optimized
- *  to keep the tsd_set() and tsd_get() times as small as possible.
+ * Copyright (C) 2008 MacZFS
+ * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
  *
- *  The majority of the entries in the hash table are for specific tsd
- *  entries.  These entries are hashed by the product of their key and
- *  pid because by design the key and pid are guaranteed to be unique.
- *  Their product also has the desirable properly that it will be uniformly
- *  distributed over the hash bins providing neither the pid nor key is zero.
- *  Under linux the zero pid is always the init process and thus won't be
- *  used, and this implementation is careful to never to assign a zero key.
- *  By default the hash table is sized to 512 bins which is expected to
- *  be sufficient for light to moderate usage of thread specific data.
- *
- *  The hash table contains two additional type of entries.  They first
- *  type is entry is called a 'key' entry and it is added to the hash during
- *  tsd_create().  It is used to store the address of the destructor function
- *  and it is used as an anchor point.  All tsd entries which use the same
- *  key will be linked to this entry.  This is used during tsd_destory() to
- *  quickly call the destructor function for all tsd associated with the key.
- *  The 'key' entry may be looked up with tsd_hash_search() by passing the
- *  key you wish to lookup and DTOR_PID constant as the pid.
- *
- *  The second type of entry is called a 'pid' entry and it is added to the
- *  hash the first time a process set a key.  The 'pid' entry is also used
- *  as an anchor and all tsd for the process will be linked to it.  This
- *  list is using during tsd_exit() to ensure all registered destructors
- *  are run for the process.  The 'pid' entry may be looked up with
- *  tsd_hash_search() by passing the PID_KEY constant as the key, and
- *  the process pid.  Note that tsd_exit() is called by thread_exit()
- *  so if your using the Solaris thread API you should not need to call
- *  tsd_exit() directly.
- *
-\*****************************************************************************/
+ */
 
 #include <sys/kmem.h>
 #include <sys/thread.h>

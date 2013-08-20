@@ -1,32 +1,4 @@
 /*****************************************************************************\
- *  Copyright (C) 2007-2010 Lawrence Livermore National Security, LLC.
- *  Copyright (C) 2007 The Regents of the University of California.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Brian Behlendorf <behlendorf1@llnl.gov>.
- *  UCRL-CODE-235197
- *
- *  This file is part of the SPL, Solaris Porting Layer.
- *  For details, see <http://github.com/behlendorf/spl/>.
- *
- *  The SPL is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation; either version 2 of the License, or (at your
- *  option) any later version.
- *
- *  The SPL is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with the SPL.  If not, see <http://www.gnu.org/licenses/>.
- *****************************************************************************
- *  z_compress_level/z_uncompress are nearly identical copies of the
- *  compress2/uncompress functions provided by the official zlib package
- *  available at http://zlib.net/.  The only changes made we to slightly
- *  adapt the functions called to match the linux kernel implementation
- *  of zlib.  The full zlib license follows:
- *
  *  zlib.h -- interface of the 'zlib' general purpose compression library
  *  version 1.2.5, April 19th, 2010
  *
@@ -57,7 +29,6 @@
 
 
 #include <sys/types.h>
-//#include <linux/zlib.h>
 #include <libkern/zlib.h>
 #include <sys/kmem.h>
 
