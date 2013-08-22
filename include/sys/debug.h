@@ -1,26 +1,35 @@
-/*****************************************************************************\
- *  Copyright (C) 2007-2010 Lawrence Livermore National Security, LLC.
- *  Copyright (C) 2007 The Regents of the University of California.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Brian Behlendorf <behlendorf1@llnl.gov>.
- *  UCRL-CODE-235197
+/*
+ * CDDL HEADER START
  *
- *  This file is part of the SPL, Solaris Porting Layer.
- *  For details, see <http://github.com/behlendorf/spl/>.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
  *
- *  The SPL is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation; either version 2 of the License, or (at your
- *  option) any later version.
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
  *
- *  The SPL is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
  *
- *  You should have received a copy of the GNU General Public License along
- *  with the SPL.  If not, see <http://www.gnu.org/licenses/>.
-\*****************************************************************************/
+ * CDDL HEADER END
+ */
+/*
+ * Copyright 2010 Sun Microsystems, Inc. All rights reserved.
+ * Use is subject to license terms.
+ */
+
+/*
+ * Copyright (c) 2012 by Delphix. All rights reserved.
+ */
+
+/* Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T */
+/* All Rights Reserved */
+
 
 /*
  * Available Solaris debug functions.  All of the ASSERT() macros will be
@@ -62,12 +71,19 @@ do {									\
 
 #define __ASSERT(x)			((void)0)
 #define ASSERT(x)			((void)0)
+#define ASSERT0(x)			((void)0)
 #define ASSERTF(x, y, z...)		((void)0)
 #define ASSERTV(x)
 #define VERIFY(cond)							\
 do {									\
 	if (unlikely(!(cond)))						\
 		PANIC("VERIFY(" #cond ") failed\n");			\
+} while (0)
+
+#define VERIFY0(cond)							\
+do {									\
+	if (unlikely((cond)!=0))						\
+		PANIC("VERIFY0(" #cond ") failed\n");			\
 } while (0)
 
 #define VERIFY3_IMPL(LEFT, OP, RIGHT, TYPE, FMT, CAST)			\
@@ -115,6 +131,12 @@ do {									\
 		PANIC("ASSERTION(" #cond ") failed\n");			\
 } while (0)
 
+#define ASSERT0(cond==0)							\
+do {									\
+	if (unlikely(!(cond)))						\
+		PANIC("ASSERTION(" #cond ") failed\n");			\
+} while (0)
+
 #define ASSERTF(cond, fmt, a...)					\
 do {									\
 	if (unlikely(!(cond)))						\
@@ -140,6 +162,7 @@ do {									\
 
 #define ASSERTV(x)	x
 #define VERIFY(x)	ASSERT(x)
+#define VERIFY0(x)	ASSERT((x)==0)
 
 #endif /* NDEBUG */
 #endif /* SPL_DEBUG_H */

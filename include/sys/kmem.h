@@ -1,38 +1,36 @@
-/*****************************************************************************\
- *  Copyright (C) 2007-2010 Lawrence Livermore National Security, LLC.
- *  Copyright (C) 2007 The Regents of the University of California.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Brian Behlendorf <behlendorf1@llnl.gov>.
- *  UCRL-CODE-235197
+/*
+ * CDDL HEADER START
  *
- *  This file is part of the SPL, Solaris Porting Layer.
- *  For details, see <http://github.com/behlendorf/spl/>.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
  *
- *  The SPL is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation; either version 2 of the License, or (at your
- *  option) any later version.
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
  *
- *  The SPL is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
  *
- *  You should have received a copy of the GNU General Public License along
- *  with the SPL.  If not, see <http://www.gnu.org/licenses/>.
-\*****************************************************************************/
+ * CDDL HEADER END
+ */
+
+/*
+ *
+ * Copyright (C) 2008 MacZFS Project
+ * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
+ *
+ */
+
+
 
 #ifndef _SPL_KMEM_H
 #define	_SPL_KMEM_H
 
-//#include <linux/module.h>
-//#include <linux/slab.h>
-//#include <linux/vmalloc.h>
-//#include <linux/mm_compat.h>
-//#include <linux/spinlock.h>
-//#include <linux/rwsem.h>
-//#include <linux/hash.h>
-//#include <linux/ctype.h>
 #include <sys/atomic.h>
 #include <sys/types.h>
 #include <sys/vmsystm.h>
@@ -47,9 +45,6 @@ extern uint64_t physmem;
 
 #define KERN_MAP_MIN_SIZE (8192+1)
 
-/*
- * Used internally, the kernel does not need to support this flag
- */
 #ifndef __GFP_ZERO
 # define __GFP_ZERO                     0x8000
 #endif
@@ -114,11 +109,13 @@ sanitize_flags(struct task_struct *p, gfp_t *flags)
 #define    KMC_NODEBUG     0x00020000
 #define KMC_NOTOUCH             0
 
+
 typedef struct kmem_cache {
         char            kc_name[32];
         size_t          kc_size;
         int             (*kc_constructor)(void *, void *, int);
         void            (*kc_destructor)(void *, void *);
+        void            (*kc_reclaim)(void *);
         void            *kc_private;
 } kmem_cache_t;
 
@@ -130,7 +127,7 @@ uint64_t kmem_size(void);
 uint64_t kmem_used(void);
 kmem_cache_t *kmem_cache_create(char *name, size_t bufsize, size_t align,
     int (*constructor)(void *, void *, int), void (*destructor)(void *, void *),
-    void (*reclaim)(void *) __unused, void *_private, vmem_t *vmp, int cflags);
+    void (*reclaim)(void *), void *_private, vmem_t *vmp, int cflags);
 void kmem_cache_destroy(kmem_cache_t *cache);
 void *kmem_cache_alloc(kmem_cache_t *cache, int flags);
 void kmem_cache_free(kmem_cache_t *cache, void *buf);

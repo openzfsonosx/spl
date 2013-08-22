@@ -1,33 +1,28 @@
-/*-
- * Copyright 2007 John Birrell <jb@FreeBSD.org>
+/*
+ * CDDL HEADER START
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
  *
- * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
  *
- * $FreeBSD$
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
  *
+ * CDDL HEADER END
  */
 
 /*
- * OSX Port by Jorgen Lundman <lundman@lundman.net>
+ *
+ * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
+ *
  */
 
 
@@ -47,14 +42,12 @@
 
 #include <kern/processor.h>
 
-struct utsname utsname = {
-        "OS-X", "", "1.0", "1.0", "i386"
-};
+struct utsname utsname = { 0 };
 
 //extern struct machine_info      machine_info;
 
-unsigned int max_ncpus;
-uint64_t  total_memory;
+unsigned int max_ncpus = 0;
+static uint64_t  total_memory = 0;
 
 
 #include <sys/types.h>
@@ -76,6 +69,19 @@ osx_delay(int ticks)
 	IODelay(ticks * 10000);
 }
 
+
+uint32_t zone_get_hostid(void *zone)
+{
+    size_t len;
+    uint32_t myhostid = 0;
+
+    len = sizeof(myhostid);
+    sysctlbyname("kern.hostid", &myhostid, &len, NULL, 0);
+
+    return myhostid;
+}
+
+
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
     //max_ncpus = processor_avail_count;
@@ -86,6 +92,23 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
 
     physmem = total_memory / PAGE_SIZE;
+
+    len = sizeof(utsname.sysname);
+    sysctlbyname("kern.ostype", &utsname.sysname, &len, NULL, 0);
+
+    /*
+     * For some reason, (CTLFLAG_KERN is not set) looking up hostname
+     * returns 1. So we set it to uuid just to give it *something*.
+     * As it happens, ZFS sets the nodename on init.
+     */
+    len = sizeof(utsname.nodename);
+    sysctlbyname("kern.uuid", &utsname.nodename, &len, NULL, 0);
+
+    len = sizeof(utsname.release);
+    sysctlbyname("kern.osrelease", &utsname.release, &len, NULL, 0);
+
+    len = sizeof(utsname.version);
+    sysctlbyname("kern.version", &utsname.version, &len, NULL, 0);
 
     spl_kmem_init();
     spl_mutex_subsystem_init();

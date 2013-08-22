@@ -4,7 +4,7 @@ include $(top_srcdir)/config/tgz.am
 include $(top_srcdir)/config/arch.am
 
 if CONFIG_USER
-USER_DIR = lib cmd scripts
+USER_DIR = scripts
 endif
 if CONFIG_KERNEL
 KERNEL_DIR = module include

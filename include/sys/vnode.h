@@ -1,41 +1,35 @@
-/*****************************************************************************\
- *  Copyright (C) 2007-2010 Lawrence Livermore National Security, LLC.
- *  Copyright (C) 2007 The Regents of the University of California.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Brian Behlendorf <behlendorf1@llnl.gov>.
- *  UCRL-CODE-235197
+/*
+ * CDDL HEADER START
  *
- *  This file is part of the SPL, Solaris Porting Layer.
- *  For details, see <http://github.com/behlendorf/spl/>.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
  *
- *  The SPL is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation; either version 2 of the License, or (at your
- *  option) any later version.
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
  *
- *  The SPL is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
  *
- *  You should have received a copy of the GNU General Public License along
- *  with the SPL.  If not, see <http://www.gnu.org/licenses/>.
-\*****************************************************************************/
+ * CDDL HEADER END
+ */
+
+/*
+ *
+ * Copyright (C) 2008 MacZFS
+ * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
+ *
+ */
 
 #ifndef _SPL_VNODE_H
 #define _SPL_VNODE_H
 
-//#include <linux/module.h>
-//#include <linux/syscalls.h>
-//#include <linux/fcntl.h>
 #include <sys/fcntl.h>
-//#include <linux/buffer_head.h>
-//#include <linux/dcache.h>
-//#include <linux/namei.h>
-//#include <linux/file.h>
-//#include <linux/fs.h>
-//#include <linux/fs_struct.h>
-//#include <linux/mount.h>
 
 #include <sys/mount.h>
 #include <sys/kmem.h>
@@ -45,6 +39,7 @@
 #include <sys/uio.h>
 #include <sys/sunldi.h>
 #include <sys/cred.h>
+#include <sys/ubc.h>
 
 #include <kern/locks.h>
 
@@ -57,41 +52,12 @@
 #define vnode_t struct vnode
 #define uio_t struct uio
 
-/*
- * Prior to linux-2.6.33 only O_DSYNC semantics were implemented and
- * they used the O_SYNC flag.  As of linux-2.6.33 the this behavior
- * was properly split in to O_SYNC and O_DSYNC respectively.
- */
-#ifndef O_DSYNC
-#define O_DSYNC		O_SYNC
-#endif
-
 
 struct caller_context;
 typedef struct caller_context caller_context_t;
 typedef int vcexcl_t;
 
 enum vcexcl	{ NONEXCL, EXCL };
-
-
-#if 0
-#define FREAD		1
-#define FWRITE		2
-#define FCREAT		O_CREAT
-#define FTRUNC		O_TRUNC
-#define FOFFMAX		O_LARGEFILE
-#define FSYNC		O_SYNC
-#define FDSYNC		O_DSYNC
-#define FRSYNC		O_SYNC
-#define FEXCL		O_EXCL
-#define FDIRECT		O_DIRECT
-#define FAPPEND		O_APPEND
-
-#define FNODSYNC	0x10000 /* fsync pseudo flag */
-#define FNOFOLLOW	0x20000 /* don't follow symlinks */
-
-#define F_FREESP	11 	/* Free file space */
-#endif
 
 
 #define ATTR_XVATTR	(1 << 31)
@@ -106,49 +72,6 @@ enum vcexcl	{ NONEXCL, EXCL };
 #define IS_DEVVP(vp)    \
         (vnode_ischr(vp) || vnode_isblk(vp) || vnode_isfifo(vp))
 
-#if 0
-/*
- * The vnode AT_ flags are mapped to the Linux ATTR_* flags.
- * This allows them to be used safely with an iattr structure.
- * The AT_XVATTR flag has been added and mapped to the upper
- * bit range to avoid conflicting with the standard Linux set.
- */
-#undef AT_UID
-#undef AT_GID
-
-#define AT_MODE		ATTR_MODE
-#define AT_UID		ATTR_UID
-#define AT_GID		ATTR_GID
-#define AT_SIZE		ATTR_SIZE
-#define AT_ATIME	ATTR_ATIME
-#define AT_MTIME	ATTR_MTIME
-#define AT_CTIME	ATTR_CTIME
-
-#define ATTR_XVATTR	(1 << 31)
-#define AT_XVATTR	ATTR_XVATTR
-
-#define ATTR_IATTR_MASK	(ATTR_MODE | ATTR_UID | ATTR_GID | ATTR_SIZE | \
-			ATTR_ATIME | ATTR_MTIME | ATTR_CTIME | ATTR_FILE)
-
-#define CRCREAT		0x01
-#define RMFILE		0x02
-
-#define B_INVAL		0x01
-#define B_TRUNC		0x02
-
-#define LOOKUP_DIR		0x01
-#define LOOKUP_XATTR		0x02
-#define CREATE_XATTR_DIR	0x04
-#define ATTR_NOACLCHECK		0x20
-
-#ifdef HAVE_PATH_IN_NAMEIDATA
-# define nd_dentry	path.dentry
-# define nd_mnt		path.mnt
-#else
-# define nd_dentry	dentry
-# define nd_mnt		mnt
-#endif
-#endif
 
 
 enum rm         { RMFILE, RMDIRECTORY };        /* rm or rmdir (remove) */
@@ -164,6 +87,7 @@ enum create     { CRCREAT, CRMKNOD, CRMKDIR };  /* reason for create */
  */
 #define AT_TYPE         VNODE_ATTR_va_type
 #define AT_MODE         VNODE_ATTR_va_mode
+#define AT_ACL          VNODE_ATTR_va_acl
 #define AT_UID          VNODE_ATTR_va_uid
 #define AT_GID          VNODE_ATTR_va_gid
 #define AT_ATIME        VNODE_ATTR_va_access_time
@@ -171,7 +95,6 @@ enum create     { CRCREAT, CRMKNOD, CRMKDIR };  /* reason for create */
 #define AT_CTIME        VNODE_ATTR_va_change_time
 #define AT_SIZE         VNODE_ATTR_va_data_size
 #define	AT_NOSET        0
-
 
 #define va_size         va_data_size
 #define va_atime        va_access_time
@@ -181,23 +104,6 @@ enum create     { CRCREAT, CRMKNOD, CRMKDIR };  /* reason for create */
 #define va_bytes        va_data_size
 
 
-
-#if 0
-typedef enum vtype {
-	VNON		= 0,
-	VREG		= 1,
-	VDIR		= 2,
-	VBLK		= 3,
-	VCHR		= 4,
-	VLNK		= 5,
-	VFIFO		= 6,
-	VDOOR		= 7,
-	VPROC		= 8,
-	VSOCK		= 9,
-	VPORT		= 10,
-	VBAD		= 11
-} vtype_t;
-#endif
 
 typedef struct vnode_attr vattr;
 typedef struct vnode_attr vattr_t;
@@ -213,60 +119,7 @@ typedef struct vnode_attr vattr_t;
 #define VSA_ACE_ACLFLAGS        0x0080  /* get/set ACE ACL flags */
 
 
-
-#if 0
-typedef struct vattr {
-	enum vtype	va_type;	/* vnode type */
-	u_int		va_mask;	/* attribute bit-mask */
-	u_short		va_mode;	/* acc mode */
-	uid_t		va_uid;		/* owner uid */
-	gid_t		va_gid;		/* owner gid */
-	long		va_fsid;	/* fs id */
-	long		va_nodeid;	/* node # */
-	uint32_t	va_nlink;	/* # links */
-	uint64_t	va_size;	/* file size */
-	struct timespec	va_atime;	/* last acc */
-	struct timespec	va_mtime;	/* last mod */
-	struct timespec	va_ctime;	/* last chg */
-	dev_t		va_rdev;	/* dev */
-	uint64_t	va_nblocks;	/* space used */
-	uint32_t	va_blksize;	/* block size */
-	uint32_t	va_seq;		/* sequence */
-	struct dentry	*va_dentry;	/* dentry to wire */
-} vattr_t;
-#endif
-
-#if 0
-struct vnode {
-	struct file	*v_file;
-	kmutex_t	v_lock;		/* protects vnode fields */
-	uint_t		v_flag;		/* vnode flags (see below) */
-	uint_t		v_count;	/* reference count */
-	void		*v_data;	/* private data for fs */
-	struct vfs	*v_vfsp;	/* ptr to containing VFS */
-	struct stdata	*v_stream;	/* associated stream */
-	enum vtype	v_type;		/* vnode type */
-	dev_t		v_rdev;		/* device (VCHR, VBLK) */
-	//gfp_t		v_gfp_mask;	/* original mapping gfp mask */
-};
-#endif
-
-#if 0
-typedef struct vn_file {
-	int		f_fd;		/* linux fd for lookup */
-	struct task_struct *f_task;	/* linux task this fd belongs to */
-	struct file	*f_file;	/* linux file struct */
-	atomic_t	f_ref;		/* ref count */
-	kmutex_t	f_lock;		/* struct lock */
-	loff_t		f_offset;	/* offset */
-	struct vnode		*f_vnode;	/* vnode */
-	struct list_head f_list;	/* list referenced file_t's */
-} file_t;
-#endif
-
 extern struct vnode *vn_alloc(int flag);
-//void vn_free(struct vnode *vp);
-//void vn_free(struct vnode *vp);
 
 extern int vn_open(char *pnamep, enum uio_seg seg, int filemode,
                    int createmode,

@@ -1,57 +1,35 @@
-/*****************************************************************************\
- *  Copyright (C) 2007-2010 Lawrence Livermore National Security, LLC.
- *  Copyright (C) 2007 The Regents of the University of California.
- *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Brian Behlendorf <behlendorf1@llnl.gov>.
- *  UCRL-CODE-235197
+/*
+ * CDDL HEADER START
  *
- *  This file is part of the SPL, Solaris Porting Layer.
- *  For details, see <http://github.com/behlendorf/spl/>.
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
  *
- *  The SPL is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation; either version 2 of the License, or (at your
- *  option) any later version.
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
  *
- *  The SPL is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
  *
- *  You should have received a copy of the GNU General Public License along
- *  with the SPL.  If not, see <http://www.gnu.org/licenses/>.
- *****************************************************************************
- *  Solaris Porting Layer (SPL) Kmem Implementation.
-\*****************************************************************************/
+ * CDDL HEADER END
+ */
+
+/*
+ *
+ * Copyright (C) 2008 MacZFS
+ * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
+ *
+ */
+
 
 #include <sys/kmem.h>
 #include <spl-debug.h>
 
-/*-
- * Copyright (c) 2006-2007 Pawel Jakub Dawidek <pjd@FreeBSD.org>
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHORS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
 
 #include <sys/cdefs.h>
 
@@ -62,8 +40,6 @@
 #include <sys/kmem.h>
 #include <sys/mutex.h>
 
-//#include <vm/vm_page.h>
-//#include <vm/vm_object.h>
 #include <vm/vm_kern.h>
 #include <vm/vm_map.h>
 #include <mach/host_info.h>
@@ -77,13 +53,14 @@
 #endif
 
 extern uint64_t    max_mem;
-uint64_t    physmem;
+uint64_t    physmem = 0;
 
 //extern uint64_t    max_mem;
 static OSMallocTag zfs_kmem_alloc_tag = NULL;
 
 vmem_t *zio_alloc_arena = NULL; /* arena for allocating zio memory */
 
+static uint64_t total_in_use = 0;
 
 void
 strfree(char *str)
@@ -97,15 +74,22 @@ void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
 	void *p;
+    uint64_t times = 0;
 #ifdef KMEM_DEBUG
 	struct kmem_item *i;
 
 	size += sizeof(struct kmem_item);
 #endif
 
+    do {
+
+        times++;
+
+#if 0
     if (kmflags & KM_NOSLEEP)
         p = OSMalloc_noblock(size, zfs_kmem_alloc_tag);
     else
+#endif
         p = OSMalloc(size, zfs_kmem_alloc_tag);
 
 #ifndef _KERNEL
@@ -126,17 +110,29 @@ zfs_kmem_alloc(size_t size, int kmflags)
     if (p && (kmflags & KM_ZERO))
         bzero(p, size);
 
+    } while(!p);
+
+    if (times > 1)
+        printf("[spl] kmem_alloc(%lu) took %d retries\n",
+               size, times);
+
     if (!p) {
         printf("[spl] kmem_alloc(%lu) failed: \n",size);
-    }
+    } else atomic_add_64(&total_in_use, size);
 
 	return (p);
 }
 
 void
-zfs_kmem_free(void *buf, size_t size __unused)
+zfs_kmem_free(void *buf, size_t size)
 {
     OSFree(buf, size, zfs_kmem_alloc_tag);
+    atomic_sub_64(&total_in_use, size);
+}
+
+void spl_total_in_use(void)
+{
+    printf("SPL: memory in use %llu\n", total_in_use);
 }
 
 static uint64_t kmem_size_val;
@@ -145,8 +141,9 @@ static uint64_t kmem_size_val;
 void
 spl_kmem_init(void)
 {
-
+    //OSMT_PAGEABLE
     zfs_kmem_alloc_tag = OSMalloc_Tagalloc("ZFS general purpose",
+                                           //OSMT_PAGEABLE);
                                            OSMT_DEFAULT);
 
 }
@@ -173,7 +170,7 @@ uint64_t
 kmem_size(void)
 {
 
-	return (kmem_size_val);
+	return (physmem * PAGE_SIZE);
 }
 
 uint64_t
@@ -202,7 +199,7 @@ kmem_std_destructor(void *mem, int size __unused, void *private)
 kmem_cache_t *
 kmem_cache_create(char *name, size_t bufsize, size_t align,
     int (*constructor)(void *, void *, int), void (*destructor)(void *, void *),
-    void (*reclaim)(void *) __unused, void *private, vmem_t *vmp, int cflags)
+    void (*reclaim)(void *), void *private, vmem_t *vmp, int cflags)
 {
 	kmem_cache_t *cache;
 
@@ -212,6 +209,7 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 	strlcpy(cache->kc_name, name, sizeof(cache->kc_name));
 	cache->kc_constructor = constructor;
 	cache->kc_destructor = destructor;
+	cache->kc_reclaim = reclaim;
 	cache->kc_private = private;
 	cache->kc_size = bufsize;
 
@@ -243,27 +241,23 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
 	kmem_free(buf, cache->kc_size);
 }
 
-#ifdef _KERNEL
+
+/*
+ * Call the registered reclaim function for a cache.  Depending on how
+ * many and which objects are released it may simply repopulate the
+ * local magazine which will then need to age-out.  Objects which cannot
+ * fit in the magazine we will be released back to their slabs which will
+ * also need to age out before being release.  This is all just best
+ * effort and we do not want to thrash creating and destroying slabs.
+ */
 void
-kmem_cache_reap_now(kmem_cache_t *cache)
+kmem_cache_reap_now(kmem_cache_t *skc)//, int count)
 {
 }
 
-void
-kmem_reap(void)
-{
-}
-#else
-void
-kmem_cache_reap_now(kmem_cache_t *cache __unused)
-{
-}
 
-void
-kmem_reap(void)
-{
-}
-#endif
+
+
 
 int
 kmem_debugging(void)
