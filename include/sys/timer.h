@@ -32,7 +32,7 @@
 #include <osx/sched.h>
 
 
-#define USEC_PER_SEC    1000000         /* microseconds per second */
+//#define USEC_PER_SEC    1000000         /* microseconds per second */
 
 /* Open Solaris lbolt is in hz */
 static inline uint64_t

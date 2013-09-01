@@ -122,7 +122,7 @@ is_ascii_str(const char * str)
 
 
 static inline void *
-memchr(const void *s, int c, size_t n)
+kmemchr(const void *s, int c, size_t n)
 {
     if (n != 0) {
         const unsigned char *p = (const unsigned char *)s;
