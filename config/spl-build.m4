@@ -39,6 +39,12 @@ AC_DEFUN([SPL_AC_KERNEL], [
 
 	AC_MSG_CHECKING([kernel header directory])
 	AS_IF([test -z "$KERNEL_HEADERS"], [
+		tmpdir=`xcrun --show-sdk-path`
+		AS_IF([test -d "$tmpdir/System/Library/Frameworks/Kernel.framework/"], [
+			KERNEL_HEADERS="$tmpdir/System/Library/Frameworks/Kernel.framework/"
+		])
+	])
+	AS_IF([test -z "$KERNEL_HEADERS"], [
 		AS_IF([test -d "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.9.sdk/System/Library/Frameworks/Kernel.framework"], [
 			KERNEL_HEADERS="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.9.sdk/System/Library/Frameworks/Kernel.framework"
 		])
