@@ -64,7 +64,7 @@ spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	@cp -f $(INFO_PLIST) spl.kext/Contents/
 	@cp -f $(PLIST_STRING) spl.kext/Contents/Resources/English.lproj/
 	@cp -f spl spl.kext/Contents/MacOS/
-	@kextlibs -undef-symbols -xml spl.kext/
+	@kextlibs -undef-symbols -xml spl.kext/ || echo "Ignoring errors.."
 
 install-exec-local: spl.kext
 	rm -rf $(KERNEL_MODDIR)
