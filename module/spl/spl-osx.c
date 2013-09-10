@@ -69,6 +69,44 @@ osx_delay(int ticks)
 	IODelay(ticks * 10000);
 }
 
+/*
+ * fnv_32a_str - perform a 32 bit Fowler/Noll/Vo FNV-1a hash on a string
+ *
+ * input:
+ *	str	- string to hash
+ *	hval	- previous hash value or 0 if first call
+ *
+ * returns:
+ *	32 bit hash as a static hash type
+ *
+ * NOTE: To use the recommended 32 bit FNV-1a hash, use FNV1_32A_INIT as the
+ *  	 hval arg on the first call to either fnv_32a_buf() or fnv_32a_str().
+ */
+#define FNV1_32A_INIT ((uint32_t)0x811c9dc5)
+uint32_t
+fnv_32a_str(char *str, uint32_t hval)
+{
+    unsigned char *s = (unsigned char *)str;	/* unsigned string */
+
+    /*
+     * FNV-1a hash each octet in the buffer
+     */
+    while (*s) {
+
+	/* xor the bottom with the current octet */
+	hval ^= (uint32_t)*s++;
+
+	/* multiply by the 32 bit FNV magic prime mod 2^32 */
+#if defined(NO_FNV_GCC_OPTIMIZATION)
+	hval *= FNV_32_PRIME;
+#else
+	hval += (hval<<1) + (hval<<4) + (hval<<7) + (hval<<8) + (hval<<24);
+#endif
+    }
+
+    /* return our new hash value */
+    return hval;
+}
 
 uint32_t zone_get_hostid(void *zone)
 {
@@ -77,7 +115,6 @@ uint32_t zone_get_hostid(void *zone)
 
     len = sizeof(myhostid);
     sysctlbyname("kern.hostid", &myhostid, &len, NULL, 0);
-
     return myhostid;
 }
 
@@ -87,6 +124,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     //max_ncpus = processor_avail_count;
     int ncpus;
     size_t len = sizeof(ncpus);
+    uint32_t myhostid = 0;
     sysctlbyname("hw.logicalcpu_max", &max_ncpus, &len, NULL, 0);
     len = sizeof(total_memory);
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
@@ -109,6 +147,21 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 
     len = sizeof(utsname.version);
     sysctlbyname("kern.version", &utsname.version, &len, NULL, 0);
+
+
+    /*
+     * hostid is left as 0 on OSX, and left to be set if developers wish to
+     * use it. If it is 0, we will hash the kern.uuid into a 32bit value and
+     * set the hostid.
+     */
+    len = sizeof(myhostid);
+    sysctlbyname("kern.hostid", &myhostid, &len, NULL, 0);
+    if (myhostid == 0) {
+        myhostid = fnv_32a_str(utsname.nodename, FNV1_32A_INIT);
+        sysctlbyname("kern.hostid", NULL, NULL, &myhostid, sizeof(myhostid));
+        printf("SPL: hostid set to %08x from UUID '%s'\n",
+               myhostid, utsname.nodename);
+    }
 
     spl_kmem_init();
     spl_mutex_subsystem_init();
