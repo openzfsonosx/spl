@@ -77,7 +77,6 @@ uint32_t zone_get_hostid(void *zone)
 
     len = sizeof(myhostid);
     sysctlbyname("kern.hostid", &myhostid, &len, NULL, 0);
-
     return myhostid;
 }
 
@@ -87,6 +86,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     //max_ncpus = processor_avail_count;
     int ncpus;
     size_t len = sizeof(ncpus);
+    uint32_t myhostid = 0;
     sysctlbyname("hw.logicalcpu_max", &max_ncpus, &len, NULL, 0);
     len = sizeof(total_memory);
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
