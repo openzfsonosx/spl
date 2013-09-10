@@ -491,7 +491,7 @@ xdr_dec_string(XDR *xdrs, char **sp, const uint_t maxsize)
 	if (!xdrmem_dec_bytes(xdrs, *sp, size))
 		goto fail;
 
-	if (memchr(*sp, 0, size) != NULL)
+	if (kmemchr(*sp, 0, size) != NULL)
 		goto fail;
 
 	(*sp)[size] = '\0';
