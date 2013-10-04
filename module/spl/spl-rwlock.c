@@ -29,10 +29,11 @@
 #include <sys/rwlock.h>
 #include <kern/debug.h>
 #include <sys/atomic.h>
+#include <sys/mutex.h>
 
-extern lck_attr_t *zfs_lock_attr;
+static lck_attr_t       *zfs_rwlock_attr = NULL;
+static lck_grp_attr_t   *zfs_rwlock_group_attr = NULL;
 static lck_grp_t  *zfs_rwlock_group = NULL;
-
 
 void
 rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
@@ -40,7 +41,7 @@ rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
     ASSERT(type != RW_DRIVER);
 
     lck_rw_init((lck_rw_t *)&rwlp->rw_lock[0],
-                zfs_rwlock_group, zfs_lock_attr);
+                zfs_rwlock_group, zfs_rwlock_attr);
     rwlp->rw_owner = NULL;
     rwlp->rw_readers = 0;
 }
@@ -143,10 +144,11 @@ rw_downgrade(krwlock_t *rwlp)
     atomic_inc_32((volatile uint32_t *)&rwlp->rw_readers);
 }
 
-
 int spl_rwlock_init(void)
 {
-    zfs_rwlock_group = lck_grp_alloc_init("zfs-rwlock", zfs_group_attr);
+    zfs_rwlock_attr = lck_attr_alloc_init();
+    zfs_rwlock_group_attr = lck_grp_attr_alloc_init();
+    zfs_rwlock_group = lck_grp_alloc_init("zfs-rwlock", zfs_rwlock_group_attr);
     return 0;
 }
 
@@ -154,5 +156,11 @@ void spl_rwlock_fini(void)
 {
     lck_grp_free(zfs_rwlock_group);
     zfs_rwlock_group = NULL;
+
+    lck_grp_attr_free(zfs_rwlock_group_attr);
+    zfs_rwlock_group_attr = NULL;
+
+    lck_attr_free(zfs_rwlock_attr);
+    zfs_rwlock_attr = NULL;
 }
 

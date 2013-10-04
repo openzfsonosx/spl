@@ -42,8 +42,8 @@
 extern boolean_t lck_mtx_try_lock(lck_mtx_t *lck);
 
 
-lck_attr_t       *zfs_lock_attr = NULL;
-lck_grp_attr_t   *zfs_group_attr = NULL;
+static lck_attr_t       *zfs_lock_attr = NULL;
+static lck_grp_attr_t   *zfs_group_attr = NULL;
 
 static lck_grp_t *zfs_mutex_group = NULL;
 
@@ -76,10 +76,6 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 {
     ASSERT(type != MUTEX_SPIN);
     ASSERT(ibc == NULL);
-
-
-    //lck_mtx_init((lck_mtx_t *)&mp->m_lock[0],
-    //           zfs_mutex_group, zfs_lock_attr);
     mp->m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
     mp->m_owner = NULL;
 }
@@ -88,7 +84,6 @@ void spl_mutex_destroy(kmutex_t *mp)
 {
     if (!mp) return;
     lck_mtx_free(mp->m_lock, zfs_mutex_group);
-    //lck_mtx_destroy((lck_mtx_t *)&mp->m_lock[0], zfs_mutex_group);
 }
 
 void mutex_enter(kmutex_t *mp)
@@ -96,7 +91,6 @@ void mutex_enter(kmutex_t *mp)
     if (mp->m_owner == current_thread())
         panic("mutex_enter: locking against myself!");
 
-    //lck_mtx_lock((lck_mtx_t *)&mp->m_lock[0]);
     lck_mtx_lock(mp->m_lock);
     mp->m_owner = current_thread();
 }
@@ -104,7 +98,6 @@ void mutex_enter(kmutex_t *mp)
 void spl_mutex_exit(kmutex_t *mp)
 {
     mp->m_owner = NULL;
-    //lck_mtx_unlock((lck_mtx_t *)&mp->m_lock[0]);
     lck_mtx_unlock(mp->m_lock);
 }
 
@@ -116,7 +109,6 @@ int spl_mutex_tryenter(kmutex_t *mp)
     if (mp->m_owner == current_thread())
         panic("mutex_tryenter: locking against myself!");
 
-    //held = lck_mtx_try_lock((lck_mtx_t *)&mp->m_lock[0]);
     held = lck_mtx_try_lock(mp->m_lock);
     if (held)
         mp->m_owner = current_thread();
