@@ -48,7 +48,7 @@
 void *atomic_cas_ptr(volatile void *target, void *cmp, void *new)
 {
 #ifdef __LP64__
-    return (void *)__sync_val_compare_and_swap((uint64_t *)target, cmp, new);
+    return (void *)__sync_val_compare_and_swap((uint64_t *)target, (uint64_t)cmp, (uint64_t)new);
 #else
     return (void *)__sync_val_compare_and_swap((uint32_t *)target, cmp, new);
 #endif

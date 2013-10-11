@@ -113,7 +113,7 @@ zfs_kmem_alloc(size_t size, int kmflags)
     } while(!p);
 
     if (times > 1)
-        printf("[spl] kmem_alloc(%lu) took %d retries\n",
+        printf("[spl] kmem_alloc(%lu) took %llu retries\n",
                size, times);
 
     if (!p) {
@@ -134,8 +134,6 @@ void spl_total_in_use(void)
 {
     printf("SPL: memory in use %llu\n", total_in_use);
 }
-
-static uint64_t kmem_size_val;
 
 
 void

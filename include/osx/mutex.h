@@ -33,14 +33,9 @@ typedef struct {
  */
 typedef struct kmutex {
     void           *m_owner;
-    uint64_t      initialized;
-    //mutex_t         m_lock[1];  // should be lck_mtx_t ?
     lck_mtx_t *m_lock;
-    uint8_t m_padding[6];
+    uint8_t m_padding[14];
 } kmutex_t;
-
-extern lck_attr_t     *zfs_lock_attr;
-extern lck_grp_attr_t *zfs_group_attr;
 
 
 #define MUTEX_HELD(x)           (mutex_owned(x))

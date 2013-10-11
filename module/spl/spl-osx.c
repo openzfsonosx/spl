@@ -42,7 +42,7 @@
 
 #include <kern/processor.h>
 
-struct utsname utsname = { 0 };
+struct utsname utsname = { { 0 } };
 
 //extern struct machine_info      machine_info;
 
@@ -86,7 +86,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     //max_ncpus = processor_avail_count;
     int ncpus;
     size_t len = sizeof(ncpus);
-    uint32_t myhostid = 0;
+
     sysctlbyname("hw.logicalcpu_max", &max_ncpus, &len, NULL, 0);
     len = sizeof(total_memory);
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);

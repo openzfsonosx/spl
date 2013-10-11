@@ -101,7 +101,7 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, const char *msg)
         ts.tv_sec = 1;
 #endif
     if (ts.tv_sec > 1000)
-        printf("cv_timedwait: will wait %ds\n", ts.tv_sec);
+        printf("cv_timedwait: will wait %lds\n", ts.tv_sec);
 
     ++cvp->cv_waiters;
 
