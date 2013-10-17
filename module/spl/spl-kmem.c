@@ -226,7 +226,6 @@ zfs_kmem_alloc(size_t size, int kmflags)
     if (!p) {
         printf("[spl] kmem_alloc(%lu) failed: \n",size);
     } else {
-        atomic_add_64(&total_in_use, size);
 
         if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
             atomic_add_64(&spl_large_bytes_allocated, size);
@@ -327,6 +326,13 @@ kmem_size(void)
 
 uint64_t
 kmem_used(void)
+{
+    return total_in_use;
+    //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+}
+
+uint64_t
+kmem_avail(void)
 {
     return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
 }
