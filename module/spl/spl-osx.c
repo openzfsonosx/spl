@@ -59,6 +59,9 @@ static uint64_t  total_memory = 0;
 #define	_task_user_
 #include <IOKit/IOLib.h>
 
+
+extern char hostname[MAXHOSTNAMELEN];
+
 /*
  * Solaris delay is in ticks (hz) and Darwin uses microsecs
  * 1 HZ is 10 milliseconds
@@ -79,7 +82,6 @@ uint32_t zone_get_hostid(void *zone)
     sysctlbyname("kern.hostid", &myhostid, &len, NULL, 0);
     return myhostid;
 }
-
 
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
@@ -110,7 +112,9 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     len = sizeof(utsname.version);
     sysctlbyname("kern.version", &utsname.version, &len, NULL, 0);
 
-    spl_kmem_init();
+    strlcpy(utsname.nodename, hostname, sizeof(utsname.nodename));
+
+    spl_kmem_init(total_memory);
     spl_mutex_subsystem_init();
     spl_rwlock_init();
     spl_taskq_init();

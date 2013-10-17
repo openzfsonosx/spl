@@ -62,55 +62,88 @@ vmem_t *zio_alloc_arena = NULL; /* arena for allocating zio memory */
 
 static uint64_t total_in_use = 0;
 
+
+#ifdef __APPLE__
+extern unsigned int vm_page_free_count;
+extern unsigned int vm_page_speculative_count;
+#endif
+
+
+typedef void * zone_t;
+extern void *zinit( vm_size_t,  vm_size_t,  vm_size_t, char *);
+extern void *zalloc( void *);
+extern void zfree(void *, void *);
+
+struct spl_kmem_zone_struct {
+    unsigned int size;
+    void *zone;
+};
+
+
+/*
+ * Allocate zones for common sizes we want to allocate into.
+ * Anything larger will be allocated as kalloc.large.
+ */
+static struct spl_kmem_zone_struct spl_kmem_zones[] = {
+    { 32,     NULL },
+    { 64,     NULL },
+    { 128,    NULL },
+    { 256,    NULL },
+    { 512,    NULL },
+    { 2048,   NULL },
+    { 4096,   NULL },
+    { 8192,   NULL },
+    { 16384,  NULL },
+    { 32768,  NULL },
+    { 65536,  NULL },
+    { 131072, NULL },
+};
+
+#define SPL_KMEM_NUM_ZONES (sizeof(spl_kmem_zones) / sizeof(struct spl_kmem_zone_struct))
+
+
+
+
+
 void
 strfree(char *str)
 {
-    kmem_free(str, strlen(str) + 1);
+    OSFree(str, strlen(str) + 1, zfs_kmem_alloc_tag);
 }
 
-
+extern void * IOMallocContiguous(vm_size_t size, vm_size_t alignment,
+                                 void * physicalAddress);
+extern void IOFreeContiguous(void * _address, vm_size_t size);
 
 void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
-	void *p;
+	void *p = NULL;
     uint64_t times = 0;
-#ifdef KMEM_DEBUG
-	struct kmem_item *i;
-
-	size += sizeof(struct kmem_item);
-#endif
+    int i;
 
     do {
 
         times++;
 
-#if 0
-    if (kmflags & KM_NOSLEEP)
-        p = OSMalloc_noblock(size, zfs_kmem_alloc_tag);
-    else
-#endif
-        p = OSMalloc(size, zfs_kmem_alloc_tag);
+        /* Find the correct zone */
+        if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
+            p = OSMalloc(size, zfs_kmem_alloc_tag);
+        } else {
 
-#ifndef _KERNEL
-	if (kmflags & KM_SLEEP)
-		assert(p != NULL);
-#endif
-#ifdef KMEM_DEBUG
-	if (p != NULL) {
-		i = p;
-		p = (u_char *)p + sizeof(struct kmem_item);
-		stack_save(&i->stack);
-		mtx_lock(&kmem_items_mtx);
-		LIST_INSERT_HEAD(&kmem_items, i, next);
-		mtx_unlock(&kmem_items_mtx);
-	}
-#endif
+            for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
+                if (size <= spl_kmem_zones[i].size) {
+                    p = zalloc(spl_kmem_zones[i].zone);
+                    break;
+                }
+            }
+        }
+
+    } while(!p);
+
 
     if (p && (kmflags & KM_ZERO))
         bzero(p, size);
-
-    } while(!p);
 
     if (times > 1)
         printf("[spl] kmem_alloc(%lu) took %llu retries\n",
@@ -126,7 +159,20 @@ zfs_kmem_alloc(size_t size, int kmflags)
 void
 zfs_kmem_free(void *buf, size_t size)
 {
-    OSFree(buf, size, zfs_kmem_alloc_tag);
+    int i;
+    /* Find the correct zone */
+    if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
+        OSFree(buf, size, zfs_kmem_alloc_tag);
+    } else {
+
+        for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
+            if (size <= spl_kmem_zones[i].size) {
+                zfree(spl_kmem_zones[i].zone, buf);
+                break;
+            }
+        }
+    }
+
     atomic_sub_64(&total_in_use, size);
 }
 
@@ -137,12 +183,30 @@ void spl_total_in_use(void)
 
 
 void
-spl_kmem_init(void)
+spl_kmem_init(uint64_t total_memory)
 {
+    int i;
+    char name[100];
+
     //OSMT_PAGEABLE
-    zfs_kmem_alloc_tag = OSMalloc_Tagalloc("ZFS general purpose",
+    zfs_kmem_alloc_tag = OSMalloc_Tagalloc("spl.kmem.large",
                                            //OSMT_PAGEABLE);
                                            OSMT_DEFAULT);
+
+    printf("SPL: Total memory %llu\n", total_memory);
+    for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
+        snprintf(name, sizeof(name), "spl.kmem.%u", spl_kmem_zones[i].size);
+        printf("SPL: Initialising zone %d: %u '%s'\n",
+               i,
+               spl_kmem_zones[i].size, name);
+        spl_kmem_zones[i].zone = zinit(spl_kmem_zones[i].size,
+                                       total_memory,
+                                       spl_kmem_zones[i].size,
+                                       name);
+        if (spl_kmem_zones[i].zone == NULL)
+            printf("SPL: Zone allocation %u failed.\n",
+                   spl_kmem_zones[i].size);
+    }
 
 }
 
@@ -174,8 +238,7 @@ kmem_size(void)
 uint64_t
 kmem_used(void)
 {
-    return 0x1234567890;
-	//return (kmem_map->size);
+    return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
 }
 
 static int

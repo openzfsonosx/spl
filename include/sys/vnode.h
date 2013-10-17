@@ -290,7 +290,18 @@ getrootdir(void)
 
 #define vn_ismntpt(vp)   (vnode_mountedhere(vp) != NULL)
 
+extern errno_t VOP_LOOKUP   (struct vnode *, struct vnode **,
+                             struct componentname *, vfs_context_t);
+extern errno_t VOP_MKDIR    (struct vnode *, struct vnode **,
+                             struct componentname *, struct vnode_attr *,
+                             vfs_context_t);
+extern errno_t VOP_REMOVE   (struct vnode *, struct vnode *,
+                             struct componentname *, int, vfs_context_t);
+extern errno_t VOP_SYMLINK  (struct vnode *, struct vnode **,
+                             struct componentname *, struct vnode_attr *,
+                             char *, vfs_context_t);
 
-
+extern int spl_vfs_root(mount_t mount, struct vnode **vp);
+#define VFS_ROOT(V, L, VP) spl_vfs_root((V), (VP))
 
 #endif /* SPL_VNODE_H */

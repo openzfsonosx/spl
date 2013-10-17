@@ -152,7 +152,7 @@ extern char *kmem_asprintf(const char *fmt, ...);
 extern void strfree(char *str);
 extern char *kmem_vasprintf(const char *fmt, va_list ap);
 
-void spl_kmem_init(void);
+void spl_kmem_init(uint64_t);
 void spl_kmem_fini(void);
 
 #ifdef	__cplusplus

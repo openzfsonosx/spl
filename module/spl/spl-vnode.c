@@ -212,6 +212,53 @@ int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
 }
 
 
+errno_t VNOP_LOOKUP(struct vnode *, struct vnode **, struct componentname *, vfs_context_t);
+
+errno_t VOP_LOOKUP(struct vnode *vp, struct vnode **vpp, struct componentname *cn, vfs_context_t ct)
+{
+    return VNOP_LOOKUP(vp,vpp,cn,ct);
+}
+
+extern errno_t VNOP_MKDIR   (struct vnode *, struct vnode **,
+                             struct componentname *, struct vnode_attr *,
+                             vfs_context_t);
+errno_t VOP_MKDIR(struct vnode *vp, struct vnode **vpp,
+                  struct componentname *cn, struct vnode_attr *vattr,
+                  vfs_context_t ct)
+{
+    return VNOP_MKDIR(vp, vpp, cn, vattr, ct);
+}
+
+extern errno_t VNOP_REMOVE  (struct vnode *, struct vnode *,
+                             struct componentname *, int, vfs_context_t);
+errno_t VOP_REMOVE  (struct vnode *vp, struct vnode *dp,
+                             struct componentname *cn, int flags,
+                      vfs_context_t ct)
+{
+    return VNOP_REMOVE(vp, dp, cn, flags, ct);
+}
+
+
+extern errno_t VNOP_SYMLINK (struct vnode *, struct vnode **,
+                             struct componentname *, struct vnode_attr *,
+                             char *, vfs_context_t);
+errno_t VOP_SYMLINK (struct vnode *vp, struct vnode **vpp,
+                             struct componentname *cn, struct vnode_attr *attr,
+                             char *name, vfs_context_t ct)
+{
+    return VNOP_SYMLINK(vp, vpp, cn, attr, name, ct);
+}
+
+#undef VFS_ROOT
+
+extern int VFS_ROOT(mount_t, struct vnode **, vfs_context_t);
+int spl_vfs_root(mount_t mount, struct vnode **vp)
+{
+    return VFS_ROOT(mount, vp, vfs_context_current() );
+}
+
+
+
 void vfs_mountedfrom(struct mount *vfsp, char *osname)
 {
     (void) copystr(osname, vfs_statfs(vfsp)->f_mntfromname, MNAMELEN - 1, 0);
