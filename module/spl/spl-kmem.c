@@ -77,6 +77,9 @@ extern void zfree(void *, void *);
 struct spl_kmem_zone_struct {
     unsigned int size;
     void *zone;
+    char name[32];
+    uint32_t num_allocated;
+    uint64_t bytes_allocated;
 };
 
 
@@ -85,24 +88,25 @@ struct spl_kmem_zone_struct {
  * Anything larger will be allocated as kalloc.large.
  */
 static struct spl_kmem_zone_struct spl_kmem_zones[] = {
-    { 32,     NULL },
-    { 64,     NULL },
-    { 128,    NULL },
-    { 256,    NULL },
-    { 512,    NULL },
-    { 2048,   NULL },
-    { 4096,   NULL },
-    { 8192,   NULL },
-    { 16384,  NULL },
-    { 32768,  NULL },
-    { 65536,  NULL },
-    { 131072, NULL },
+    /* size   zone  name                 #  bytes */
+    { 32,     NULL, "spl.kmem.32",       0, 0 },
+    { 64,     NULL, "spl.kmem.64",       0, 0 },
+    { 128,    NULL, "spl.kmem.128",      0, 0 },
+    { 256,    NULL, "spl.kmem.256",      0, 0 },
+    { 512,    NULL, "spl.kmem.512",      0, 0 },
+    { 2048,   NULL, "spl.kmem.2048",     0, 0 },
+    { 4096,   NULL, "spl.kmem.4096",     0, 0 },
+    { 8192,   NULL, "spl.kmem.8192",     0, 0 },
+    { 16384,  NULL, "spl.kmem.16384",    0, 0 },
+    { 32768,  NULL, "spl.kmem.32768",    0, 0 },
+    { 65536,  NULL, "spl.kmem.65536",    0, 0 },
+    { 131072, NULL, "spl.kmem.131072",   0, 0 },
 };
 
 #define SPL_KMEM_NUM_ZONES (sizeof(spl_kmem_zones) / sizeof(struct spl_kmem_zone_struct))
 
-
-
+static uint32_t spl_large_num_allocated   = 0;
+static uint64_t spl_large_bytes_allocated = 0;
 
 
 void
@@ -151,8 +155,19 @@ zfs_kmem_alloc(size_t size, int kmflags)
 
     if (!p) {
         printf("[spl] kmem_alloc(%lu) failed: \n",size);
-    } else atomic_add_64(&total_in_use, size);
+    } else {
+        atomic_add_64(&total_in_use, size);
 
+        if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
+            atomic_add_64(&spl_large_bytes_allocated, size);
+            atomic_inc_32(&spl_large_num_allocated);
+        } else {
+            atomic_add_64(&spl_kmem_zones[i].bytes_allocated, size);
+            atomic_inc_32(&spl_kmem_zones[i].num_allocated);
+        }
+
+        atomic_add_64(&total_in_use, size);
+    }
 	return (p);
 }
 
@@ -163,11 +178,15 @@ zfs_kmem_free(void *buf, size_t size)
     /* Find the correct zone */
     if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
         OSFree(buf, size, zfs_kmem_alloc_tag);
+        atomic_sub_64(&spl_large_bytes_allocated, size);
+        atomic_dec_32(&spl_large_num_allocated);
     } else {
 
         for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
             if (size <= spl_kmem_zones[i].size) {
                 zfree(spl_kmem_zones[i].zone, buf);
+                atomic_sub_64(&spl_kmem_zones[i].bytes_allocated, size);
+                atomic_dec_32(&spl_kmem_zones[i].num_allocated);
                 break;
             }
         }
@@ -186,7 +205,6 @@ void
 spl_kmem_init(uint64_t total_memory)
 {
     int i;
-    char name[100];
 
     //OSMT_PAGEABLE
     zfs_kmem_alloc_tag = OSMalloc_Tagalloc("spl.kmem.large",
@@ -195,14 +213,13 @@ spl_kmem_init(uint64_t total_memory)
 
     printf("SPL: Total memory %llu\n", total_memory);
     for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
-        snprintf(name, sizeof(name), "spl.kmem.%u", spl_kmem_zones[i].size);
-        printf("SPL: Initialising zone %d: %u '%s'\n",
+        printf("SPL: Initialising zone %d: %u\n",
                i,
-               spl_kmem_zones[i].size, name);
+               spl_kmem_zones[i].size);
         spl_kmem_zones[i].zone = zinit(spl_kmem_zones[i].size,
                                        total_memory,
                                        spl_kmem_zones[i].size,
-                                       name);
+                                       spl_kmem_zones[i].name);
         if (spl_kmem_zones[i].zone == NULL)
             printf("SPL: Zone allocation %u failed.\n",
                    spl_kmem_zones[i].size);
