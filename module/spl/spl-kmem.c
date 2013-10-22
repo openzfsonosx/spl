@@ -209,10 +209,18 @@ zfs_kmem_alloc(size_t size, int kmflags)
                 if (size <= spl_kmem_zones[i].size) {
 #if 0
                     int elm;
+                    int num;
+
+                    if (spl_kmem_zones[i].size <= PAGE_SIZE)
+                        num = PAGE_SIZE / spl_kmem_zones[i].size;
+                    else
+                        num = 4;
+                    num <<= 2;
+
                     /* Check if there is enough space first */
-                    if ((elm = zone_free_count(spl_kmem_zones[i].zone))< 100) {
+                    if ((elm = zone_free_count(spl_kmem_zones[i].zone))< num) {
                         int r;
-                        r = zfill(spl_kmem_zones[i].zone, 200);
+                        r = zfill(spl_kmem_zones[i].zone, num*2);
                         printf("SPL: zone %u low (%u), called zfill (r %d)\n",
                                spl_kmem_zones[i].size, elm, r);
                     }
@@ -296,6 +304,7 @@ void
 spl_kmem_init(uint64_t total_memory)
 {
     int i;
+    int num;
 
     //OSMT_PAGEABLE
     zfs_kmem_alloc_tag = OSMalloc_Tagalloc("spl.kmem.large",
@@ -314,17 +323,17 @@ spl_kmem_init(uint64_t total_memory)
         if (spl_kmem_zones[i].zone == NULL)
             printf("SPL: Zone allocation %u failed.\n",
                    spl_kmem_zones[i].size);
-#if 1
+#if 0
+        zone_change(spl_kmem_zones[i].zone, Z_EXHAUST, TRUE);
         zone_change(spl_kmem_zones[i].zone, Z_NOENCRYPT, TRUE);
         zone_change(spl_kmem_zones[i].zone, Z_COLLECT, FALSE);
-        zone_change(spl_kmem_zones[i].zone, Z_EXPAND, TRUE); // XX
+        zone_change(spl_kmem_zones[i].zone, Z_EXPAND, FALSE); // XX
         zone_change(spl_kmem_zones[i].zone, Z_FOREIGN, TRUE);
         zone_change(spl_kmem_zones[i].zone, Z_NOCALLOUT, TRUE);
         zone_change(spl_kmem_zones[i].zone, Z_CALLERACCT, FALSE);
         zone_change(spl_kmem_zones[i].zone, Z_GZALLOC_EXEMPT, TRUE);
 
         if (i < 99) {
-            int num;
             if (spl_kmem_zones[i].size <= PAGE_SIZE)
                 num = PAGE_SIZE / spl_kmem_zones[i].size;
             else
@@ -336,6 +345,12 @@ spl_kmem_init(uint64_t total_memory)
                                        num);
             printf("Calling zone_prio_refill_configure(%u)\n", num);
         }
+#endif
+#if 0
+        num = (total_memory / spl_kmem_zones[i].size);
+        printf("zfill for %u elements\n", num);
+        zfill(spl_kmem_zones[i].zone, num);
+
 #endif
     }
 
@@ -380,6 +395,11 @@ uint64_t
 kmem_avail(void)
 {
     return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+}
+
+int spl_vm_pool_low(void)
+{
+    return vm_pool_low();
 }
 
 static int

@@ -15,3 +15,4 @@ _zone_prio_refill_configure
 _zfill
 _zone_free_count
 _zone_change
+_vm_pool_low

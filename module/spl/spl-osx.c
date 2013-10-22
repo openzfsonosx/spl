@@ -93,6 +93,17 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     len = sizeof(total_memory);
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
 
+    /*
+     * OSX kernel can only use quarter the memory available. Unless
+     * boot-args zsize is used to bring it to 50%.
+     */
+    vm_size_t zsizearg;
+    if (PE_parse_boot_argn("zsize", &zsizearg, sizeof (zsizearg))) {
+        total_memory = zsizearg * 1024ULL * 1024ULL;
+    } else {
+        total_memory >>= 2;
+    }
+
     physmem = total_memory / PAGE_SIZE;
 
     len = sizeof(utsname.sysname);
