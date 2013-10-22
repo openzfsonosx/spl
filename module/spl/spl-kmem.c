@@ -207,7 +207,19 @@ zfs_kmem_alloc(size_t size, int kmflags)
 
             for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
                 if (size <= spl_kmem_zones[i].size) {
+#if 0
+                    int elm;
+                    /* Check if there is enough space first */
+                    if ((elm = zone_free_count(spl_kmem_zones[i].zone))< 100) {
+                        int r;
+                        r = zfill(spl_kmem_zones[i].zone, 200);
+                        printf("SPL: zone %u low (%u), called zfill (r %d)\n",
+                               spl_kmem_zones[i].size, elm, r);
+                    }
+#endif
                     p = zalloc(spl_kmem_zones[i].zone);
+
+
                     break;
                 }
             }
@@ -269,7 +281,17 @@ void spl_total_in_use(void)
     printf("SPL: memory in use %llu\n", total_in_use);
 }
 
-
+#define Z_EXHAUST       1       /* Make zone exhaustible        */
+#define Z_COLLECT       2       /* Make zone collectable        */
+#define Z_EXPAND        3       /* Make zone expandable         */
+#define Z_FOREIGN       4       /* Allow collectable zone to contain foreign elements */
+#define Z_CALLERACCT    5       /* Account alloc/free against the caller */
+#define Z_NOENCRYPT     6       /* Don't encrypt zone during hibernation */
+#define Z_NOCALLOUT     7       /* Don't asynchronously replenish the zone via
+                                 * callouts
+                                 */
+#define Z_ALIGNMENT_REQUIRED 8
+#define Z_GZALLOC_EXEMPT 9      /* Not tracked in guard allocation mode */
 void
 spl_kmem_init(uint64_t total_memory)
 {
@@ -292,6 +314,29 @@ spl_kmem_init(uint64_t total_memory)
         if (spl_kmem_zones[i].zone == NULL)
             printf("SPL: Zone allocation %u failed.\n",
                    spl_kmem_zones[i].size);
+#if 1
+        zone_change(spl_kmem_zones[i].zone, Z_NOENCRYPT, TRUE);
+        zone_change(spl_kmem_zones[i].zone, Z_COLLECT, FALSE);
+        zone_change(spl_kmem_zones[i].zone, Z_EXPAND, TRUE); // XX
+        zone_change(spl_kmem_zones[i].zone, Z_FOREIGN, TRUE);
+        zone_change(spl_kmem_zones[i].zone, Z_NOCALLOUT, TRUE);
+        zone_change(spl_kmem_zones[i].zone, Z_CALLERACCT, FALSE);
+        zone_change(spl_kmem_zones[i].zone, Z_GZALLOC_EXEMPT, TRUE);
+
+        if (i < 99) {
+            int num;
+            if (spl_kmem_zones[i].size <= PAGE_SIZE)
+                num = PAGE_SIZE / spl_kmem_zones[i].size;
+            else
+                num = 4;
+
+            // Push them a little higher?
+            num <<= 3;
+            zone_prio_refill_configure(spl_kmem_zones[i].zone,
+                                       num);
+            printf("Calling zone_prio_refill_configure(%u)\n", num);
+        }
+#endif
     }
 
     spl_register_oids();
