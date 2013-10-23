@@ -10,6 +10,7 @@ _vm_page_speculative_count
 _VFS_ROOT
 _zinit
 _zalloc
+_zalloc_noblock
 _zfree
 _zone_prio_refill_configure
 _zfill

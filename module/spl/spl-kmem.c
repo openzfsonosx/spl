@@ -70,6 +70,7 @@ extern unsigned int vm_page_speculative_count;
 typedef void * zone_t;
 extern void *zinit( vm_size_t,  vm_size_t,  vm_size_t, char *);
 extern void *zalloc( void *);
+extern void *zalloc_noblock( void *);
 extern void zfree(void *, void *);
 
 struct spl_kmem_zone_struct {
@@ -202,7 +203,12 @@ zfs_kmem_alloc(size_t size, int kmflags)
 
         /* Find the correct zone */
         if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
-            p = OSMalloc(size, zfs_kmem_alloc_tag);
+
+            if (kmflags & KM_NOSLEEP)
+                p = OSMalloc_noblock(size, zfs_kmem_alloc_tag);
+            else
+                p = OSMalloc(size, zfs_kmem_alloc_tag);
+
         } else {
 
             for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
@@ -225,8 +231,11 @@ zfs_kmem_alloc(size_t size, int kmflags)
                                spl_kmem_zones[i].size, elm, r);
                     }
 #endif
-                    p = zalloc(spl_kmem_zones[i].zone);
 
+                    if (kmflags & KM_NOSLEEP)
+                        p = zalloc_noblock(spl_kmem_zones[i].zone);
+                    else
+                        p = zalloc(spl_kmem_zones[i].zone);
 
                     break;
                 }
