@@ -106,8 +106,8 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
             mem = total_memory>>1;
 
     } else {
-        printf("SPL: boot-args zsize not used, restricted to 25% memory\n");
-        total_memory >>= 2;
+        //printf("SPL: boot-args zsize not used, restricted to 25%% memory\n");
+        //total_memory >>= 2;
     }
 
     physmem = total_memory / PAGE_SIZE;

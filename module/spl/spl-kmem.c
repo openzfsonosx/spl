@@ -190,57 +190,42 @@ extern void * IOMallocContiguous(vm_size_t size, vm_size_t alignment,
                                  void * physicalAddress);
 extern void IOFreeContiguous(void * _address, vm_size_t size);
 
+
+extern vm_map_t kernel_map;
+
+#undef kmem_alloc
+#undef kmem_free
+extern kern_return_t    kmem_alloc(
+                                   vm_map_t        map,
+                                   vm_offset_t     *addrp,
+                                   vm_size_t       size);
+
+extern void             kmem_free(
+                                  vm_map_t        map,
+                                  vm_offset_t     addr,
+                                  vm_size_t       size);
+
+
 void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
 	void *p = NULL;
     uint64_t times = 0;
     int i;
+    kern_return_t kr;
+
+    if (!size) return NULL; // FIXME
 
     do {
 
         times++;
 
-        /* Find the correct zone */
-        if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
 
-            if (kmflags & KM_NOSLEEP)
-                p = OSMalloc_noblock(size, zfs_kmem_alloc_tag);
-            else
-                p = OSMalloc(size, zfs_kmem_alloc_tag);
+        kr = kmem_alloc(kernel_map,
+                        (vm_offset_t *)&p,
+                        size);
 
-        } else {
-
-            for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
-                if (size <= spl_kmem_zones[i].size) {
-#if 0
-                    int elm;
-                    int num;
-
-                    if (spl_kmem_zones[i].size <= PAGE_SIZE)
-                        num = PAGE_SIZE / spl_kmem_zones[i].size;
-                    else
-                        num = 4;
-                    num <<= 2;
-
-                    /* Check if there is enough space first */
-                    if ((elm = zone_free_count(spl_kmem_zones[i].zone))< num) {
-                        int r;
-                        r = zfill(spl_kmem_zones[i].zone, num*2);
-                        printf("SPL: zone %u low (%u), called zfill (r %d)\n",
-                               spl_kmem_zones[i].size, elm, r);
-                    }
-#endif
-
-                    if (kmflags & KM_NOSLEEP)
-                        p = zalloc_noblock(spl_kmem_zones[i].zone);
-                    else
-                        p = zalloc(spl_kmem_zones[i].zone);
-
-                    break;
-                }
-            }
-        }
+        if (times > 2) break;
 
     } while(!p);
 
@@ -255,15 +240,6 @@ zfs_kmem_alloc(size_t size, int kmflags)
     if (!p) {
         printf("[spl] kmem_alloc(%lu) failed: \n",size);
     } else {
-
-        if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
-            atomic_add_64(&spl_large_bytes_allocated, size);
-            atomic_inc_32(&spl_large_num_allocated);
-        } else {
-            atomic_add_64(&spl_kmem_zones[i].bytes_allocated, size);
-            atomic_inc_32(&spl_kmem_zones[i].num_allocated);
-        }
-
         atomic_add_64(&total_in_use, size);
     }
 	return (p);
@@ -273,23 +249,8 @@ void
 zfs_kmem_free(void *buf, size_t size)
 {
     int i;
-    /* Find the correct zone */
-    if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
-        OSFree(buf, size, zfs_kmem_alloc_tag);
-        atomic_sub_64(&spl_large_bytes_allocated, size);
-        atomic_dec_32(&spl_large_num_allocated);
-    } else {
 
-        for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
-            if (size <= spl_kmem_zones[i].size) {
-                zfree(spl_kmem_zones[i].zone, buf);
-                atomic_sub_64(&spl_kmem_zones[i].bytes_allocated, size);
-                atomic_dec_32(&spl_kmem_zones[i].num_allocated);
-                break;
-            }
-        }
-    }
-
+    kmem_free(kernel_map, (vm_offset_t)buf, size);
     atomic_sub_64(&total_in_use, size);
 }
 
@@ -298,17 +259,6 @@ void spl_total_in_use(void)
     printf("SPL: memory in use %llu\n", total_in_use);
 }
 
-#define Z_EXHAUST       1       /* Make zone exhaustible        */
-#define Z_COLLECT       2       /* Make zone collectable        */
-#define Z_EXPAND        3       /* Make zone expandable         */
-#define Z_FOREIGN       4       /* Allow collectable zone to contain foreign elements */
-#define Z_CALLERACCT    5       /* Account alloc/free against the caller */
-#define Z_NOENCRYPT     6       /* Don't encrypt zone during hibernation */
-#define Z_NOCALLOUT     7       /* Don't asynchronously replenish the zone via
-                                 * callouts
-                                 */
-#define Z_ALIGNMENT_REQUIRED 8
-#define Z_GZALLOC_EXEMPT 9      /* Not tracked in guard allocation mode */
 void
 spl_kmem_init(uint64_t total_memory)
 {
@@ -321,47 +271,6 @@ spl_kmem_init(uint64_t total_memory)
                                            OSMT_DEFAULT);
 
     printf("SPL: Total memory %llu\n", total_memory);
-    for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
-        printf("SPL: Initialising zone %d: %u\n",
-               i,
-               spl_kmem_zones[i].size);
-        spl_kmem_zones[i].zone = zinit(spl_kmem_zones[i].size,
-                                       total_memory,
-                                       spl_kmem_zones[i].size,
-                                       spl_kmem_zones[i].name);
-        if (spl_kmem_zones[i].zone == NULL)
-            printf("SPL: Zone allocation %u failed.\n",
-                   spl_kmem_zones[i].size);
-#if 0
-        zone_change(spl_kmem_zones[i].zone, Z_EXHAUST, TRUE);
-        zone_change(spl_kmem_zones[i].zone, Z_NOENCRYPT, TRUE);
-        zone_change(spl_kmem_zones[i].zone, Z_COLLECT, FALSE);
-        zone_change(spl_kmem_zones[i].zone, Z_EXPAND, FALSE); // XX
-        zone_change(spl_kmem_zones[i].zone, Z_FOREIGN, TRUE);
-        zone_change(spl_kmem_zones[i].zone, Z_NOCALLOUT, TRUE);
-        zone_change(spl_kmem_zones[i].zone, Z_CALLERACCT, FALSE);
-        zone_change(spl_kmem_zones[i].zone, Z_GZALLOC_EXEMPT, TRUE);
-
-        if (i < 99) {
-            if (spl_kmem_zones[i].size <= PAGE_SIZE)
-                num = PAGE_SIZE / spl_kmem_zones[i].size;
-            else
-                num = 4;
-
-            // Push them a little higher?
-            num <<= 3;
-            zone_prio_refill_configure(spl_kmem_zones[i].zone,
-                                       num);
-            printf("Calling zone_prio_refill_configure(%u)\n", num);
-        }
-#endif
-#if 0
-        num = (total_memory / spl_kmem_zones[i].size);
-        printf("zfill for %u elements\n", num);
-        zfill(spl_kmem_zones[i].zone, num);
-
-#endif
-    }
 
     spl_register_oids();
 
@@ -406,6 +315,7 @@ kmem_avail(void)
     return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
 }
 
+extern int              vm_pool_low(void);
 int spl_vm_pool_low(void)
 {
     return vm_pool_low();
@@ -436,7 +346,7 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 
 	ASSERT(vmp == NULL);
 
-	cache = kmem_alloc(sizeof(*cache), KM_SLEEP);
+	cache = zfs_kmem_alloc(sizeof(*cache), KM_SLEEP);
 	strlcpy(cache->kc_name, name, sizeof(cache->kc_name));
 	cache->kc_constructor = constructor;
 	cache->kc_destructor = destructor;
@@ -450,7 +360,7 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 void
 kmem_cache_destroy(kmem_cache_t *cache)
 {
-	kmem_free(cache, sizeof(*cache));
+	zfs_kmem_free(cache, sizeof(*cache));
 }
 
 void *
@@ -458,7 +368,7 @@ kmem_cache_alloc(kmem_cache_t *cache, int flags)
 {
 	void *p;
 
-	p = kmem_alloc(cache->kc_size, flags);
+	p = zfs_kmem_alloc(cache->kc_size, flags);
 	if (p != NULL && cache->kc_constructor != NULL)
 		kmem_std_constructor(p, cache->kc_size, cache, flags);
 	return (p);
@@ -469,7 +379,7 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
 {
 	if (cache->kc_destructor != NULL)
 		kmem_std_destructor(buf, cache->kc_size, cache);
-	kmem_free(buf, cache->kc_size);
+	zfs_kmem_free(buf, cache->kc_size);
 }
 
 
