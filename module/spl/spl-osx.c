@@ -99,8 +99,14 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
      */
     vm_size_t zsizearg;
     if (PE_parse_boot_argn("zsize", &zsizearg, sizeof (zsizearg))) {
-        total_memory = zsizearg * 1024ULL * 1024ULL;
+        uint64_t mem = zsizearg * 1024ULL * 1024ULL;
+
+        // OSX does not let you set zsize over 50%
+        if (mem > (total_memory>>1))
+            mem = total_memory>>1;
+
     } else {
+        printf("SPL: boot-args zsize not used, restricted to 25% memory\n");
         total_memory >>= 2;
     }
 
