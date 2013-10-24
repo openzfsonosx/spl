@@ -8,12 +8,4 @@ _hostname
 _vm_page_free_count
 _vm_page_speculative_count
 _VFS_ROOT
-_zinit
-_zalloc
-_zalloc_noblock
-_zfree
-_zone_prio_refill_configure
-_zfill
-_zone_free_count
-_zone_change
 _vm_pool_low
