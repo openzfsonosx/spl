@@ -56,6 +56,7 @@ AM_CONDITIONAL([CONFIG_USER], [ true ])
 AC_CONFIG_FILES([
 	Makefile
 	module/Makefile
+	module/spl/KernelExports/Makefile
 	module/spl/Makefile
 	include/Makefile
 	scripts/Makefile

@@ -44,6 +44,7 @@
 #include <vm/vm_map.h>
 #include <mach/host_info.h>
 #include <libkern/OSMalloc.h>
+#include <sys/sysctl.h>
 
 #ifdef _KERNEL
 
@@ -62,55 +63,175 @@ vmem_t *zio_alloc_arena = NULL; /* arena for allocating zio memory */
 
 static uint64_t total_in_use = 0;
 
+
+extern unsigned int vm_page_free_count;
+extern unsigned int vm_page_speculative_count;
+
+typedef void * zone_t;
+extern void *zinit( vm_size_t,  vm_size_t,  vm_size_t, char *);
+extern void *zalloc( void *);
+extern void *zalloc_noblock( void *);
+extern void zfree(void *, void *);
+
+struct spl_kmem_zone_struct {
+    unsigned int size;
+    void *zone;
+    char name[32];
+    uint32_t num_allocated;
+    uint64_t bytes_allocated;
+};
+
+
+/*
+ * Allocate zones for common sizes we want to allocate into.
+ * Anything larger will be allocated as kalloc.large.
+ */
+static struct spl_kmem_zone_struct spl_kmem_zones[] = {
+    /* size   zone  name                 #  bytes */
+    { 32,     NULL, "spl.kmem.32",       0, 0 },
+    { 64,     NULL, "spl.kmem.64",       0, 0 },
+    { 128,    NULL, "spl.kmem.128",      0, 0 },
+    { 256,    NULL, "spl.kmem.256",      0, 0 },
+    { 512,    NULL, "spl.kmem.512",      0, 0 },
+    { 1024,   NULL, "spl.kmem.1024",     0, 0 },
+    { 2048,   NULL, "spl.kmem.2048",     0, 0 },
+    { 4096,   NULL, "spl.kmem.4096",     0, 0 },
+    { 8192,   NULL, "spl.kmem.8192",     0, 0 },
+    { 16384,  NULL, "spl.kmem.16384",    0, 0 },
+    { 32768,  NULL, "spl.kmem.32768",    0, 0 },
+    { 65536,  NULL, "spl.kmem.65536",    0, 0 },
+    { 131072, NULL, "spl.kmem.131072",   0, 0 },
+    { 262144, NULL, "spl.kmem.262144",   0, 0 },
+};
+
+#define SPL_KMEM_NUM_ZONES (sizeof(spl_kmem_zones) / sizeof(struct spl_kmem_zone_struct))
+
+static uint32_t spl_large_num_allocated   = 0;
+static uint64_t spl_large_bytes_allocated = 0;
+
+void spl_register_oids(void);
+void spl_unregister_oids(void);
+SYSCTL_DECL(_spl);
+SYSCTL_NODE( , OID_AUTO, spl, CTLFLAG_RW, 0, "Solaris Porting Layer");
+struct sysctl_oid_list sysctl__spl_children;
+
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_32, CTLFLAG_RD,
+            &spl_kmem_zones[0].bytes_allocated, "kmem.32 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_64, CTLFLAG_RD,
+            &spl_kmem_zones[1].bytes_allocated, "kmem.64 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_128, CTLFLAG_RD,
+            &spl_kmem_zones[2].bytes_allocated, "kmem.128 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_256, CTLFLAG_RD,
+            &spl_kmem_zones[3].bytes_allocated, "kmem.256 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_512, CTLFLAG_RD,
+            &spl_kmem_zones[4].bytes_allocated, "kmem.512 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_1024, CTLFLAG_RD,
+            &spl_kmem_zones[5].bytes_allocated, "kmem.1024 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_2048, CTLFLAG_RD,
+            &spl_kmem_zones[6].bytes_allocated, "kmem.2048 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_4096, CTLFLAG_RD,
+            &spl_kmem_zones[7].bytes_allocated, "kmem.4096 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_8192, CTLFLAG_RD,
+            &spl_kmem_zones[8].bytes_allocated, "kmem.8192 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_16384, CTLFLAG_RD,
+            &spl_kmem_zones[9].bytes_allocated, "kmem.16384 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_32768, CTLFLAG_RD,
+            &spl_kmem_zones[10].bytes_allocated, "kmem.32768 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_65536, CTLFLAG_RD,
+            &spl_kmem_zones[11].bytes_allocated, "kmem.65536 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_131072, CTLFLAG_RD,
+           &spl_kmem_zones[12].bytes_allocated, "kmem.131072 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_262144, CTLFLAG_RD,
+           &spl_kmem_zones[13].bytes_allocated, "kmem.262144 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_large, CTLFLAG_RD,
+           &spl_large_bytes_allocated, "kmem.large bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_total, CTLFLAG_RD,
+           &total_in_use, "kmem.total bytes allocated");
+
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_32, CTLFLAG_RD,
+      &spl_kmem_zones[0].num_allocated, 0, "kmem.32 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_64, CTLFLAG_RD,
+      &spl_kmem_zones[1].num_allocated, 0, "kmem.64 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_128, CTLFLAG_RD,
+      &spl_kmem_zones[2].num_allocated, 0, "kmem.128 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_256, CTLFLAG_RD,
+      &spl_kmem_zones[3].num_allocated, 0, "kmem.256 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_512, CTLFLAG_RD,
+      &spl_kmem_zones[4].num_allocated, 0, "kmem.512 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_1024, CTLFLAG_RD,
+      &spl_kmem_zones[5].num_allocated, 0, "kmem.1024 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_2048, CTLFLAG_RD,
+      &spl_kmem_zones[6].num_allocated, 0, "kmem.2048 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_4096, CTLFLAG_RD,
+      &spl_kmem_zones[7].num_allocated, 0, "kmem.4096 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_8192, CTLFLAG_RD,
+      &spl_kmem_zones[8].num_allocated, 0, "kmem.8192 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_16384, CTLFLAG_RD,
+      &spl_kmem_zones[9].num_allocated, 0, "kmem.16384 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_32768, CTLFLAG_RD,
+      &spl_kmem_zones[10].num_allocated, 0, "kmem.32768 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_65536, CTLFLAG_RD,
+      &spl_kmem_zones[11].num_allocated, 0, "kmem.65536 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_131072, CTLFLAG_RD,
+      &spl_kmem_zones[12].num_allocated, 0, "kmem.131072 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_262144, CTLFLAG_RD,
+      &spl_kmem_zones[13].num_allocated, 0, "kmem.262144 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_large, CTLFLAG_RD,
+      &spl_large_num_allocated, 0, "kmem.large active allocations");
+
+
 void
 strfree(char *str)
 {
-    kmem_free(str, strlen(str) + 1);
+    OSFree(str, strlen(str) + 1, zfs_kmem_alloc_tag);
 }
 
+extern void * IOMallocContiguous(vm_size_t size, vm_size_t alignment,
+                                 void * physicalAddress);
+extern void IOFreeContiguous(void * _address, vm_size_t size);
+
+
+extern vm_map_t kernel_map;
+
+#undef kmem_alloc
+#undef kmem_free
+extern kern_return_t    kmem_alloc(
+                                   vm_map_t        map,
+                                   vm_offset_t     *addrp,
+                                   vm_size_t       size);
+
+extern void             kmem_free(
+                                  vm_map_t        map,
+                                  vm_offset_t     addr,
+                                  vm_size_t       size);
 
 
 void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
-	void *p;
+	void *p = NULL;
     uint64_t times = 0;
-#ifdef KMEM_DEBUG
-	struct kmem_item *i;
+    int i;
+    kern_return_t kr;
 
-	size += sizeof(struct kmem_item);
-#endif
+    if (!size) return NULL; // FIXME
 
     do {
 
         times++;
 
-#if 0
-    if (kmflags & KM_NOSLEEP)
-        p = OSMalloc_noblock(size, zfs_kmem_alloc_tag);
-    else
-#endif
-        p = OSMalloc(size, zfs_kmem_alloc_tag);
 
-#ifndef _KERNEL
-	if (kmflags & KM_SLEEP)
-		assert(p != NULL);
-#endif
-#ifdef KMEM_DEBUG
-	if (p != NULL) {
-		i = p;
-		p = (u_char *)p + sizeof(struct kmem_item);
-		stack_save(&i->stack);
-		mtx_lock(&kmem_items_mtx);
-		LIST_INSERT_HEAD(&kmem_items, i, next);
-		mtx_unlock(&kmem_items_mtx);
-	}
-#endif
+        kr = kmem_alloc(kernel_map,
+                        (vm_offset_t *)&p,
+                        size);
+
+        if (times > 2) break;
+
+    } while(!p);
+
 
     if (p && (kmflags & KM_ZERO))
         bzero(p, size);
-
-    } while(!p);
 
     if (times > 1)
         printf("[spl] kmem_alloc(%lu) took %llu retries\n",
@@ -118,15 +239,18 @@ zfs_kmem_alloc(size_t size, int kmflags)
 
     if (!p) {
         printf("[spl] kmem_alloc(%lu) failed: \n",size);
-    } else atomic_add_64(&total_in_use, size);
-
+    } else {
+        atomic_add_64(&total_in_use, size);
+    }
 	return (p);
 }
 
 void
 zfs_kmem_free(void *buf, size_t size)
 {
-    OSFree(buf, size, zfs_kmem_alloc_tag);
+    int i;
+
+    kmem_free(kernel_map, (vm_offset_t)buf, size);
     atomic_sub_64(&total_in_use, size);
 }
 
@@ -135,14 +259,20 @@ void spl_total_in_use(void)
     printf("SPL: memory in use %llu\n", total_in_use);
 }
 
-
 void
-spl_kmem_init(void)
+spl_kmem_init(uint64_t total_memory)
 {
+    int i;
+    int num;
+
     //OSMT_PAGEABLE
-    zfs_kmem_alloc_tag = OSMalloc_Tagalloc("ZFS general purpose",
+    zfs_kmem_alloc_tag = OSMalloc_Tagalloc("spl.kmem.large",
                                            //OSMT_PAGEABLE);
                                            OSMT_DEFAULT);
+
+    printf("SPL: Total memory %llu\n", total_memory);
+
+    spl_register_oids();
 
 }
 
@@ -150,6 +280,7 @@ void
 spl_kmem_fini(void)
 {
     OSMalloc_Tagfree(zfs_kmem_alloc_tag);
+    spl_unregister_oids();
 }
 
 
@@ -174,8 +305,20 @@ kmem_size(void)
 uint64_t
 kmem_used(void)
 {
-    return 0x1234567890;
-	//return (kmem_map->size);
+    return total_in_use;
+    //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+}
+
+uint64_t
+kmem_avail(void)
+{
+    return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+}
+
+extern int              vm_pool_low(void);
+int spl_vm_pool_low(void)
+{
+    return vm_pool_low();
 }
 
 static int
@@ -203,7 +346,7 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 
 	ASSERT(vmp == NULL);
 
-	cache = kmem_alloc(sizeof(*cache), KM_SLEEP);
+	cache = zfs_kmem_alloc(sizeof(*cache), KM_SLEEP);
 	strlcpy(cache->kc_name, name, sizeof(cache->kc_name));
 	cache->kc_constructor = constructor;
 	cache->kc_destructor = destructor;
@@ -217,7 +360,7 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 void
 kmem_cache_destroy(kmem_cache_t *cache)
 {
-	kmem_free(cache, sizeof(*cache));
+	zfs_kmem_free(cache, sizeof(*cache));
 }
 
 void *
@@ -225,7 +368,7 @@ kmem_cache_alloc(kmem_cache_t *cache, int flags)
 {
 	void *p;
 
-	p = kmem_alloc(cache->kc_size, flags);
+	p = zfs_kmem_alloc(cache->kc_size, flags);
 	if (p != NULL && cache->kc_constructor != NULL)
 		kmem_std_constructor(p, cache->kc_size, cache, flags);
 	return (p);
@@ -236,7 +379,7 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
 {
 	if (cache->kc_destructor != NULL)
 		kmem_std_destructor(buf, cache->kc_size, cache);
-	kmem_free(buf, cache->kc_size);
+	zfs_kmem_free(buf, cache->kc_size);
 }
 
 
@@ -332,3 +475,76 @@ kmem_asprintf(const char *fmt, ...)
     return ptr;
 }
 
+
+
+void spl_register_oids(void)
+{
+    sysctl_register_oid(&sysctl__spl);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_32);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_64);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_128);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_256);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_512);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_1024);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_2048);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_4096);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_8192);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_16384);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_32768);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_65536);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_131072);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_262144);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_large);
+    sysctl_register_oid(&sysctl__spl_kmem_bytes_total);
+    sysctl_register_oid(&sysctl__spl_kmem_count_32);
+    sysctl_register_oid(&sysctl__spl_kmem_count_64);
+    sysctl_register_oid(&sysctl__spl_kmem_count_128);
+    sysctl_register_oid(&sysctl__spl_kmem_count_256);
+    sysctl_register_oid(&sysctl__spl_kmem_count_512);
+    sysctl_register_oid(&sysctl__spl_kmem_count_1024);
+    sysctl_register_oid(&sysctl__spl_kmem_count_2048);
+    sysctl_register_oid(&sysctl__spl_kmem_count_4096);
+    sysctl_register_oid(&sysctl__spl_kmem_count_8192);
+    sysctl_register_oid(&sysctl__spl_kmem_count_16384);
+    sysctl_register_oid(&sysctl__spl_kmem_count_32768);
+    sysctl_register_oid(&sysctl__spl_kmem_count_65536);
+    sysctl_register_oid(&sysctl__spl_kmem_count_131072);
+    sysctl_register_oid(&sysctl__spl_kmem_count_262144);
+    sysctl_register_oid(&sysctl__spl_kmem_count_large);
+}
+
+void spl_unregister_oids(void)
+{
+    sysctl_unregister_oid(&sysctl__spl);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_32);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_64);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_128);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_256);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_512);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_1024);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_2048);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_4096);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_8192);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_16384);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_32768);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_65536);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_131072);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_262144);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_large);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_total);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_32);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_64);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_128);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_256);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_512);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_1024);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_2048);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_4096);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_8192);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_16384);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_32768);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_65536);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_131072);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_262144);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_large);
+}

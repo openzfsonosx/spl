@@ -125,6 +125,9 @@ void *zfs_kmem_alloc(size_t size, int kmflags);
 void zfs_kmem_free(void *buf, size_t size);
 uint64_t kmem_size(void);
 uint64_t kmem_used(void);
+uint64_t kmem_avail(void);
+int spl_vm_pool_low(void);
+
 kmem_cache_t *kmem_cache_create(char *name, size_t bufsize, size_t align,
     int (*constructor)(void *, void *, int), void (*destructor)(void *, void *),
     void (*reclaim)(void *), void *_private, vmem_t *vmp, int cflags);
@@ -152,7 +155,7 @@ extern char *kmem_asprintf(const char *fmt, ...);
 extern void strfree(char *str);
 extern char *kmem_vasprintf(const char *fmt, va_list ap);
 
-void spl_kmem_init(void);
+void spl_kmem_init(uint64_t);
 void spl_kmem_fini(void);
 
 #ifdef	__cplusplus
