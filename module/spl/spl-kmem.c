@@ -225,7 +225,7 @@ zfs_kmem_alloc(size_t size, int kmflags)
                         (vm_offset_t *)&p,
                         size);
 
-        if (times > 2) break;
+        if (times > 0) break;
 
     } while(!p);
 
