@@ -66,10 +66,10 @@ spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	@cp -f $(INFO_PLIST) spl.kext/Contents/
 	@cp -f $(PLIST_STRING) spl.kext/Contents/Resources/English.lproj/
 	@cp -f spl spl.kext/Contents/MacOS/
-	@mkdir -p spl.kext/Contents/Plugins/KernelExports.kext/
-	@cp -f KernelExports/KernelExports spl.kext/Contents/Plugins/KernelExports.kext/
-	cp -f KernelExports/Info.plist spl.kext/Contents/Plugins/KernelExports.kext/
-	cp -f KernelExports/version.plist spl.kext/Contents/Plugins/KernelExports.kext/
+	@mkdir -p spl.kext/Contents/PlugIns/KernelExports.kext/
+	@cp -f KernelExports/KernelExports spl.kext/Contents/PlugIns/KernelExports.kext/
+	cp -f KernelExports/Info.plist spl.kext/Contents/PlugIns/KernelExports.kext/
+	cp -f KernelExports/version.plist spl.kext/Contents/PlugIns/KernelExports.kext/
 	mkdir -p KernelExports.kext/Contents/MacOS
 	cp -f KernelExports/KernelExports KernelExports.kext/Contents/MacOS/
 	cp -f KernelExports/Info.plist KernelExports.kext/Contents/
