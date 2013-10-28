@@ -102,9 +102,12 @@ zfs_kmem_alloc(size_t size, int kmflags)
 
     if (!size) return NULL; // FIXME
 
-    kr = kmem_alloc(kernel_map,
-                    (vm_offset_t *)&p,
-                    size);
+    if (size < PAGE_SIZE)
+        p = OSMalloc(size, zfs_kmem_alloc_tag);
+    else
+        kr = kmem_alloc(kernel_map,
+                        (vm_offset_t *)&p,
+                        size);
 
     if (p && (kmflags & KM_ZERO))
         bzero(p, size);
@@ -120,7 +123,10 @@ zfs_kmem_alloc(size_t size, int kmflags)
 void
 zfs_kmem_free(void *buf, size_t size)
 {
-    kmem_free(kernel_map, (vm_offset_t)buf, size);
+    if (size < PAGE_SIZE)
+        OSFree(buf, size, zfs_kmem_alloc_tag);
+    else
+        kmem_free(kernel_map, (vm_offset_t)buf, size);
     atomic_sub_64(&total_in_use, size);
 }
 
