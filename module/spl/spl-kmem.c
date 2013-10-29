@@ -133,6 +133,8 @@ zfs_kmem_alloc(size_t size, int kmflags)
 void
 zfs_kmem_free(void *buf, size_t size)
 {
+    if (!buf || !size) return;
+
 #ifdef SPL_HYBRID_ALLOCATOR
     if (size < PAGE_SIZE)
         OSFree(buf, size, zfs_kmem_alloc_tag);
