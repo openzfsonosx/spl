@@ -92,6 +92,7 @@ SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_total, CTLFLAG_RD,
            &total_in_use, "kmem.total bytes allocated");
 
 
+//#define SPL_HYBRID_ALLOCATOR
 
 
 void *
@@ -102,9 +103,21 @@ zfs_kmem_alloc(size_t size, int kmflags)
 
     if (!size) return NULL; // FIXME
 
-    kr = kmem_alloc(kernel_map,
-                    (vm_offset_t *)&p,
-                    size);
+#ifdef SPL_HYBRID_ALLOCATOR
+    if (size < PAGE_SIZE)
+        p = OSMalloc(size, zfs_kmem_alloc_tag);
+    else
+        kr = kmem_alloc(kernel_map,
+                        (vm_offset_t *)&p,
+                        size);
+
+#else
+    p = OSMalloc(size, zfs_kmem_alloc_tag);
+#endif
+
+
+
+
 
     if (p && (kmflags & KM_ZERO))
         bzero(p, size);
@@ -120,7 +133,17 @@ zfs_kmem_alloc(size_t size, int kmflags)
 void
 zfs_kmem_free(void *buf, size_t size)
 {
-    kmem_free(kernel_map, (vm_offset_t)buf, size);
+    if (!buf || !size) return;
+
+#ifdef SPL_HYBRID_ALLOCATOR
+    if (size < PAGE_SIZE)
+        OSFree(buf, size, zfs_kmem_alloc_tag);
+    else
+        kmem_free(kernel_map, (vm_offset_t)buf, size);
+#else
+    OSFree(buf, size, zfs_kmem_alloc_tag);
+#endif
+
     atomic_sub_64(&total_in_use, size);
 }
 
