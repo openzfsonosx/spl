@@ -37,7 +37,7 @@
 #include <string.h>
 #include <sys/sysmacros.h>
 #include <libkern/libkern.h>
-
+#include <spl/events.h>
 
 #include <sys/stropts.h>
 

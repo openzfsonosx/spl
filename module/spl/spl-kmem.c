@@ -99,7 +99,7 @@ void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
 	void *p = NULL;
-    kern_return_t kr;
+    //kern_return_t kr;
 
     if (!size) return NULL; // FIXME
 

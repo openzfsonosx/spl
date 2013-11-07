@@ -39,6 +39,7 @@ spl_SOURCES = 	\
 	spl-cred.c \
 	spl-ddi.c \
 	spl-err.c \
+	spl-events.c \
 	spl-kmem.c \
 	spl-kobj.c \
 	spl-kstat.c \

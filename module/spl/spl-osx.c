@@ -83,6 +83,7 @@ uint32_t zone_get_hostid(void *zone)
     return myhostid;
 }
 
+
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
     //max_ncpus = processor_avail_count;
@@ -136,6 +137,8 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     spl_rwlock_init();
     spl_taskq_init();
 
+    spl_notification_init();
+
     IOLog("SPL: Loaded module v0.01 (ncpu %d, memsize %llu, pages %llu)\n",
           max_ncpus, total_memory, physmem);
     return KERN_SUCCESS;
@@ -144,6 +147,9 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 
 kern_return_t spl_stop (kmod_info_t * ki, void * d)
 {
+    // If all listeners are not gone, we can not unload.
+    if (spl_notification_fini())
+        return KERN_FAILURE;
     spl_taskq_fini();
     spl_rwlock_fini();
     spl_mutex_subsystem_fini();
