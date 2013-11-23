@@ -308,5 +308,17 @@ int  spl_vnode_init(void);
 extern int spl_vfs_root(mount_t mount, struct vnode **vp);
 #define VFS_ROOT(V, L, VP) spl_vfs_root((V), (VP))
 
+int spl_vn_rdwr(
+            enum uio_rw rw,
+            struct vnode *vp,
+            caddr_t base,
+            ssize_t len,
+            offset_t offset,
+            enum uio_seg seg,
+            int ioflag,
+            rlim64_t ulimit,        /* meaningful only if rw is UIO_WRITE */
+            cred_t *cr,
+            ssize_t *residp);
+#define VN_RDWR(A,B,C,D,E,F,G,H,I,J) spl_vn_rdwr(A,&(B),C,D,E,F,G,H,I,J)
 
 #endif /* SPL_VNODE_H */

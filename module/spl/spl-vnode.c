@@ -495,17 +495,6 @@ void releasef(int fd)
 }
 
 
-int spl_vn_rdwr(
-            enum uio_rw rw,
-            struct vnode *vp,
-            caddr_t base,
-            ssize_t len,
-            offset_t offset,
-            enum uio_seg seg,
-            int ioflag,
-            rlim64_t ulimit,        /* meaningful only if rw is UIO_WRITE */
-            cred_t *cr,
-            ssize_t *residp);
 
 /*
  * Our version of vn_rdwr, here "vp" is not actually a vnode, but a ptr
