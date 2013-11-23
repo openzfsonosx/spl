@@ -301,7 +301,12 @@ extern errno_t VOP_SYMLINK  (struct vnode *, struct vnode **,
                              struct componentname *, struct vnode_attr *,
                              char *, vfs_context_t);
 
+void spl_vnode_fini(void);
+int  spl_vnode_init(void);
+
+
 extern int spl_vfs_root(mount_t mount, struct vnode **vp);
 #define VFS_ROOT(V, L, VP) spl_vfs_root((V), (VP))
+
 
 #endif /* SPL_VNODE_H */

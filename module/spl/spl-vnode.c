@@ -29,6 +29,8 @@
 #include <sys/vnode.h>
 #include <spl-debug.h>
 #include <sys/malloc.h>
+#include <sys/list.h>
+#include <sys/file.h>
 #include <IOKit/IOLib.h>
 
 int
@@ -402,3 +404,128 @@ void dnlc_update(struct vnode *vp, char *name, struct vnode *tp)
     cache_enter(vp, tp==DNLC_NO_VNODE?NULL:tp, &cn);
     return;
 }
+
+
+
+static kmutex_t spl_getf_lock;
+static list_t   spl_getf_list;
+
+
+int spl_vnode_init(void)
+{
+    mutex_init(&spl_getf_lock, NULL, MUTEX_DEFAULT, NULL);
+    list_create(&spl_getf_list, sizeof (struct spl_fileproc),
+		offsetof(struct spl_fileproc, f_next));
+    return 0;
+}
+
+void spl_vnode_fini(void)
+{
+    mutex_destroy(&spl_getf_lock);
+    list_destroy(&spl_getf_list);
+}
+
+#include <sys/file.h>
+struct fileproc;
+
+extern int fp_drop(struct proc *p, int fd, struct fileproc *fp, int locked);
+extern int fp_lookup(struct proc *p, int fd, struct fileproc **resultfp, int locked);
+extern int fd_rdwr(int fd, enum uio_rw, uint64_t base, int64_t len,
+                   enum uio_seg, off_t offset, int io_flg, int64_t *aresid);
+
+
+/*
+ * getf(int fd) - hold a lock on a file descriptor, to be released by calling
+ * releasef(). On OSX we will also look up the vnode of the fd for calls
+ * to spl_vn_rdwr().
+ */
+void *getf(int fd)
+{
+    struct fileproc     *fp  = NULL;
+    struct spl_fileproc *sfp = NULL;
+
+    /*
+     * We should probably keep the fp reference around so we can onlock it
+     * properly, but for the moment, we just look it up again in releasef
+     * and unlock it twice
+     */
+
+    sfp = kmem_alloc(sizeof(*sfp), KM_SLEEP);
+    if (!sfp) return NULL;
+
+    if (fp_lookup(current_proc(), fd, &fp, 0/*!locked*/)) {
+        kmem_free(fp, sizeof(*sfp));
+        return (NULL);
+    }
+
+    sfp->f_fd     = fd;
+    sfp->f_vnode  = (void *)&sfp->f_fd;
+    sfp->f_offset = 0;
+    sfp->f_proc   = current_proc();
+    sfp->f_fp     = fp;
+
+	mutex_enter(&spl_getf_lock);
+	list_insert_tail(&spl_getf_list, sfp);
+	mutex_exit(&spl_getf_lock);
+
+    return fp;
+}
+
+
+void releasef(int fd)
+{
+    struct spl_fileproc *fp = NULL;
+    struct proc *p;
+
+    p = current_proc();
+	mutex_enter(&spl_getf_lock);
+	for (fp = list_head(&spl_getf_list); fp != NULL;
+	     fp = list_next(&spl_getf_list, fp)) {
+        if ((fp->f_proc == p) && fp->f_fd == fd) break;
+    }
+	mutex_exit(&spl_getf_lock);
+    if (!fp) return; // Not found
+
+    // Another release for the lock in getf()
+    fp_drop(p, fd, fp->f_fp, 0/*!locked*/);
+
+	mutex_enter(&spl_getf_lock);
+	list_remove(&spl_getf_list, fp);
+	mutex_exit(&spl_getf_lock);
+}
+
+
+int spl_vn_rdwr(
+            enum uio_rw rw,
+            struct vnode *vp,
+            caddr_t base,
+            ssize_t len,
+            offset_t offset,
+            enum uio_seg seg,
+            int ioflag,
+            rlim64_t ulimit,        /* meaningful only if rw is UIO_WRITE */
+            cred_t *cr,
+            ssize_t *residp);
+
+/*
+ * Our version of vn_rdwr, here "vp" is not actually a vnode, but a ptr
+ * to the fd to use, so we can call fd_rdwr().
+ */
+#undef vn_rdwr
+int spl_vn_rdwr(enum uio_rw rw,
+                struct vnode *vp,
+                caddr_t base,
+                ssize_t len,
+                offset_t offset,
+                enum uio_seg seg,
+                int ioflag,
+                rlim64_t ulimit,    /* meaningful only if rw is UIO_WRITE */
+                cred_t *cr,
+                ssize_t *residp)
+{
+    int *fdp = (int *)vp;
+
+    return fd_rdwr(*fdp, rw, (uint64_t)base, len, seg, offset, ioflag,
+                   (int64_t *)residp);
+}
+
