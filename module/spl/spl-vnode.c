@@ -454,12 +454,12 @@ void *getf(int fd)
     if (!sfp) return NULL;
 
     if (fp_lookup(current_proc(), fd, &fp, 0/*!locked*/)) {
-        kmem_free(fp, sizeof(*sfp));
+        kmem_free(sfp, sizeof(*sfp));
         return (NULL);
     }
 
+    sfp->f_vnode  = NULL;
     sfp->f_fd     = fd;
-    sfp->f_vnode  = (void *)&sfp->f_fd;
     sfp->f_offset = 0;
     sfp->f_proc   = current_proc();
     sfp->f_fp     = fp;
@@ -523,9 +523,9 @@ int spl_vn_rdwr(enum uio_rw rw,
                 cred_t *cr,
                 ssize_t *residp)
 {
-    int *fdp = (int *)vp;
+    struct spl_fileproc *sfp = (struct spl_fileproc*)vp;
 
-    return fd_rdwr(*fdp, rw, (uint64_t)base, len, seg, offset, ioflag,
+    return fd_rdwr(sfp->f_fd, rw, (uint64_t)base, len, seg, offset, ioflag,
                    (int64_t *)residp);
 }
 

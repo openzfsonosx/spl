@@ -8,8 +8,8 @@
 #include <sys/list.h>
 
 struct spl_fileproc {
-    list_node_t  f_next;   /* next zfsdev_state_t link */
     void        *f_vnode;  // this points to the "fd" so we can look it up.
+    list_node_t  f_next;   /* next zfsdev_state_t link */
     int          f_fd;
     uint64_t     f_offset;
     void        *f_proc;
