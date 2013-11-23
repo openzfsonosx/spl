@@ -319,6 +319,5 @@ int spl_vn_rdwr(
             rlim64_t ulimit,        /* meaningful only if rw is UIO_WRITE */
             cred_t *cr,
             ssize_t *residp);
-#define VN_RDWR(A,B,C,D,E,F,G,H,I,J) spl_vn_rdwr(A,&(B),C,D,E,F,G,H,I,J)
 
 #endif /* SPL_VNODE_H */

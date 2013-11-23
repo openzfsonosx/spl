@@ -458,7 +458,7 @@ void *getf(int fd)
         return (NULL);
     }
 
-    sfp->f_vnode  = NULL;
+    sfp->f_vnode  = sfp;
     sfp->f_fd     = fd;
     sfp->f_offset = 0;
     sfp->f_proc   = current_proc();
