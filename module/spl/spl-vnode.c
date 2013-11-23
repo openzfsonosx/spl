@@ -468,7 +468,7 @@ void *getf(int fd)
 	list_insert_tail(&spl_getf_list, sfp);
 	mutex_exit(&spl_getf_lock);
 
-    return fp;
+    return sfp;
 }
 
 
