@@ -468,6 +468,9 @@ void *getf(int fd)
 	list_insert_tail(&spl_getf_list, sfp);
 	mutex_exit(&spl_getf_lock);
 
+    printf("SPL: new getf(%d) ret %p fp is %p so vnode set to %p\n",
+           fd, sfp, fp, sfp->f_vnode);
+
     return sfp;
 }
 
@@ -476,6 +479,8 @@ void releasef(int fd)
 {
     struct spl_fileproc *fp = NULL;
     struct proc *p;
+
+    printf("SPL: releasef(%d)\n", fd);
 
     p = current_proc();
 	mutex_enter(&spl_getf_lock);
@@ -486,12 +491,15 @@ void releasef(int fd)
 	mutex_exit(&spl_getf_lock);
     if (!fp) return; // Not found
 
+    printf("SPL: releasing %p\n", fp);
+
     // Another release for the lock in getf()
     fp_drop(p, fd, fp->f_fp, 0/*!locked*/);
 
 	mutex_enter(&spl_getf_lock);
 	list_remove(&spl_getf_list, fp);
 	mutex_exit(&spl_getf_lock);
+    kmem_free(fp, sizeof(*fp));
 }
 
 
@@ -500,7 +508,6 @@ void releasef(int fd)
  * Our version of vn_rdwr, here "vp" is not actually a vnode, but a ptr
  * to the fd to use, so we can call fd_rdwr().
  */
-#undef vn_rdwr
 int spl_vn_rdwr(enum uio_rw rw,
                 struct vnode *vp,
                 caddr_t base,
@@ -513,8 +520,35 @@ int spl_vn_rdwr(enum uio_rw rw,
                 ssize_t *residp)
 {
     struct spl_fileproc *sfp = (struct spl_fileproc*)vp;
+    uio_t *auio;
+    int spacetype;
+    int error=0;
+    vfs_context_t vctx;
 
-    return fd_rdwr(sfp->f_fd, rw, (uint64_t)base, len, seg, offset, ioflag,
-                   (int64_t *)residp);
+    spacetype = UIO_SEG_IS_USER_SPACE(seg) ? UIO_USERSPACE32 : UIO_SYSSPACE;
+
+    vctx = vfs_context_create((vfs_context_t)0);
+    auio = uio_create(1, 0, spacetype, rw);
+    uio_reset(auio, offset, spacetype, rw);
+    uio_addiov(auio, (uint64_t)(uintptr_t)base, len);
+
+    if (rw == UIO_READ) {
+        error = fo_read(sfp->f_fp, auio, ioflag, vctx);
+    } else {
+        error = fo_write(sfp->f_fp, auio, ioflag, vctx);
+    }
+
+    if (residp) {
+        *residp = uio_resid(auio);
+    } else {
+        if (uio_resid(auio) && error == 0)
+            error = EIO;
+    }
+
+    uio_free(auio);
+    vfs_context_rele(vctx);
+
+    return (error);
 }
+
 
