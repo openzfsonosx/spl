@@ -14,6 +14,7 @@ struct spl_fileproc {
     uint64_t     f_offset;
     void        *f_proc;
     void        *f_fp;
+    int          f_writes;
 };
 
 //typedef struct spl_fileproc file_t;

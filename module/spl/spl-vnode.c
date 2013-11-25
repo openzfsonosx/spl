@@ -429,10 +429,13 @@ void spl_vnode_fini(void)
 struct fileproc;
 
 extern int fp_drop(struct proc *p, int fd, struct fileproc *fp, int locked);
+extern int fp_drop_written(struct proc *p, int fd, struct fileproc *fp,
+                           int locked);
 extern int fp_lookup(struct proc *p, int fd, struct fileproc **resultfp, int locked);
-extern int fd_rdwr(int fd, enum uio_rw, uint64_t base, int64_t len,
-                   enum uio_seg, off_t offset, int io_flg, int64_t *aresid);
-
+extern int fo_read(struct fileproc *fp, struct uio *uio, int flags,
+                   vfs_context_t ctx);
+extern int fo_write(struct fileproc *fp, struct uio *uio, int flags,
+                    vfs_context_t ctx);
 
 /*
  * getf(int fd) - hold a lock on a file descriptor, to be released by calling
@@ -445,9 +448,8 @@ void *getf(int fd)
     struct spl_fileproc *sfp = NULL;
 
     /*
-     * We should probably keep the fp reference around so we can onlock it
-     * properly, but for the moment, we just look it up again in releasef
-     * and unlock it twice
+     * We keep the "fp" pointer as well, both for unlocking in releasef() and
+     * used in vn_rdwr().
      */
 
     sfp = kmem_alloc(sizeof(*sfp), KM_SLEEP);
@@ -458,6 +460,10 @@ void *getf(int fd)
         return (NULL);
     }
 
+    /*
+     * The f_vnode ptr is used to point back to the "sfp" node itself, as it is
+     * the only information passed to vn_rdwr.
+     */
     sfp->f_vnode  = sfp;
     sfp->f_fd     = fd;
     sfp->f_offset = 0;
@@ -468,8 +474,8 @@ void *getf(int fd)
 	list_insert_tail(&spl_getf_list, sfp);
 	mutex_exit(&spl_getf_lock);
 
-    printf("SPL: new getf(%d) ret %p fp is %p so vnode set to %p\n",
-           fd, sfp, fp, sfp->f_vnode);
+    //printf("SPL: new getf(%d) ret %p fp is %p so vnode set to %p\n",
+    //     fd, sfp, fp, sfp->f_vnode);
 
     return sfp;
 }
@@ -480,7 +486,7 @@ void releasef(int fd)
     struct spl_fileproc *fp = NULL;
     struct proc *p;
 
-    printf("SPL: releasef(%d)\n", fd);
+    //printf("SPL: releasef(%d)\n", fd);
 
     p = current_proc();
 	mutex_enter(&spl_getf_lock);
@@ -491,22 +497,31 @@ void releasef(int fd)
 	mutex_exit(&spl_getf_lock);
     if (!fp) return; // Not found
 
-    printf("SPL: releasing %p\n", fp);
+    //printf("SPL: releasing %p\n", fp);
 
-    // Another release for the lock in getf()
-    fp_drop(p, fd, fp->f_fp, 0/*!locked*/);
+    // Release the hold from getf().
+    if (fp->f_writes)
+        fp_drop_written(p, fd, fp->f_fp, 0/*!locked*/);
+    else
+        fp_drop(p, fd, fp->f_fp, 0/*!locked*/);
 
+    // Remove node from the list
 	mutex_enter(&spl_getf_lock);
 	list_remove(&spl_getf_list, fp);
 	mutex_exit(&spl_getf_lock);
+
+    // Free the node
     kmem_free(fp, sizeof(*fp));
+
 }
 
 
 
 /*
  * Our version of vn_rdwr, here "vp" is not actually a vnode, but a ptr
- * to the fd to use, so we can call fd_rdwr().
+ * to the node allocated in getf(). We use the "fp" part of the node to
+ * be able to issue IO.
+ * You must call getf() before calling spl_vn_rdwr().
  */
 int spl_vn_rdwr(enum uio_rw rw,
                 struct vnode *vp,
@@ -536,6 +551,7 @@ int spl_vn_rdwr(enum uio_rw rw,
         error = fo_read(sfp->f_fp, auio, ioflag, vctx);
     } else {
         error = fo_write(sfp->f_fp, auio, ioflag, vctx);
+        sfp->f_writes = 1;
     }
 
     if (residp) {
