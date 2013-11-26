@@ -9,3 +9,7 @@ _vm_page_free_count
 _vm_page_speculative_count
 _VFS_ROOT
 _vm_pool_low
+_fp_drop
+_fp_drop_written
+_fo_read
+_fo_write

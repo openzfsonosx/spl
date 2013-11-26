@@ -29,6 +29,8 @@
 #include <sys/vnode.h>
 #include <spl-debug.h>
 #include <sys/malloc.h>
+#include <sys/list.h>
+#include <sys/file.h>
 #include <IOKit/IOLib.h>
 
 int
@@ -402,3 +404,167 @@ void dnlc_update(struct vnode *vp, char *name, struct vnode *tp)
     cache_enter(vp, tp==DNLC_NO_VNODE?NULL:tp, &cn);
     return;
 }
+
+
+
+static kmutex_t spl_getf_lock;
+static list_t   spl_getf_list;
+
+
+int spl_vnode_init(void)
+{
+    mutex_init(&spl_getf_lock, NULL, MUTEX_DEFAULT, NULL);
+    list_create(&spl_getf_list, sizeof (struct spl_fileproc),
+		offsetof(struct spl_fileproc, f_next));
+    return 0;
+}
+
+void spl_vnode_fini(void)
+{
+    mutex_destroy(&spl_getf_lock);
+    list_destroy(&spl_getf_list);
+}
+
+#include <sys/file.h>
+struct fileproc;
+
+extern int fp_drop(struct proc *p, int fd, struct fileproc *fp, int locked);
+extern int fp_drop_written(struct proc *p, int fd, struct fileproc *fp,
+                           int locked);
+extern int fp_lookup(struct proc *p, int fd, struct fileproc **resultfp, int locked);
+extern int fo_read(struct fileproc *fp, struct uio *uio, int flags,
+                   vfs_context_t ctx);
+extern int fo_write(struct fileproc *fp, struct uio *uio, int flags,
+                    vfs_context_t ctx);
+
+/*
+ * getf(int fd) - hold a lock on a file descriptor, to be released by calling
+ * releasef(). On OSX we will also look up the vnode of the fd for calls
+ * to spl_vn_rdwr().
+ */
+void *getf(int fd)
+{
+    struct fileproc     *fp  = NULL;
+    struct spl_fileproc *sfp = NULL;
+
+    /*
+     * We keep the "fp" pointer as well, both for unlocking in releasef() and
+     * used in vn_rdwr().
+     */
+
+    sfp = kmem_alloc(sizeof(*sfp), KM_SLEEP);
+    if (!sfp) return NULL;
+
+    if (fp_lookup(current_proc(), fd, &fp, 0/*!locked*/)) {
+        kmem_free(sfp, sizeof(*sfp));
+        return (NULL);
+    }
+
+    /*
+     * The f_vnode ptr is used to point back to the "sfp" node itself, as it is
+     * the only information passed to vn_rdwr.
+     */
+    sfp->f_vnode  = sfp;
+    sfp->f_fd     = fd;
+    sfp->f_offset = 0;
+    sfp->f_proc   = current_proc();
+    sfp->f_fp     = fp;
+
+	mutex_enter(&spl_getf_lock);
+	list_insert_tail(&spl_getf_list, sfp);
+	mutex_exit(&spl_getf_lock);
+
+    //printf("SPL: new getf(%d) ret %p fp is %p so vnode set to %p\n",
+    //     fd, sfp, fp, sfp->f_vnode);
+
+    return sfp;
+}
+
+
+void releasef(int fd)
+{
+    struct spl_fileproc *fp = NULL;
+    struct proc *p;
+
+    //printf("SPL: releasef(%d)\n", fd);
+
+    p = current_proc();
+	mutex_enter(&spl_getf_lock);
+	for (fp = list_head(&spl_getf_list); fp != NULL;
+	     fp = list_next(&spl_getf_list, fp)) {
+        if ((fp->f_proc == p) && fp->f_fd == fd) break;
+    }
+	mutex_exit(&spl_getf_lock);
+    if (!fp) return; // Not found
+
+    //printf("SPL: releasing %p\n", fp);
+
+    // Release the hold from getf().
+    if (fp->f_writes)
+        fp_drop_written(p, fd, fp->f_fp, 0/*!locked*/);
+    else
+        fp_drop(p, fd, fp->f_fp, 0/*!locked*/);
+
+    // Remove node from the list
+	mutex_enter(&spl_getf_lock);
+	list_remove(&spl_getf_list, fp);
+	mutex_exit(&spl_getf_lock);
+
+    // Free the node
+    kmem_free(fp, sizeof(*fp));
+
+}
+
+
+
+/*
+ * Our version of vn_rdwr, here "vp" is not actually a vnode, but a ptr
+ * to the node allocated in getf(). We use the "fp" part of the node to
+ * be able to issue IO.
+ * You must call getf() before calling spl_vn_rdwr().
+ */
+int spl_vn_rdwr(enum uio_rw rw,
+                struct vnode *vp,
+                caddr_t base,
+                ssize_t len,
+                offset_t offset,
+                enum uio_seg seg,
+                int ioflag,
+                rlim64_t ulimit,    /* meaningful only if rw is UIO_WRITE */
+                cred_t *cr,
+                ssize_t *residp)
+{
+    struct spl_fileproc *sfp = (struct spl_fileproc*)vp;
+    uio_t *auio;
+    int spacetype;
+    int error=0;
+    vfs_context_t vctx;
+
+    spacetype = UIO_SEG_IS_USER_SPACE(seg) ? UIO_USERSPACE32 : UIO_SYSSPACE;
+
+    vctx = vfs_context_create((vfs_context_t)0);
+    auio = uio_create(1, 0, spacetype, rw);
+    uio_reset(auio, offset, spacetype, rw);
+    uio_addiov(auio, (uint64_t)(uintptr_t)base, len);
+
+    if (rw == UIO_READ) {
+        error = fo_read(sfp->f_fp, auio, ioflag, vctx);
+    } else {
+        error = fo_write(sfp->f_fp, auio, ioflag, vctx);
+        sfp->f_writes = 1;
+    }
+
+    if (residp) {
+        *residp = uio_resid(auio);
+    } else {
+        if (uio_resid(auio) && error == 0)
+            error = EIO;
+    }
+
+    uio_free(auio);
+    vfs_context_rele(vctx);
+
+    return (error);
+}
+
+
