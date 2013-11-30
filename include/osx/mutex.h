@@ -34,7 +34,11 @@ typedef struct {
 typedef struct kmutex {
     void           *m_owner;
     lck_mtx_t *m_lock;
+#ifdef __LP64__
     uint8_t m_padding[14];
+#else
+    uint8_t m_padding[22];
+#endif
 } kmutex_t;
 
 
