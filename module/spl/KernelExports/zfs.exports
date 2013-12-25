@@ -13,3 +13,11 @@ _fp_drop
 _fp_drop_written
 _fo_read
 _fo_write
+_zinit
+_zalloc
+_zalloc_noblock
+_zfree
+_zone_prio_refill_configure
+_zfill
+_zone_free_count
+_zone_change

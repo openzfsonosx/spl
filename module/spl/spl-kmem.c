@@ -46,6 +46,10 @@
 #include <libkern/OSMalloc.h>
 #include <sys/sysctl.h>
 
+#ifndef  __XNU_ZONES__
+#define __XNU_ZONES__
+#endif
+
 #ifdef _KERNEL
 
 #else
@@ -64,6 +68,7 @@ vmem_t *zio_alloc_arena = NULL; /* arena for allocating zio memory */
 static uint64_t total_in_use = 0;
 
 extern int              vm_pool_low(void);
+#ifndef __XNU_ZONES__
 
 extern vm_map_t kernel_map;
 
@@ -79,8 +84,119 @@ extern void             kmem_free(
                                   vm_offset_t     addr,
                                   vm_size_t       size);
 
+#endif	/* !__XNU_ZONES__ */
 extern unsigned int vm_page_free_count;
 extern unsigned int vm_page_speculative_count;
+
+#ifdef __XNU_ZONES__
+
+typedef void * zone_t;
+
+#ifndef	_KERN_ZALLOC_H_ //excerpt from xnu's zalloc.h
+#define _KERN_ZALLOC_H_
+
+/* Allocate from zone */
+extern void *	zalloc(
+					zone_t		zone);
+
+/* Free zone element */
+extern void		zfree(
+					zone_t		zone,
+					void 		*elem);
+
+/* Create zone */
+extern zone_t	zinit(
+					vm_size_t	size,		/* the size of an element */
+					vm_size_t	maxmem,		/* maximum memory to use */
+					vm_size_t	alloc,		/* allocation size */
+					const char	*name);		/* a name for the zone */
+
+
+/* Non-blocking version of zalloc */
+extern void *	zalloc_noblock(
+					zone_t		zone);
+
+/* direct (non-wrappered) interface */
+extern void *	zalloc_canblock(
+					zone_t		zone,
+					boolean_t	canblock);
+
+#if 0
+/* Get from zone free list */
+extern void *	zget(
+					zone_t		zone);
+#endif
+
+#if 0
+/* Fill zone with memory */
+extern void		zcram(
+					zone_t		zone,
+					vm_offset_t	newmem,
+					vm_size_t	size);
+#endif
+
+/* Initially fill zone with specified number of elements */
+extern int		zfill(
+					zone_t		zone,
+					int			nelem);
+
+/* Change zone parameters */
+extern void		zone_change(
+					zone_t			zone,
+					unsigned int	item,
+					boolean_t		value);
+extern void		zone_prio_refill_configure(zone_t, vm_size_t);
+/* Item definitions */
+#define Z_EXHAUST	1	/* Make zone exhaustible	*/
+#define Z_COLLECT	2	/* Make zone collectable	*/
+#define Z_EXPAND	3	/* Make zone expandable		*/
+#define	Z_FOREIGN	4	/* Allow collectable zone to contain foreign elements */
+#define Z_CALLERACCT	5	/* Account alloc/free against the caller */
+#define Z_NOENCRYPT	6	/* Don't encrypt zone during hibernation */
+#define Z_NOCALLOUT 	7	/* Don't asynchronously replenish the zone via
+				 * callouts
+				 */
+#define Z_ALIGNMENT_REQUIRED 8
+#define Z_GZALLOC_EXEMPT 9	/* Not tracked in guard allocation mode */
+extern integer_t	zone_free_count(
+					zone_t		zone);
+#endif	/* _KERN_ZALLOC_H_ */
+
+struct spl_kmem_zone_struct {
+    unsigned int size;
+    void *zone;
+    char name[32];
+    uint32_t num_allocated;
+    uint64_t bytes_allocated;
+};
+
+/*
+ * Allocate zones for common sizes we want to allocate into.
+ * Anything larger will be allocated as kalloc.large.
+ */
+static struct spl_kmem_zone_struct spl_kmem_zones[] = {
+    /* size   zone  name                 #  bytes */
+    { 32,     NULL, "spl.kmem.32",       0, 0 },
+    { 64,     NULL, "spl.kmem.64",       0, 0 },
+    { 128,    NULL, "spl.kmem.128",      0, 0 },
+    { 256,    NULL, "spl.kmem.256",      0, 0 },
+    { 512,    NULL, "spl.kmem.512",      0, 0 },
+    { 1024,   NULL, "spl.kmem.1024",     0, 0 },
+    { 2048,   NULL, "spl.kmem.2048",     0, 0 },
+    { 4096,   NULL, "spl.kmem.4096",     0, 0 },
+    { 8192,   NULL, "spl.kmem.8192",     0, 0 },
+    { 16384,  NULL, "spl.kmem.16384",    0, 0 },
+    { 32768,  NULL, "spl.kmem.32768",    0, 0 },
+    { 65536,  NULL, "spl.kmem.65536",    0, 0 },
+    { 131072, NULL, "spl.kmem.131072",   0, 0 },
+    { 262144, NULL, "spl.kmem.262144",   0, 0 },
+};
+
+#define SPL_KMEM_NUM_ZONES (sizeof(spl_kmem_zones) / sizeof(struct spl_kmem_zone_struct))
+
+static uint32_t spl_large_num_allocated   = 0;
+#endif	/* __XNU_ZONES__ */
+static uint64_t spl_large_bytes_allocated = 0;
 
 void spl_register_oids(void);
 void spl_unregister_oids(void);
@@ -90,8 +206,72 @@ struct sysctl_oid_list sysctl__spl_children;
 
 SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_total, CTLFLAG_RD,
            &total_in_use, "kmem.total bytes allocated");
+#ifdef __XNU_ZONES__
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_32, CTLFLAG_RD,
+            &spl_kmem_zones[0].bytes_allocated, "kmem.32 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_64, CTLFLAG_RD,
+            &spl_kmem_zones[1].bytes_allocated, "kmem.64 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_128, CTLFLAG_RD,
+            &spl_kmem_zones[2].bytes_allocated, "kmem.128 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_256, CTLFLAG_RD,
+            &spl_kmem_zones[3].bytes_allocated, "kmem.256 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_512, CTLFLAG_RD,
+            &spl_kmem_zones[4].bytes_allocated, "kmem.512 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_1024, CTLFLAG_RD,
+            &spl_kmem_zones[5].bytes_allocated, "kmem.1024 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_2048, CTLFLAG_RD,
+            &spl_kmem_zones[6].bytes_allocated, "kmem.2048 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_4096, CTLFLAG_RD,
+            &spl_kmem_zones[7].bytes_allocated, "kmem.4096 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_8192, CTLFLAG_RD,
+            &spl_kmem_zones[8].bytes_allocated, "kmem.8192 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_16384, CTLFLAG_RD,
+            &spl_kmem_zones[9].bytes_allocated, "kmem.16384 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_32768, CTLFLAG_RD,
+            &spl_kmem_zones[10].bytes_allocated, "kmem.32768 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_65536, CTLFLAG_RD,
+            &spl_kmem_zones[11].bytes_allocated, "kmem.65536 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_131072, CTLFLAG_RD,
+           &spl_kmem_zones[12].bytes_allocated, "kmem.131072 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_262144, CTLFLAG_RD,
+           &spl_kmem_zones[13].bytes_allocated, "kmem.262144 bytes allocated");
+SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_large, CTLFLAG_RD,
+           &spl_large_bytes_allocated, "kmem.large bytes allocated");
+
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_32, CTLFLAG_RD,
+           &spl_kmem_zones[0].num_allocated, 0, "kmem.32 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_64, CTLFLAG_RD,
+           &spl_kmem_zones[1].num_allocated, 0, "kmem.64 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_128, CTLFLAG_RD,
+           &spl_kmem_zones[2].num_allocated, 0, "kmem.128 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_256, CTLFLAG_RD,
+           &spl_kmem_zones[3].num_allocated, 0, "kmem.256 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_512, CTLFLAG_RD,
+           &spl_kmem_zones[4].num_allocated, 0, "kmem.512 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_1024, CTLFLAG_RD,
+           &spl_kmem_zones[5].num_allocated, 0, "kmem.1024 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_2048, CTLFLAG_RD,
+           &spl_kmem_zones[6].num_allocated, 0, "kmem.2048 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_4096, CTLFLAG_RD,
+           &spl_kmem_zones[7].num_allocated, 0, "kmem.4096 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_8192, CTLFLAG_RD,
+           &spl_kmem_zones[8].num_allocated, 0, "kmem.8192 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_16384, CTLFLAG_RD,
+           &spl_kmem_zones[9].num_allocated, 0, "kmem.16384 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_32768, CTLFLAG_RD,
+           &spl_kmem_zones[10].num_allocated, 0, "kmem.32768 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_65536, CTLFLAG_RD,
+           &spl_kmem_zones[11].num_allocated, 0, "kmem.65536 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_131072, CTLFLAG_RD,
+           &spl_kmem_zones[12].num_allocated, 0, "kmem.131072 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_262144, CTLFLAG_RD,
+           &spl_kmem_zones[13].num_allocated, 0, "kmem.262144 active allocations");
+SYSCTL_INT(_spl, OID_AUTO, kmem_count_large, CTLFLAG_RD,
+           &spl_large_num_allocated, 0, "kmem.large active allocations");
+#endif	/* __XNU_ZONES__ */
 
 
+#ifndef __XNU_ZONES__
 //#define SPL_HYBRID_ALLOCATOR
 
 
@@ -147,6 +327,118 @@ zfs_kmem_free(void *buf, size_t size)
     atomic_sub_64(&total_in_use, size);
 }
 
+#else
+//__XNU_ZONES__
+extern void * IOMallocContiguous(vm_size_t size, vm_size_t alignment,
+                                 void * physicalAddress);
+extern void IOFreeContiguous(void * _address, vm_size_t size);
+
+void *
+zfs_kmem_alloc(size_t size, int kmflags)
+{
+    void *p = NULL;
+    uint64_t times = 0;
+    int i;
+
+    do {
+
+        times++;
+
+        /* Find the correct zone */
+        if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
+
+            if (kmflags & KM_NOSLEEP)
+                p = OSMalloc_noblock(size, zfs_kmem_alloc_tag);
+            else
+                p = OSMalloc(size, zfs_kmem_alloc_tag);
+
+        } else {
+
+            for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
+                if (size <= spl_kmem_zones[i].size) {
+#if 0
+                    int elm;
+                    int num;
+
+                    if (spl_kmem_zones[i].size <= PAGE_SIZE)
+                        num = PAGE_SIZE / spl_kmem_zones[i].size;
+                    else
+                        num = 4;
+                    num <<= 2;
+
+                    /* Check if there is enough space first */
+                    if ((elm = zone_free_count(spl_kmem_zones[i].zone))< num) {
+                        int r;
+                        r = zfill(spl_kmem_zones[i].zone, num*2);
+                        printf("SPL: zone %u low (%u), called zfill (r %d)\n",
+                               spl_kmem_zones[i].size, elm, r);
+                    }
+#endif
+
+                    if (kmflags & KM_NOSLEEP)
+                        p = zalloc_noblock(spl_kmem_zones[i].zone);
+                    else
+                        p = zalloc(spl_kmem_zones[i].zone);
+
+                    break;
+                }
+            }
+        }
+
+    } while(!p);
+
+
+    if (p && (kmflags & KM_ZERO))
+        bzero(p, size);
+
+    if (times > 1)
+        printf("[spl] kmem_alloc(%lu) took %llu retries\n",
+               size, times);
+
+    if (!p) {
+        printf("[spl] kmem_alloc(%lu) failed: \n",size);
+    } else {
+
+        if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
+            atomic_add_64(&spl_large_bytes_allocated, size);
+            atomic_inc_32(&spl_large_num_allocated);
+        } else {
+            atomic_add_64(&spl_kmem_zones[i].bytes_allocated, size);
+            atomic_inc_32(&spl_kmem_zones[i].num_allocated);
+        }
+
+        atomic_add_64(&total_in_use, size);
+    }
+        return (p);
+}
+
+void
+zfs_kmem_free(void *buf, size_t size)
+{
+    if (!buf || !size) return;
+
+    int i;
+    /* Find the correct zone */
+    if (size > spl_kmem_zones[ SPL_KMEM_NUM_ZONES-1 ].size) {
+        OSFree(buf, size, zfs_kmem_alloc_tag);
+        atomic_sub_64(&spl_large_bytes_allocated, size);
+        atomic_dec_32(&spl_large_num_allocated);
+    } else {
+
+        for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
+            if (size <= spl_kmem_zones[i].size) {
+                zfree(spl_kmem_zones[i].zone, buf);
+                atomic_sub_64(&spl_kmem_zones[i].bytes_allocated, size);
+                atomic_dec_32(&spl_kmem_zones[i].num_allocated);
+                break;
+            }
+        }
+    }
+
+    atomic_sub_64(&total_in_use, size);
+}
+#endif	/* !__XNU_ZONES__ */
+
 void spl_total_in_use(void)
 {
     printf("SPL: memory in use %llu\n", total_in_use);
@@ -161,6 +453,54 @@ spl_kmem_init(uint64_t total_memory)
                                            OSMT_DEFAULT);
 
     printf("SPL: Total memory %llu\n", total_memory);
+#ifdef  __XNU_ZONES__ 
+    int i;
+#if 0
+    int num;
+#endif
+
+    for (i = 0; i < SPL_KMEM_NUM_ZONES; i++) {
+        printf("SPL: Initialising zone %d: %u\n",
+               i,
+               spl_kmem_zones[i].size);
+        spl_kmem_zones[i].zone = zinit(spl_kmem_zones[i].size,
+                                       total_memory,
+                                       spl_kmem_zones[i].size,
+                                       spl_kmem_zones[i].name);
+        if (spl_kmem_zones[i].zone == NULL)
+            printf("SPL: Zone allocation %u failed.\n",
+                   spl_kmem_zones[i].size);
+#if 0
+        zone_change(spl_kmem_zones[i].zone, Z_EXHAUST, TRUE);
+        zone_change(spl_kmem_zones[i].zone, Z_NOENCRYPT, TRUE);
+        zone_change(spl_kmem_zones[i].zone, Z_COLLECT, FALSE);
+        zone_change(spl_kmem_zones[i].zone, Z_EXPAND, FALSE); // XX
+        zone_change(spl_kmem_zones[i].zone, Z_FOREIGN, TRUE);
+        zone_change(spl_kmem_zones[i].zone, Z_NOCALLOUT, TRUE);
+        zone_change(spl_kmem_zones[i].zone, Z_CALLERACCT, FALSE);
+        zone_change(spl_kmem_zones[i].zone, Z_GZALLOC_EXEMPT, TRUE);
+
+        if (i < 99) {
+            if (spl_kmem_zones[i].size <= PAGE_SIZE)
+                num = PAGE_SIZE / spl_kmem_zones[i].size;
+            else
+                num = 4;
+
+            // Push them a little higher?
+            num <<= 3;
+            zone_prio_refill_configure(spl_kmem_zones[i].zone,
+                                       num);
+            printf("Calling zone_prio_refill_configure(%u)\n", num);
+        }
+#endif
+#if 0
+        num = (total_memory / spl_kmem_zones[i].size);
+        printf("zfill for %u elements\n", num);
+        zfill(spl_kmem_zones[i].zone, num);
+
+#endif
+    }
+#endif	/* __XNU_ZONES__ */
 
     spl_register_oids();
 
@@ -173,6 +513,21 @@ spl_kmem_fini(void)
     spl_unregister_oids();
 }
 
+
+#ifdef  __XNU_ZONES__ 
+#if 0
+static uint64_t kmem_size_val;
+
+static void
+kmem_size_init(void *unused __unused)
+{
+    zfs_kmem_alloc_tag = OSMalloc_Tagalloc("ZFS general purpose",
+                                           OSMT_DEFAULT);
+    kmem_size_val = max_mem;
+}
+SYSINIT(kmem_size_init, SI_SUB_KMEM, SI_ORDER_ANY, kmem_size_init, NULL);
+#endif
+#endif	/* __XNU_ZONES__ */
 
 uint64_t
 kmem_size(void)
@@ -223,7 +578,12 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 
 	ASSERT(vmp == NULL);
 
+#ifndef __XNU_ZONES__
 	cache = zfs_kmem_alloc(sizeof(*cache), KM_SLEEP);
+#else
+	cache = kmem_alloc(sizeof(*cache), KM_SLEEP);
+#endif	/* !__XNU_ZONES__ */
+
 	strlcpy(cache->kc_name, name, sizeof(cache->kc_name));
 	cache->kc_constructor = constructor;
 	cache->kc_destructor = destructor;
@@ -237,7 +597,11 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 void
 kmem_cache_destroy(kmem_cache_t *cache)
 {
+#ifndef __XNU_ZONES__
 	zfs_kmem_free(cache, sizeof(*cache));
+#else
+	kmem_free(cache, sizeof(*cache));
+#endif	/* !__XNU_ZONES__ */
 }
 
 void *
@@ -245,7 +609,11 @@ kmem_cache_alloc(kmem_cache_t *cache, int flags)
 {
 	void *p;
 
+#ifndef __XNU_ZONES__
 	p = zfs_kmem_alloc(cache->kc_size, flags);
+#else
+	p = kmem_alloc(cache->kc_size, flags);
+#endif	/* !__XNU_ZONES__ */
 	if (p != NULL && cache->kc_constructor != NULL)
 		kmem_std_constructor(p, cache->kc_size, cache, flags);
 	return (p);
@@ -256,7 +624,11 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
 {
 	if (cache->kc_destructor != NULL)
 		kmem_std_destructor(buf, cache->kc_size, cache);
+#ifndef __XNU_ZONES__
 	zfs_kmem_free(buf, cache->kc_size);
+#else
+	kmem_free(buf, cache->kc_size);
+#endif	/* !__XNU_ZONES__ */
 }
 
 
@@ -364,10 +736,73 @@ void spl_register_oids(void)
 {
     sysctl_register_oid(&sysctl__spl);
     sysctl_register_oid(&sysctl__spl_kmem_bytes_total);
+#ifdef __XNU_ZONES__
+sysctl_register_oid(&sysctl__spl_kmem_bytes_32);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_64);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_128);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_256);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_512);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_1024);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_2048);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_4096);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_8192);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_16384);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_32768);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_65536);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_131072);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_262144);
+sysctl_register_oid(&sysctl__spl_kmem_bytes_large);
+sysctl_register_oid(&sysctl__spl_kmem_count_32);
+sysctl_register_oid(&sysctl__spl_kmem_count_64);
+sysctl_register_oid(&sysctl__spl_kmem_count_128);
+sysctl_register_oid(&sysctl__spl_kmem_count_256);
+sysctl_register_oid(&sysctl__spl_kmem_count_512);
+sysctl_register_oid(&sysctl__spl_kmem_count_1024);
+sysctl_register_oid(&sysctl__spl_kmem_count_2048);
+sysctl_register_oid(&sysctl__spl_kmem_count_4096);
+sysctl_register_oid(&sysctl__spl_kmem_count_8192);
+sysctl_register_oid(&sysctl__spl_kmem_count_16384);
+sysctl_register_oid(&sysctl__spl_kmem_count_32768);
+sysctl_register_oid(&sysctl__spl_kmem_count_65536);
+sysctl_register_oid(&sysctl__spl_kmem_count_131072);
+sysctl_register_oid(&sysctl__spl_kmem_count_262144);
+sysctl_register_oid(&sysctl__spl_kmem_count_large);
+#endif	/* __XNU_ZONES__ */
 }
 
 void spl_unregister_oids(void)
 {
     sysctl_unregister_oid(&sysctl__spl);
     sysctl_unregister_oid(&sysctl__spl_kmem_bytes_total);
+#ifdef __XNU_ZONES__
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_32);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_64);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_128);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_256);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_512);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_1024);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_2048);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_4096);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_8192);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_16384);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_32768);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_65536);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_131072);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_262144);
+    sysctl_unregister_oid(&sysctl__spl_kmem_bytes_large);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_32);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_64);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_128);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_256);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_512);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_1024);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_2048);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_4096);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_8192);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_16384);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_32768);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_65536);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_131072);
+    sysctl_unregister_oid(&sysctl__spl_kmem_count_262144);
+#endif	/* __XNU_ZONES__ */
 }
