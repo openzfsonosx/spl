@@ -93,7 +93,7 @@ SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_total, CTLFLAG_RD,
 
 
 //#define SPL_HYBRID_ALLOCATOR
-
+#include <imembase.h>
 
 void *
 zfs_kmem_alloc(size_t size, int kmflags)
@@ -112,7 +112,9 @@ zfs_kmem_alloc(size_t size, int kmflags)
                         size);
 
 #else
-    p = OSMalloc(size, zfs_kmem_alloc_tag);
+
+    p = ikmem_malloc(size);
+    //p = OSMalloc(size, zfs_kmem_alloc_tag);
 #endif
 
 
@@ -141,7 +143,8 @@ zfs_kmem_free(void *buf, size_t size)
     else
         kmem_free(kernel_map, (vm_offset_t)buf, size);
 #else
-    OSFree(buf, size, zfs_kmem_alloc_tag);
+    ikmem_free(buf);
+    //OSFree(buf, size, zfs_kmem_alloc_tag);
 #endif
 
     atomic_sub_64(&total_in_use, size);

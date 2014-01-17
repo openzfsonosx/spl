@@ -83,6 +83,31 @@ uint32_t zone_get_hostid(void *zone)
     return myhostid;
 }
 
+typedef void * zone_t;
+extern void *zinit( vm_size_t, vm_size_t, vm_size_t, char *);
+extern void *zalloc( void *);
+extern void *zalloc_noblock( void *);
+extern void zfree(void *, void *);
+extern void *(*__ihook_malloc)(size_t size);
+extern void (*__ihook_free)(void *);
+
+static void *_slab_zone = NULL;
+
+#include <imembase.h>
+
+
+void *_slab_malloc(size_t size)
+{
+    return zalloc(_slab_zone);
+}
+
+void _slab_free(void *ptr)
+{
+    return zfree(_slab_zone, ptr);
+}
+
+
+
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
     //max_ncpus = processor_avail_count;
@@ -137,6 +162,20 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     spl_taskq_init();
     spl_vnode_init();
 
+
+
+    //_slab_zone = zinit(PAGE_SIZE,
+    //                 total_memory,
+    //                 PAGE_SIZE,
+    //                 "slab zone");
+    //__ihook_malloc = _slab_malloc;
+    //__ihook_free = _slab_free;
+
+    //void ikmem_init(int page_shift, int pg_malloc, size_t *sz)
+    size_t sz = 0;
+    ikmem_init(21, 1, &sz); // 16=64kb, 20=1MB, 21=2MB
+    printf("ikmem_init(0, 0, %llu);\n", sz);
+
     IOLog("SPL: Loaded module v0.01 (ncpu %d, memsize %llu, pages %llu)\n",
           max_ncpus, total_memory, physmem);
     return KERN_SUCCESS;
@@ -150,6 +189,7 @@ kern_return_t spl_stop (kmod_info_t * ki, void * d)
     spl_rwlock_fini();
     spl_mutex_subsystem_fini();
     spl_kmem_fini();
+    ikmem_destroy();
     IOLog("SPL: Unloaded module\n");
     return KERN_SUCCESS;
 }

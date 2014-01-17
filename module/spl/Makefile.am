@@ -51,6 +51,7 @@ spl_SOURCES = 	\
 	spl-thread.c \
 	spl-time.c \
 	spl-vnode.c \
+	imembase.c \
 	spl-xdr.c
 
 spl_CPPFLAGS=$(CFLAGS_KMOD)
