@@ -13,6 +13,4 @@ _fp_drop
 _fp_drop_written
 _fo_read
 _fo_write
-_zalloc
-_zfree
-_zinit
+_kernel_memory_allocate

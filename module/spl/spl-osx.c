@@ -83,29 +83,12 @@ uint32_t zone_get_hostid(void *zone)
     return myhostid;
 }
 
-typedef void * zone_t;
-extern void *zinit( vm_size_t, vm_size_t, vm_size_t, char *);
-extern void *zalloc( void *);
-extern void *zalloc_noblock( void *);
-extern void zfree(void *, void *);
 extern void *(*__ihook_malloc)(size_t size);
 extern void (*__ihook_free)(void *);
 
 static void *_slab_zone = NULL;
 
 #include <imembase.h>
-
-
-void *_slab_malloc(size_t size)
-{
-    return zalloc(_slab_zone);
-}
-
-void _slab_free(void *ptr)
-{
-    return zfree(_slab_zone, ptr);
-}
-
 
 
 kern_return_t spl_start (kmod_info_t * ki, void * d)
