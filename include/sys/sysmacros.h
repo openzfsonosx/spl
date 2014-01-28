@@ -219,4 +219,6 @@ extern void spl_cleanup(void);
 #define offsetof(s, m)  ((size_t)(&(((s *)0)->m)))
 #endif
 
+#define SET_ERROR(X) (X)
+
 #endif  /* _SPL_SYSMACROS_H */
