@@ -10,7 +10,7 @@ kextsymboltool_SOURCES = \
 
 kextsymboltool_LDFLAGS = -lstdc++
 
-KernelExports: zfs.exports
+KernelExports: zfs.exports | kextsymboltool
 	./kextsymboltool -arch x86_64 -import allsymbols -export zfs.exports -output KernelExports_64
 	./kextsymboltool -arch i386 -import allsymbols -export zfs.exports -output KernelExports_32
 	lipo -create KernelExports_32 KernelExports_64 -output KernelExports
