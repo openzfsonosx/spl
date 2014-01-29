@@ -160,6 +160,11 @@ typedef struct kstat_timer {
 int spl_kstat_init(void);
 void spl_kstat_fini(void);
 
+extern void __kstat_set_raw_ops(kstat_t *ksp,
+                    int (*headers)(char *buf, size_t size),
+                    int (*data)(char *buf, size_t size, void *data),
+                    void* (*addr)(kstat_t *ksp, loff_t index));
+
 extern kstat_t *__kstat_create(char *ks_module, int ks_instance,
 			     char *ks_name, char *ks_class,
 			     uchar_t ks_type, ulong_t ks_ndata,
@@ -170,5 +175,12 @@ extern void __kstat_delete(kstat_t *ksp);
 #define kstat_create(m,i,n,c,t,s,f)	__kstat_create(m,i,n,c,t,s,f)
 #define kstat_install(k)		__kstat_install(k)
 #define kstat_delete(k)			__kstat_delete(k)
+
+extern void kstat_waitq_enter(kstat_io_t *);
+extern void kstat_waitq_exit(kstat_io_t *);
+extern void kstat_runq_enter(kstat_io_t *);
+extern void kstat_runq_exit(kstat_io_t *);
+
+#define kstat_set_raw_ops(k,h,d,a)      __kstat_set_raw_ops(k,h,d,a)
 
 #endif  /* _SPL_KSTAT_H */

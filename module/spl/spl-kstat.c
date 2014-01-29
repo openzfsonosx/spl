@@ -114,3 +114,32 @@ kstat_delete(kstat_t *ksp)
     cv_destroy(&e->e_cv);
     zfs_kmem_free(e, e->e_size);
 }
+
+
+void
+kstat_waitq_enter(kstat_io_t *kiop)
+{
+}
+
+void
+kstat_waitq_exit(kstat_io_t *kiop)
+{
+}
+
+void
+kstat_runq_enter(kstat_io_t *kiop)
+{
+}
+
+void
+kstat_runq_exit(kstat_io_t *kiop)
+{
+}
+
+void
+__kstat_set_raw_ops(kstat_t *ksp,
+                    int (*headers)(char *buf, size_t size),
+                    int (*data)(char *buf, size_t size, void *data),
+                    void *(*addr)(kstat_t *ksp, loff_t index))
+{
+}

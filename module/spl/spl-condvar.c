@@ -28,6 +28,7 @@
 #include <sys/condvar.h>
 #include <spl-debug.h>
 #include <sys/errno.h>
+#include <sys/callb.h>
 
 
 void
@@ -95,6 +96,40 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, const char *msg)
 
     mp->m_owner = NULL;
     result = msleep(cvp, mp->m_lock, PRIBIO, msg, &ts);
+    mp->m_owner = current_thread();
+
+    return (result == EWOULDBLOCK ? -1 : 0);
+
+}
+
+
+/*
+* Compatibility wrapper for the cv_timedwait_hires() Illumos interface.
+*/
+clock_t
+cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
+                 hrtime_t res, int flag)
+{
+    struct timespec ts;
+    int result;
+
+    if (res > 1) {
+        /*
+         * Align expiration to the specified resolution.
+         */
+        if (flag & CALLOUT_FLAG_ROUNDUP)
+            tim += res - 1;
+        tim = (tim / res) * res;
+    }
+
+    if (!(flag & CALLOUT_FLAG_ABSOLUTE))
+        tim += gethrtime();
+
+    ts.tv_sec = 0;
+    ts.tv_nsec = tim * NSEC_PER_USEC;
+
+    mp->m_owner = NULL;
+    result = msleep(cvp, mp->m_lock, PRIBIO, "cv_timedwait_hires", &ts);
     mp->m_owner = current_thread();
 
     return (result == EWOULDBLOCK ? -1 : 0);

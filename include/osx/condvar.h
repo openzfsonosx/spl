@@ -27,6 +27,8 @@ void spl_cv_signal(kcondvar_t *cvp);
 void spl_cv_broadcast(kcondvar_t *cvp);
 void spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg);
 int  spl_cv_timedwait(kcondvar_t *cvp,kmutex_t *mp, clock_t tim, const char *msg);
+clock_t cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp,
+                           hrtime_t tim, hrtime_t res, int flag);
 
 
 /*

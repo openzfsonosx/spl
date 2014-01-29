@@ -51,5 +51,12 @@ typedef struct callb_cpr {
         mutex_exit((cp)->cc_lockp);                             \
 }
 
+
+#define CALLOUT_FLAG_ROUNDUP            0x1
+#define CALLOUT_FLAG_ABSOLUTE           0x2
+#define CALLOUT_FLAG_HRESTIME           0x4
+#define CALLOUT_FLAG_32BIT              0x8
+
+
 #endif  /* _SPL_CALLB_H */
 
