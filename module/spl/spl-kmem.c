@@ -45,6 +45,7 @@
 #include <mach/host_info.h>
 #include <libkern/OSMalloc.h>
 #include <sys/sysctl.h>
+#include "bmalloc.h"
 
 #ifdef _KERNEL
 
@@ -99,30 +100,13 @@ SYSCTL_INT(_spl, OID_AUTO, num_threads,
 
 //#define SPL_HYBRID_ALLOCATOR
 
-
 void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
-	void *p = NULL;
-    kern_return_t kr;
+    void *p = NULL;
 
     if (!size) return NULL; // FIXME
-
-#ifdef SPL_HYBRID_ALLOCATOR
-    if (size < PAGE_SIZE)
-        p = OSMalloc(size, zfs_kmem_alloc_tag);
-    else
-        kr = kmem_alloc(kernel_map,
-                        (vm_offset_t *)&p,
-                        size);
-
-#else
-    p = OSMalloc(size, zfs_kmem_alloc_tag);
-#endif
-
-
-
-
+    p = bmalloc(size);
 
     if (p && (kmflags & KM_ZERO))
         bzero(p, size);
@@ -132,7 +116,7 @@ zfs_kmem_alloc(size_t size, int kmflags)
     } else {
         atomic_add_64(&total_in_use, size);
     }
-	return (p);
+    return (p);
 }
 
 void
@@ -140,15 +124,7 @@ zfs_kmem_free(void *buf, size_t size)
 {
     if (!buf || !size) return;
 
-#ifdef SPL_HYBRID_ALLOCATOR
-    if (size < PAGE_SIZE)
-        OSFree(buf, size, zfs_kmem_alloc_tag);
-    else
-        kmem_free(kernel_map, (vm_offset_t)buf, size);
-#else
-    OSFree(buf, size, zfs_kmem_alloc_tag);
-#endif
-
+    bfree(buf, size);
     atomic_sub_64(&total_in_use, size);
 }
 
@@ -200,7 +176,11 @@ kmem_avail(void)
 
 int spl_vm_pool_low(void)
 {
-    return vm_pool_low();
+    int r = vm_pool_low();
+    if(r) {
+       bmalloc_release_memory();
+    }
+    return r;
 }
 
 static int

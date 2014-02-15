@@ -83,6 +83,14 @@ uint32_t zone_get_hostid(void *zone)
     return myhostid;
 }
 
+extern void *(*__ihook_malloc)(size_t size);
+extern void (*__ihook_free)(void *);
+
+static void *_slab_zone = NULL;
+
+#include <bmalloc.h>
+
+
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
     //max_ncpus = processor_avail_count;
@@ -131,11 +139,14 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 
     strlcpy(utsname.nodename, hostname, sizeof(utsname.nodename));
 
-    spl_kmem_init(total_memory);
     spl_mutex_subsystem_init();
+    bmalloc_init();
+    spl_kmem_init(total_memory);
     spl_rwlock_init();
     spl_taskq_init();
     spl_vnode_init();
+
+    size_t sz = 0;
 
     IOLog("SPL: Loaded module v0.01 (ncpu %d, memsize %llu, pages %llu)\n",
           max_ncpus, total_memory, physmem);
@@ -150,6 +161,7 @@ kern_return_t spl_stop (kmod_info_t * ki, void * d)
     spl_rwlock_fini();
     spl_mutex_subsystem_fini();
     spl_kmem_fini();
+    bmalloc_fini();
     IOLog("SPL: Unloaded module\n");
     return KERN_SUCCESS;
 }
