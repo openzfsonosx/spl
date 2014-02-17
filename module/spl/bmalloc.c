@@ -23,11 +23,11 @@
 #include "slice.h"
 #include "osif.h"
 
-typedef struct Params
-{
-    sa_size_t allocation_size;    // Size of user allocable memory
-    sa_size_t allocation_count;   // Number of user allocations per Slice
-} Params;
+//typedef struct Params
+//{
+//    sa_size_t allocation_size;    // Size of user allocable memory
+//    sa_size_t allocation_count;   // Number of user allocations per Slice
+//} Params;
 
 // Try to force the underlying allocator to issue
 // blocks of memory of a consistent size around
@@ -40,48 +40,47 @@ const sa_size_t ALLOCATION_SIZE = 512*1024; // bytes
 // of instrumenting allocations. In terms of allocator
 // efficiency its beneficial to closely match allocation
 // requests to slice size.
-Params allocator_params[] =
-{
-{64, 5957},
-{80, 5040},
-{96, 4368},
-{104, 1024},
-{128, 1024},
-{176, 1024},
-{192, 1024},
-{224, 1024},
-{256, 1024},
-{320, 1024},
-{384, 1024},
-{448, 1024},
-{512, 1024},
-{856, 1024},
-{944, 1024},
-{1024, 1024},
-{1920, 1024},
-{2048, 1024},
-{4096, 512},
-{6144, 512},
-{7168, 512},
-{8192, 512},
-{12288, 512},
-{16384, 512},
-{32768, 256},
-{36864, 256},
-{40960, 256},
-{49152, 256},
-{57344, 256},
-{65536, 128},
-{81920, 128},
-{90112, 128},
-{98304, 128},
-{106496, 128},
-{114688, 128},
-{122880, 128},
-{131072, 128}
+sa_size_t allocator_params[] = {
+    64,
+    80,
+    96,
+    104,
+    128,
+    176,
+    192,
+    224,
+    256,
+    320,
+    384,
+    448,
+    512,
+    856,
+    944,
+    1024,
+    1920,
+    2048,
+    4096,
+    6144,
+    7168,
+    8192,
+    12288,
+    16384,
+    32768,
+    36864,
+    40960,
+    49152,
+    57344,
+    65536,
+    81920,
+    90112,
+    98304,
+    106496,
+    114688,
+    122880,
+    131072
 };
 
-long num_allocators = sizeof(allocator_params)/sizeof(struct Params);
+long num_allocators = sizeof(allocator_params)/sizeof(sa_size_t);
 
 SliceAllocator* allocators = 0;
 sa_size_t* allocator_counts = 0;
@@ -114,7 +113,7 @@ sa_size_t bmalloc_allocator_lookup_table_size()
 
 void bmalloc_init()
 {
-    max_allocation_size = allocator_params[num_allocators - 1].allocation_size;
+    max_allocation_size = allocator_params[num_allocators - 1];
     
     // Create the underlying per allocation size allocators
     sa_size_t array_size = bmalloc_allocator_array_size();
@@ -126,11 +125,11 @@ void bmalloc_init()
         // Calculate the number of allocations that will yield the closest value
         // to the target allocation size.
         sa_size_t num_allocations_per_slice =
-           (ALLOCATION_SIZE - sizeof(struct SliceAllocator))/
-           (sizeof(struct AllocatableRow) + allocator_params[i].allocation_size);
+        (ALLOCATION_SIZE - sizeof(struct SliceAllocator))/
+        (sizeof(struct AllocatableRow) + allocator_params[i]);
         
         slice_allocator_init(&allocators[i],
-                             allocator_params[i].allocation_size,
+                             allocator_params[i],
                              num_allocations_per_slice);
     }
     
