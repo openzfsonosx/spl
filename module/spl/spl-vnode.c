@@ -395,6 +395,12 @@ void dnlc_update(struct vnode *vp, char *name, struct vnode *tp)
     // OSX panics if you give empty(non-NULL) name
     if (!name || !*name || !strlen(name)) return;
 
+    /*
+     * The addition of negative cache entries has been removed as they
+     * appear to break on OSX.
+     */
+    if (!tp) return;// No negative cache entries for now.
+
 	bzero(&cn, sizeof (cn));
 	cn.cn_nameiop = CREATE;
 	cn.cn_flags = ISLASTCN;
@@ -566,5 +572,3 @@ int spl_vn_rdwr(enum uio_rw rw,
 
     return (error);
 }
-
-
