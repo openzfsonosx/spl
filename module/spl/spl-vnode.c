@@ -389,6 +389,14 @@ void dnlc_remove(struct vnode *vp, char *name)
  */
 void dnlc_update(struct vnode *vp, char *name, struct vnode *tp)
 {
+
+    /*
+     * It has been determined that if we manually add entries to the
+     * cache, that we get false negatives, and false positives from
+     * VFS layer.
+     */
+#if 0 //NOT YET
+
     // If tp is NULL, it is a negative-cache entry
     struct componentname cn;
 
@@ -408,6 +416,7 @@ void dnlc_update(struct vnode *vp, char *name, struct vnode *tp)
 	cn.cn_namelen = strlen(name);
 
     cache_enter(vp, tp==DNLC_NO_VNODE?NULL:tp, &cn);
+#endif
     return;
 }
 
