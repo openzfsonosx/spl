@@ -1383,6 +1383,16 @@ taskq_create(const char *name, int nthreads, pri_t pri, int minalloc,
 	taskq_t *tq;
 	uint_t bsize;	/* # of buckets - always power of 2 */
 
+
+	/* Scale the number of threads using nthreads as a percentage */
+    if (flags & TASKQ_THREADS_CPU_PCT) {
+        ASSERT(nthreads <= 100);
+        ASSERT(nthreads >= 0);
+        nthreads = MIN(nthreads, 100);
+        nthreads = MAX(nthreads, 0);
+        nthreads = MAX((max_ncpus * nthreads) / 100, 1);
+    }
+
 	tq = kmem_cache_alloc(taskq_cache, KM_SLEEP);
 
     tq->tq_thread = NULL;
@@ -1404,6 +1414,7 @@ taskq_create(const char *name, int nthreads, pri_t pri, int minalloc,
 	/* For dynamic task queues use just one backup thread */
 	if (flags & TASKQ_DYNAMIC)
 		nthreads = 1;
+
 
 	(void) strncpy(tq->tq_name, name, TASKQ_NAMELEN + 1);
 	tq->tq_name[TASKQ_NAMELEN] = '\0';
