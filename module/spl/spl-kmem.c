@@ -91,6 +91,11 @@ struct sysctl_oid_list sysctl__spl_children;
 SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_total, CTLFLAG_RD,
            &total_in_use, "kmem.total bytes allocated");
 
+extern uint32_t zfs_threads;
+SYSCTL_INT(_spl, OID_AUTO, num_threads,
+           CTLFLAG_RD, &zfs_threads, 0,
+           "Num threads");
+
 
 //#define SPL_HYBRID_ALLOCATOR
 
@@ -364,10 +369,12 @@ void spl_register_oids(void)
 {
     sysctl_register_oid(&sysctl__spl);
     sysctl_register_oid(&sysctl__spl_kmem_bytes_total);
+    sysctl_register_oid(&sysctl__spl_num_threads);
 }
 
 void spl_unregister_oids(void)
 {
     sysctl_unregister_oid(&sysctl__spl);
     sysctl_unregister_oid(&sysctl__spl_kmem_bytes_total);
+    sysctl_unregister_oid(&sysctl__spl_num_threads);
 }

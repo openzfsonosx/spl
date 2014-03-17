@@ -388,6 +388,7 @@
 #include <libkern/libkern.h>
 
 
+
 static kmem_cache_t *taskq_ent_cache, *taskq_cache;
 
 /*
@@ -690,6 +691,7 @@ spl_taskq_init(void)
 
 	taskq_cache = kmem_cache_create("taskq_cache", sizeof (taskq_t),
 	    0, taskq_constructor, taskq_destructor, NULL, NULL, NULL, 0);
+
     return 0;
 }
 

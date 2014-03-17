@@ -32,7 +32,7 @@
 #include <sys/tsd.h>
 #include <spl-debug.h>
 
-static uint32_t zfs_threads = 0;
+uint32_t zfs_threads = 0;
 
 kthread_t *
 spl_thread_create(
