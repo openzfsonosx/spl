@@ -1,13 +1,15 @@
-This is spl.kext, the Solaris Portability Layer (SPL)
+OpenZFS on OS X (O3X) brings OpenZFS features to Apple's OS X.
 
-It is tested primarily on Mac OS 10.8.2 and secondarily on 10.6.8, with
-the latest Macports.
+This is spl.kext, the Solaris Portability Layer (SPL).
 
-See https://github.com/zfs-osx/ and http://openzfsonosx.org/ for more information.
-Note MacZFS's wiki on kernel development and panic decoding.
+** spl.kext is a dependency of zfs.kext, so start with this repository.
+
+It is tested primarily on Mac OS X Mavericks.
+
+See http://openzfsonosx.org/ for more information.
 
 Please note that 'llvm-gcc' or 'clang' has to be used for compiling KEXTs.
-Pure 'gcc' will produce instable builds.
+Pure 'gcc' will produce unstable builds.
 
 ```
  # ./configure CC=clang CXX=clang++
@@ -21,7 +23,7 @@ Pure 'gcc' will produce instable builds.
 
 ```
 # ./autogen.sh
-# ./configure CC=clang CXX=clang++ --prefix=/usr/local
+# ./configure CC=clang CXX=clang++
 # make
 
 # rsync -ar --delete module/spl/spl.kext/ /tmp/spl.kext/
@@ -29,4 +31,7 @@ Pure 'gcc' will produce instable builds.
 
 # kextload -r /tmp/ -v /tmp/spl.kext
 ```
+
+: SPL: Total memory 17179869184AGC: 3.4.5, HW version=3.2.19 [3.2.8], flags:0, features:20600
+: SPL: Loaded module v0.01 (ncpu 8, memsize 17179869184, pages 4194304)
 
