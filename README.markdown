@@ -8,7 +8,7 @@ It is tested primarily on Mac OS X Mavericks.
 
 See http://openzfsonosx.org/ for more information.
 
-Please note that 'llvm-gcc' or 'clang' has to be used for compiling KEXTs.
+Please note that 'llvm-gcc' or 'clang' should be used for compiling the KEXTs.
 Pure 'gcc' will produce unstable builds.
 
 ```
@@ -18,7 +18,7 @@ Pure 'gcc' will produce unstable builds.
 ```
 
 ```
- # git clone https://github.com/zfs-osx/spl.git
+ # git clone https://github.com/openzfsonosx/spl.git
 ```
 
 ```
@@ -34,6 +34,6 @@ Pure 'gcc' will produce unstable builds.
 : SPL: Total memory 17179869184AGC: 3.4.5, HW version=3.2.19 [3.2.8], flags:0, features:20600
 : SPL: Loaded module v0.01 (ncpu 8, memsize 17179869184, pages 4194304)
 
-
 ```
 
+- lundman
