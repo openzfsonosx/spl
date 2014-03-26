@@ -24,6 +24,7 @@
 
 void bmalloc_init();
 void bmalloc_release_memory();
+void bmalloc_garbage_collect();
 void bmalloc_fini();
 
 void* bmalloc(size_t size);

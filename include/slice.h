@@ -51,7 +51,7 @@ typedef struct Slice {
     sa_size_t allocation_size;
     sa_size_t num_allocations;
     sa_size_t alloc_count;
-    sa_size_t destroyed; // FIXME remove
+    hrtime_t time_freed;
 } Slice;
 
 void slice_init(Slice* slice,

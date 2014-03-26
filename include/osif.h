@@ -22,6 +22,7 @@
 #ifndef OSIF_H
 #define OSIF_H
 
+#include <stdint.h>
 #include <string.h>
 
 #ifdef _KERNEL
@@ -34,7 +35,7 @@
 #include "pthread.h"
 #endif
 
-typedef size_t sa_size_t;
+typedef uint64_t sa_size_t;
 
 void* osif_malloc(sa_size_t size);
 void osif_free(void* buf, sa_size_t size);

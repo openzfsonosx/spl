@@ -19,31 +19,32 @@
  * CDDL HEADER END
  */
 
-#include "osif.h"
-
 #ifndef SLICE_ALLOCATOR_H
 #define SLICE_ALLOCATOR_H
+
+#include "osif.h"
+#include "slice_list.h"
 
 struct Slice;
 
 typedef struct SliceAllocator {
-    struct Slice* available;
-    struct Slice* full;
-    sa_size_t max_alloc_size;        /*  Max alloc size for slice */
-    sa_size_t num_allocs_per_buffer; /* Number of rows to be allocated in the Slices */
-    long num_slices;
+    Slice_List free;
+    Slice_List partial;
+    Slice_List full;
+    sa_size_t  max_alloc_size;        /*  Max alloc size for slice */
+    sa_size_t  num_allocs_per_buffer; /* Number of rows to be allocated in the Slices */
     osif_mutex mutex;
 } SliceAllocator;
 
-void slice_allocator_init(SliceAllocator* sa, sa_size_t max_alloc_size, sa_size_t num_allocs_per_buffer);
+void slice_allocator_init(SliceAllocator* sa, sa_size_t max_alloc_size);
 void slice_allocator_fini(SliceAllocator* sa);
 
 void* slice_allocator_alloc(SliceAllocator* sa, sa_size_t size);
 void slice_allocator_free(SliceAllocator* sa, void* buf);
 
 sa_size_t slice_allocator_get_allocation_size(SliceAllocator* sa);
-
 void slice_allocator_release_memory(SliceAllocator* sa);
+void slice_allocator_garbage_collect(SliceAllocator* sa);
 
 
 #endif

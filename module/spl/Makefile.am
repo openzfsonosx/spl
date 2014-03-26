@@ -55,6 +55,9 @@ spl_SOURCES = 	\
 	bmalloc.c \
 	slice_allocator.c \
 	slice.c \
+	slice_list.c \
+	memory_pool.c \
+	memory_block_list.c \
 	osif.c
 
 spl_CPPFLAGS=$(CFLAGS_KMOD)

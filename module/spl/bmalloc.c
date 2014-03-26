@@ -22,17 +22,7 @@
 #include "slice_allocator.h"
 #include "slice.h"
 #include "osif.h"
-
-//typedef struct Params
-//{
-//    sa_size_t allocation_size;    // Size of user allocable memory
-//    sa_size_t allocation_count;   // Number of user allocations per Slice
-//} Params;
-
-// Try to force the underlying allocator to issue
-// blocks of memory of a consistent size around
-// this threshold.
-const sa_size_t ALLOCATION_SIZE = 512*1024; // bytes
+#include "memory_pool.h"
 
 // Sizes of various slices that are used by zfs
 // This table started out as a naive ^2 table,
@@ -40,14 +30,20 @@ const sa_size_t ALLOCATION_SIZE = 512*1024; // bytes
 // of instrumenting allocations. In terms of allocator
 // efficiency its beneficial to closely match allocation
 // requests to slice size.
+
+    // These buckets are all serviced using the "small allocator"
 sa_size_t allocator_params[] = {
+
+    16,
+    32,
+    48, 
     64,
     80,
     96,
-    104,
     128,
-    176,
-    192,
+    144,
+    160,
+    196,
     224,
     256,
     320,
@@ -83,57 +79,51 @@ sa_size_t allocator_params[] = {
 long num_allocators = sizeof(allocator_params)/sizeof(sa_size_t);
 
 SliceAllocator* allocators = 0;
-sa_size_t* allocator_counts = 0;
+
 SliceAllocator** allocator_lookup_table = 0;
 sa_size_t max_allocation_size = 0;
 int initalised = 0;
 
+sa_size_t bmalloc_allocator_array_size()
+{
+    return num_allocators * sizeof(struct SliceAllocator);
+}
+
 SliceAllocator* bmalloc_allocator_for_size(sa_size_t size)
 {
     for(int i=0; i<num_allocators; i++) {
-        if (slice_allocator_get_allocation_size(&allocators[i]) >= size) {
-            return &allocators[i];
-        }
+      if (slice_allocator_get_allocation_size(&allocators[i]) >= size) {
+        return &allocators[i];
+      }
     }
     
-    // FIXME - panic? this is a programming error
-    
-    return 0;
-}
-
-sa_size_t bmalloc_allocator_array_size()
-{
-    return num_allocators*sizeof(struct SliceAllocator);
+    return (void*)0;
 }
 
 sa_size_t bmalloc_allocator_lookup_table_size()
 {
-    return max_allocation_size * sizeof(struct SliceAllocator*);
+    return max_allocation_size * sizeof(void*);
 }
 
 void bmalloc_init()
 {
+    printf("[SPL] bmalloc slice allocator initialised\n");
+
     max_allocation_size = allocator_params[num_allocators - 1];
+
+    // Initialise the memory pool
+    memory_pool_init();
     
-    // Create the underlying per allocation size allocators
+    // Create the slice allocators
     sa_size_t array_size = bmalloc_allocator_array_size();
     allocators = (SliceAllocator*)osif_malloc(array_size);
     osif_zero_memory(allocators, array_size);
     
     for(int i=0; i<num_allocators; i++) {
-        
-        // Calculate the number of allocations that will yield the closest value
-        // to the target allocation size.
-        sa_size_t num_allocations_per_slice =
-        (ALLOCATION_SIZE - sizeof(struct SliceAllocator))/
-        (sizeof(struct AllocatableRow) + allocator_params[i]);
-        
-        slice_allocator_init(&allocators[i],
-                             allocator_params[i],
-                             num_allocations_per_slice);
+        slice_allocator_init(&allocators[i], allocator_params[i]);
     }
     
-    // Lookup table of allocation size to correct allocator
+    // Create the allocator lookup array
     allocator_lookup_table = osif_malloc(bmalloc_allocator_lookup_table_size());
     
     for(int i=1; i<=max_allocation_size; i++) {
@@ -145,15 +135,17 @@ void bmalloc_init()
 
 void bmalloc_fini()
 {
-    // Clean up all the allocators
+    // Clean up the allocators
     for(int i=0; i<num_allocators; i++) {
         slice_allocator_fini(&allocators[i]);
     }
     
+    // Free local resources
     osif_free(allocators, bmalloc_allocator_array_size());
-    
-    // Clean up the lookup table
     osif_free(allocator_lookup_table, bmalloc_allocator_lookup_table_size());
+    
+    // Clean up the memory pool
+    memory_pool_fini();
     
     initalised = 0;
 }
@@ -162,10 +154,10 @@ void* bmalloc(sa_size_t size)
 {
     void* p = 0;
     
-    if(size > max_allocation_size) {
-        p = osif_malloc(size);
-    } else {
+    if(size <= max_allocation_size) {
         p = slice_allocator_alloc(allocator_lookup_table[size-1], size);
+    } else {
+        p = osif_malloc(size);
     }
     
     return p;
@@ -173,10 +165,10 @@ void* bmalloc(sa_size_t size)
 
 void bfree(void* buf, sa_size_t size)
 {
-    if(size > max_allocation_size) {
-        osif_free(buf, size);
-    } else {
+    if(size <= max_allocation_size) {
         slice_allocator_free(allocator_lookup_table[size-1], buf);
+    } else {
+        osif_free(buf, size);
     }
 }
 
@@ -185,5 +177,15 @@ void bmalloc_release_memory()
     for(int i=0; i<num_allocators; i++) {
         slice_allocator_release_memory(&allocators[i]);
     }
+
+    memory_pool_release_memory();
 }
 
+void bmalloc_garbage_collect()
+{
+    for(int i=0; i<num_allocators; i++) {
+        slice_allocator_garbage_collect(&allocators[i]);
+    }
+
+    memory_pool_garbage_collect();
+}

@@ -65,10 +65,7 @@ AllocatableRow* slice_get_row(Slice* slice)
         if(slice->free) {
             slice->free->prev = 0;
         }
-        
-        row->next = 0;
-        row->prev = 0;
-        
+
         return row;
     }
 }
@@ -81,14 +78,11 @@ void slice_init(Slice* slice,
     osif_zero_memory(slice, sizeof(struct Slice));
     slice->num_allocations = num_allocations;
     slice->allocation_size = allocation_size;
-    slice->alloc_count = 0;
-    slice->destroyed = 0;
+    //slice->alloc_count = 0;
     
     // Add all rows to the free list. Set pointers to the slice.
     for(int i=0; i < slice->num_allocations; i++) {
         AllocatableRow* row = slice_get_row_address(slice, i);
-        row->next = 0;
-        row->prev = 0;
         row->owner = slice;
         
         slice_insert_free_row(slice, row);
@@ -136,8 +130,8 @@ void slice_free(Slice* slice, void* buf)
 
 Slice* slice_get_owner(void* buf)
 {
-    char* p = (char*)(buf);
-    p = p - sizeof(AllocatableRow);
+    unsigned char* p = (unsigned char*)(buf);
+    p -= sizeof(struct AllocatableRow);
     AllocatableRow* row = (AllocatableRow*)(p);
     return row->owner;
 }

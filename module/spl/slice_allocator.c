@@ -22,18 +22,15 @@
 #include "slice_allocator.h"
 #include "slice.h"
 #include "osif.h"
+#include "memory_pool.h"
 
 #include <string.h>
 
-// If a memory is released and the slice allocator contains
-// more than this number of bytes of allocated memory then
-// start returning memory to the OS.
-const sa_size_t SLICE_ALLOCATOR_RELEASE_MEMORY_THRESHOLD = 1024*1024; // bytes
+const hrtime_t SA_MAX_FREE_MEM_AGE = 30 * NSEC_PER_SEC; 
 
 Slice* slice_allocator_create_slice(SliceAllocator* sa)
 {
-    sa_size_t size = slice_calculate_size(sa->max_alloc_size, sa->num_allocs_per_buffer);
-    Slice* slice = (Slice*)osif_malloc(size);
+    Slice* slice = (Slice*)memory_pool_claim();
     slice_init(slice, sa->max_alloc_size, sa->num_allocs_per_buffer);
     
     return slice;
@@ -41,124 +38,51 @@ Slice* slice_allocator_create_slice(SliceAllocator* sa)
 
 void slice_allocator_destroy_slice(SliceAllocator*sa, Slice* slice)
 {
-    sa_size_t size = slice_calculate_size(sa->max_alloc_size, sa->num_allocs_per_buffer);
-    osif_free(slice, size);
+    memory_pool_return(slice);
 }
 
-void slice_allocator_init(SliceAllocator* sa, sa_size_t max_alloc_size, sa_size_t num_allocs_per_buffer)
+void slice_allocator_empty_list(SliceAllocator* sa, Slice_List* list)
+{
+    while(slice_list_size(list)) {
+        Slice* slice = slice_list_front(list);
+        slice_list_remove_front(list);
+        slice_allocator_destroy_slice(sa, slice);
+    }
+}
+
+void slice_allocator_init(SliceAllocator* sa, sa_size_t max_alloc_size)
 {
     osif_zero_memory(sa, sizeof(struct SliceAllocator));
-    sa->available = 0;
-    sa->full = 0;
+    
+    slice_list_init(&sa->free);
+    slice_list_init(&sa->partial);
+    slice_list_init(&sa->full);
+    
+    // Calculate the number of allocations that will fit into a standard
+    // memory_pool block
+    sa_size_t num_allocations_per_slice =
+        (memory_pool_claim_size() - sizeof(struct SliceAllocator))/(sizeof(struct AllocatableRow) + max_alloc_size);
+    
     sa->max_alloc_size = max_alloc_size;
-    sa->num_allocs_per_buffer = num_allocs_per_buffer;
-    sa->num_slices = 0;
+    sa->num_allocs_per_buffer = num_allocations_per_slice;
+
     osif_mutex_init(&sa->mutex);
 }
 
 void slice_allocator_fini(SliceAllocator* sa)
 {
-    Slice* next = sa->available;
+    slice_allocator_empty_list(sa, &sa->free);
+    slice_allocator_empty_list(sa, &sa->partial);
+    slice_allocator_empty_list(sa, &sa->full);
     
-    while(next) {
-        Slice* slice = next;
-        next = slice->next;
-        slice_allocator_destroy_slice(sa, slice);
-    }
-    
-    next = sa->full;
-    while(next) {
-        Slice* slice = next;
-        next = slice->next;
-        slice_allocator_destroy_slice(sa, slice);
-    }
-    
-    sa->full = 0;
-    sa->available = 0;
-    sa->num_slices = 0;
+    slice_list_fini(&sa->free);
+    slice_list_fini(&sa->partial);
+    slice_list_fini(&sa->full);
 }
 
 sa_size_t slice_allocator_get_allocation_size(SliceAllocator* sa)
 {
     return sa->max_alloc_size;
-}
-
-
-void slice_allocator_insert_available_slice(SliceAllocator* sa,
-                                            Slice* slice)
-{
-    Slice* curr_available = sa->available;
-    
-    sa->available = slice;
-    sa->available->next = curr_available;
-    if(curr_available) {
-        curr_available->prev = sa->available;
-    }
-    sa->available->prev = 0;
-}
-
-void slice_allocator_remove_available_slice(SliceAllocator* sa,
-                                            Slice* slice)
-{
-    if(sa->available == slice) {
-        sa->available = slice->next;
-        
-        if(sa->available) {
-            sa->available->prev = 0;
-        }
-    } else {
-        Slice* before = slice->prev;
-        Slice* after = slice->next;
-        
-        if(before) {
-            before->next = after;
-        }
-        
-        if(after) {
-            after->prev = before;
-        }
-    }
-    
-    slice->prev = 0;
-    slice->next = 0;
-}
-
-void slice_allocator_insert_full_slice(SliceAllocator* sa, Slice* slice)
-{
-    Slice* curr_full = sa->full;
-    
-    sa->full = slice;
-    sa->full->next = curr_full;
-    if(curr_full) {
-        curr_full->prev = sa->full;
-    }
-    sa->full->prev = 0;
-}
-
-void slice_allocator_remove_full_slice(SliceAllocator* sa,
-                                       Slice* slice)
-{
-    if(sa->full == slice) {
-        sa->full = slice->next;
-        
-        if(sa->full) {
-            sa->full->prev = 0;
-        }
-    } else {
-        Slice* before = slice->prev;
-        Slice* after = slice->next;
-        
-        if(before) {
-            before->next = after;
-        }
-        
-        if(after) {
-            after->prev = before;
-        }
-    }
-    
-    slice->prev = 0;
-    slice->next = 0;
 }
 
 void* slice_allocator_alloc(SliceAllocator* sa, sa_size_t size)
@@ -167,14 +91,22 @@ void* slice_allocator_alloc(SliceAllocator* sa, sa_size_t size)
     
     osif_mutex_enter(&sa->mutex);
     
-    // Locate a Slice with residual capacity
-    if(sa->available == 0) {
-        slice = slice_allocator_create_slice(sa);
-        slice_allocator_insert_available_slice(sa, slice);
-        sa->num_slices++;
+    // Locate a Slice with residual capacity, first check for a partially
+    // full slice, use some more of its capacity. Next, look to see if we
+    // have a ready to go empty slice. If not finally go to underlying
+    // allocator for a new slice.
+    if(slice_list_size(&sa->partial)) {
+        slice = slice_list_front(&sa->partial);
+    } else if (slice_list_size(&sa->free)) {
+        slice = slice_list_tail(&sa->free);
+        slice_list_remove_tail(&sa->free);
+        slice_list_push_front(&sa->partial, slice);
     } else {
-        slice = sa->available;
+        slice = slice_allocator_create_slice(sa);
+        slice_list_push_front(&sa->partial, slice);
     }
+    
+    // FIXME: we might crash here if slice_allocator_create_slice returns null.
     
     // Grab memory from the slice
     void *p = slice_alloc(slice, size);
@@ -184,8 +116,8 @@ void* slice_allocator_alloc(SliceAllocator* sa, sa_size_t size)
     // full list so that we no longer keep
     // trying to allocate from it.
     if(slice_is_full(slice)) {
-        slice_allocator_remove_available_slice(sa, slice);
-        slice_allocator_insert_full_slice(sa, slice);
+        slice_list_remove(&sa->partial, slice);
+        slice_list_push_front(&sa->full, slice);
     }
     
     osif_mutex_exit(&sa->mutex);
@@ -203,30 +135,16 @@ void slice_allocator_free(SliceAllocator* sa, void* buf)
     // If the slice was previously full remove it from the free list
     // and place in the available list
     if(slice_is_full(slice)) {
-        slice_allocator_remove_full_slice(sa, slice);
-        slice_allocator_insert_available_slice(sa, slice);
+        slice_list_remove(&sa->full, slice);
+        slice_list_push_front(&sa->partial, slice);
     }
     
     slice_free(slice, buf);
     
-    // If appropriate, return memory to the underlying allocator
-    int need_to_release = 0;
     if(slice_is_empty(slice)) {
-        
-        if(osif_memory_pressure()) {
-            need_to_release = 1;
-        } else {
-            sa_size_t size = slice_calculate_size(sa->max_alloc_size, sa->num_allocs_per_buffer);
-            if(sa->num_slices * size > SLICE_ALLOCATOR_RELEASE_MEMORY_THRESHOLD) {
-                need_to_release = 1;
-            }
-        }
-        
-        if(need_to_release) {
-            slice_allocator_remove_available_slice(sa, slice);
-            slice_allocator_destroy_slice(sa, slice);
-            sa->num_slices--;
-        }
+        slice_list_remove(&sa->partial, slice);
+        slice->time_freed = gethrtime();
+        slice_list_push_front(&sa->free, slice);
     }
     
     osif_mutex_exit(&sa->mutex);
@@ -234,23 +152,33 @@ void slice_allocator_free(SliceAllocator* sa, void* buf)
 
 void slice_allocator_release_memory(SliceAllocator* sa)
 {
-    // Unlike the memory release strategy in _free,
-    // this function locates all empty slices and returns
-    // the memory to the underlying allocator as the
-    // underlying allocator is reporting memory pressure.
+    osif_mutex_enter(&sa->mutex);
+    slice_allocator_empty_list(sa, &sa->free);
+    osif_mutex_exit(&sa->mutex);
+}
+
+void slice_allocator_garbage_collect(SliceAllocator* sa)
+{
     osif_mutex_enter(&sa->mutex);
 
-    Slice* next = sa->available;
-    
-    while(next) {
-        Slice* slice = next;
-        next = slice->next;
-        if(slice_is_empty(slice)) {
-            slice_allocator_remove_available_slice(sa, slice);
-            slice_allocator_destroy_slice(sa, slice);
-            sa->num_slices--;
+    hrtime_t stale_time = gethrtime() - SA_MAX_FREE_MEM_AGE;
+
+    int done = 0;
+
+    do {
+        sa_size_t free_slices = slice_list_size(&sa->free);
+        if (free_slices) {
+            Slice* slice = slice_list_tail(&sa->free);
+            if(slice->time_freed <= stale_time) {
+                slice_list_remove_tail(&sa->free);
+                slice_allocator_destroy_slice(sa, slice);
+            } else {
+                done = 1;
+            }
+        } else {
+            done = 1;
         }
-    }
+    } while (!done);
 
     osif_mutex_exit(&sa->mutex);
 }
