@@ -1184,7 +1184,6 @@ taskq_thread(void *arg)
 	taskq_ent_t *tqe;
 	callb_cpr_t cprinfo;
 	hrtime_t start, end;
-
 	CALLB_CPR_INIT(&cprinfo, &tq->tq_lock, callb_generic_cpr,  tq->tq_name);
 	mutex_enter(&tq->tq_lock);
 	while (tq->tq_flags & TASKQ_ACTIVE) {
@@ -1416,7 +1415,6 @@ taskq_create(const char *name, int nthreads, pri_t pri, int minalloc,
 	/* For dynamic task queues use just one backup thread */
 	if (flags & TASKQ_DYNAMIC)
 		nthreads = 1;
-
 
 	(void) strncpy(tq->tq_name, name, TASKQ_NAMELEN + 1);
 	tq->tq_name[TASKQ_NAMELEN] = '\0';

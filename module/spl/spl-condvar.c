@@ -89,9 +89,9 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, const char *msg)
     ts.tv_nsec = 0;
 #if 1
     if (ts.tv_sec < 1)
-        ts.tv_sec = 1;
+        ts.tv_nsec = 100;
 #endif
-    if (ts.tv_sec > 1000)
+    if (ts.tv_sec > 400)
         printf("cv_timedwait: will wait %lds\n", ts.tv_sec);
 
     mp->m_owner = NULL;
@@ -127,6 +127,12 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
 
     ts.tv_sec = 0;
     ts.tv_nsec = tim * NSEC_PER_USEC;
+    if (ts.tv_nsec < 1)
+        ts.tv_nsec = 100;
+
+    if (ts.tv_nsec > 400 * NSEC_PER_SEC)
+        printf("cv_timedwait_hires: will wait %lds\n", ts.tv_sec/NSEC_PER_SEC);
+
 
     mp->m_owner = NULL;
     result = msleep(cvp, mp->m_lock, PRIBIO, "cv_timedwait_hires", &ts);
