@@ -98,7 +98,6 @@ SYSCTL_INT(_spl, OID_AUTO, num_threads,
            "Num threads");
 
 
-//#define SPL_HYBRID_ALLOCATOR
 
 void *
 zfs_kmem_alloc(size_t size, int kmflags)
