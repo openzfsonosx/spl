@@ -106,8 +106,14 @@ extern errno_t vnode_remove(const char *, int, enum vtype, vfs_context_t);
 errno_t
 vnode_remove(const char *name, int flag, enum vtype type, vfs_context_t vctx)
 {
+    /*
+     * Now that zed ZFS Event Daemon can handle the rename of zpool.cache
+     * we will silence this limitation, and look in zed.d/config.sync.sh
+     */
+    /*
     IOLog("vnode_remove: \"%s\"\n", name);
     IOLog("zfs: vnode_remove not yet supported\n");
+    */
     return (EPERM);
 }
 

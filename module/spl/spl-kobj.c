@@ -44,9 +44,9 @@ kobj_open_file(char *name)
     error = vnode_open(name, 0, 0, 0, &vp, vctx);
     (void) vfs_context_rele(vctx);
 
-    printf("kobj_open_file: \"%s\", err %d from vnode_open\n", name ? name : "", error);
-
     if (error) {
+        printf("kobj_open_file: \"%s\", err %d from vnode_open\n", name ? name : "", error);
+
         return ((struct _buf *)-1);
     }
     file = (struct _buf *)zfs_kmem_alloc(sizeof (struct _buf *), KM_SLEEP);
