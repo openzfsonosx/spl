@@ -66,3 +66,10 @@ void spl_thread_exit(void)
 
         (void) thread_terminate(current_thread());
 }
+
+void spl_rele_async(void *arg)
+{
+    struct vnode *vp = (struct vnode *)arg;
+    if (vp) vnode_put(vp);
+    thread_exit();
+}

@@ -217,10 +217,14 @@ void spl_vn_fini(void);
   * Warning: Excessive use of this routine can lead to performance problems.
   * This is because taskqs throttle back allocation if too many are created.
   */
-#define VN_RELE_ASYNC(vp,tq)                        \
-    do {                                            \
-        if ((vp) && (vp) != DNLC_NO_VNODE)          \
-            vnode_put(vp);                          \
+
+void spl_rele_async(void *arg);
+
+#define VN_RELE_ASYNC(vp,tq)                                            \
+    do {                                                                \
+        if ((vp) && (vp) != DNLC_NO_VNODE)                              \
+            (void) thread_create(NULL, 0, spl_rele_async, vp, 0, &p0,   \
+                                 TS_RUN, minclsyspri);                  \
     } while (0)
 
 

@@ -6,4 +6,9 @@
 #define HW_HOSTID_LEN		11		/* minimum buffer size needed */
 						/* to hold a decimal or hex */
 						/* hostid string */
+
+const char *spl_panicstr(void);
+int spl_system_inshutdown(void);
+
+
 #endif /* SPL_SYSTEMINFO_H */

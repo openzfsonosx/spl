@@ -89,7 +89,21 @@ extern void (*__ihook_free)(void *);
 static void *_slab_zone = NULL;
 
 #include <bmalloc.h>
+#include <sys/systeminfo.h>
 
+
+extern const char              *panicstr;
+extern int system_inshutdown;
+
+const char *spl_panicstr(void)
+{
+    return panicstr;
+}
+
+int spl_system_inshutdown(void)
+{
+    return system_inshutdown;
+}
 
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {

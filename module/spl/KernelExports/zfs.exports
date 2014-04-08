@@ -14,3 +14,5 @@ _fp_drop
 _fp_drop_written
 _fo_read
 _fo_write
+_panicstr
+_system_inshutdown
