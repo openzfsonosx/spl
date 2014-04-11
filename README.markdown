@@ -26,7 +26,7 @@ Pure 'gcc' will produce unstable builds.
 # ./configure CC=clang CXX=clang++
 # make
 
-# rsync -ar --delete module/spl/spl.kext/ /tmp/spl.kext/
+# rsync -a --delete module/spl/spl.kext/ /tmp/spl.kext/
 # chown -R root:wheel /tmp/spl.kext
 
 # kextload -r /tmp/ -v /tmp/spl.kext
