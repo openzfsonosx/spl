@@ -395,6 +395,7 @@ void dnlc_remove(struct vnode *vp, char *name)
  */
 void dnlc_update(struct vnode *vp, char *name, struct vnode *tp)
 {
+
 #if 0
     // If tp is NULL, it is a negative-cache entry
     struct componentname cn;
