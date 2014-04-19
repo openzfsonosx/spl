@@ -39,7 +39,6 @@ struct Slice;
 struct AllocatableRow;
 typedef struct AllocatableRow {
     struct Slice*    owner;      // a pointer back to the header for this SliceAllocator
-    struct AllocatableRow* prev;       // Links for inclusion into free and allocated lists.
     struct AllocatableRow* next;
 } AllocatableRow;
 

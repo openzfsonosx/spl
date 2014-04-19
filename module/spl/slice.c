@@ -46,10 +46,6 @@ void slice_insert_free_row(Slice* slice, AllocatableRow* row)
     AllocatableRow* curr_free = slice->free;
     
     slice->free = row;
-    slice->free->prev = 0;
-    if(curr_free) {
-        curr_free->prev = slice->free;
-    }
     slice->free->next = curr_free;
 }
 
@@ -61,11 +57,6 @@ AllocatableRow* slice_get_row(Slice* slice)
     } else {
         AllocatableRow* row = slice->free;
         slice->free = row->next;
-        
-        if(slice->free) {
-            slice->free->prev = 0;
-        }
-
         return row;
     }
 }
