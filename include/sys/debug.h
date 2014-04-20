@@ -131,11 +131,7 @@ do {									\
 		PANIC("ASSERTION(" #cond ") failed\n");			\
 } while (0)
 
-#define ASSERT0(cond==0)							\
-do {									\
-	if (unlikely(!(cond)))						\
-		PANIC("ASSERTION(" #cond ") failed\n");			\
-} while (0)
+#define ASSERT0(cond)	ASSERT((cond)==0)
 
 #define ASSERTF(cond, fmt, a...)					\
 do {									\
