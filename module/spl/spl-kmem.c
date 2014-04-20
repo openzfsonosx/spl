@@ -45,7 +45,7 @@
 #include <mach/host_info.h>
 #include <libkern/OSMalloc.h>
 #include <sys/sysctl.h>
-#include "bmalloc.h"
+#include "spl-bmalloc.h"
 
 #ifdef _KERNEL
 

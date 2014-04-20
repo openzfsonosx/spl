@@ -16,34 +16,46 @@
  * fields enclosed by brackets "[]" replaced with your own identifying
  * information: Portions Copyright [yyyy] [name of copyright owner]
  *
+ * Copyright 2014 Brendon Humphrey (brendon.humphrey@mac.com)
+ *
  * CDDL HEADER END
  */
 
-#ifndef MEMORY_POOL_H
-#define MEMORY_POOL_H
+#ifndef BMALLOC_H
+#define BMALLOC_H
 
-#include "osif.h"
+//
+// Initialises the allocator, must be called before any other function.
+//
+void bmalloc_init();
 
-struct memory_block;
+//
+// Allocate <size> bytes of memory for the application
+//
+void* bmalloc(size_t size);
 
-typedef struct memory_block {
-    struct memory_block* next;
-    struct memory_block* prev;
-    hrtime_t             time_freed;
-} memory_block;
+//
+// Release memory from the application
+//
+void bfree(void* buf, size_t size);
 
+//
+// Release all free memory within the allocator
+// Should be invoked if the machine is under
+// memory pressure.
+//
+void bmalloc_release_memory();
 
-void memory_pool_init();
-void memory_pool_fini();
+//
+// Manages from free memory within the allocator.
+// Should be called periodically (say at least
+// every 10 seconds).
+//
+void bmalloc_garbage_collect();
 
-sa_size_t memory_pool_claim_size();
-
-void* memory_pool_claim();
-void memory_pool_return(void* memory);
-
-void memory_pool_release_memory();
-void memory_pool_garbage_collect();
-
-
+//
+// Release all remaining memory and allocator resources
+//
+void bmalloc_fini();
 
 #endif

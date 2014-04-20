@@ -88,7 +88,7 @@ extern void (*__ihook_free)(void *);
 
 static void *_slab_zone = NULL;
 
-#include <bmalloc.h>
+#include <spl-bmalloc.h>
 #include <sys/systeminfo.h>
 
 

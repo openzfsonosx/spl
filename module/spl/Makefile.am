@@ -52,13 +52,7 @@ spl_SOURCES = 	\
 	spl-time.c \
 	spl-vnode.c \
 	spl-xdr.c \
-	bmalloc.c \
-	slice_allocator.c \
-	slice.c \
-	slice_list.c \
-	memory_pool.c \
-	memory_block_list.c \
-	osif.c
+	spl-bmalloc.c 
 
 spl_CPPFLAGS=$(CFLAGS_KMOD)
 spl_LDFLAGS=$(LINKFLAGS_KMOD)
