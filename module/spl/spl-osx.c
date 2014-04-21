@@ -86,8 +86,6 @@ uint32_t zone_get_hostid(void *zone)
 extern void *(*__ihook_malloc)(size_t size);
 extern void (*__ihook_free)(void *);
 
-//BGHstatic void *_slab_zone = NULL;
-
 #include <spl-bmalloc.h>
 #include <sys/systeminfo.h>
 
