@@ -124,6 +124,8 @@ kmem_avail(void)
 
 int spl_vm_pool_low(void)
 {
+    static int tick_counter = 0;
+    
     int r = vm_pool_low();
     
     if(r) {
@@ -133,7 +135,11 @@ int spl_vm_pool_low(void)
     // FIXME - this should be in its own thread
     // that calls garbage collect at least every
     // 5 seconds.
-    bmalloc_garbage_collect();
+    tick_counter++;
+    if(tick_counter % 5 == 0) {
+        tick_counter = 0;
+        bmalloc_garbage_collect();
+    }
     
     return r;
 }

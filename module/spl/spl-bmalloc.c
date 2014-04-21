@@ -96,6 +96,17 @@
 // Performance change not measurable.
 #define SLICE_ALLOCATOR_FINE_LOCKING 1
 
+// Borrow an idea from the linux kernel SLUB allocator,
+// that is have the Slice Allocator simply forget about
+// full slices. They are "found" again when a free
+// occurs from the full slice, and added to the 
+// partial list again. This save a small amount
+// of list processing overhead and storage space.
+// (Performance difference is probably purely academic)
+//
+// You will want to enable this if hunting memory leaks.
+//#define SLICE_ALLOCATOR_TRACK_FULL_SLABS 1
+
 #ifdef _KERNEL
 #define IN_KERNEL 1
 #else
@@ -158,6 +169,10 @@ typedef struct {
     memory_block_list_t large_blocks;
 } memory_pool_t;
 
+// Make sure this structure remains a 
+// multiple of 8 bytes to prevent
+// problems with alignment of memory
+// allocated to the caller.
 typedef struct allocatable_row {
 #ifdef SPACE_EFFICIENT
     large_offset_t slice_offset;
@@ -180,7 +195,11 @@ typedef struct slice {
 typedef struct {
     list_t       free;
     list_t       partial;
+    
+#ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
     list_t       full;
+#endif
+
     sa_size_t    max_alloc_size;       /* Max alloc size for slice */
     sa_size_t    num_allocs_per_slice; /* Number of rows to be allocated in the Slices */
     osif_mutex   mutex;
@@ -226,7 +245,9 @@ const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 5 * SA_NSEC_PER_SEC;
 // and more slice sizes were added as a result
 // of instrumenting allocations. In terms of allocator
 // efficiency its beneficial to closely match allocation
-// requests to slice size.
+// requests to slice size. Slice size % 8 must = 0
+// or the allocator will allocate non-8 byte alligned
+// memory.
 
 const sa_size_t ALLOCATOR_SLICE_SIZES[] = {
     32,
@@ -234,7 +255,6 @@ const sa_size_t ALLOCATOR_SLICE_SIZES[] = {
     96,
     128,
     160,
-    196,
     256,
     320,
     384,
@@ -699,9 +719,12 @@ void slice_allocator_init(slice_allocator_t* sa, sa_size_t max_alloc_size)
     osif_mutex_init(&sa->mutex);
     
     // Create lists for tracking the state of the slices as memory is allocated
+
     list_create(&sa->free, sizeof(slice_t), offsetof(slice_t, slice_link_node));
     list_create(&sa->partial, sizeof(slice_t), offsetof(slice_t, slice_link_node));
+#ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
     list_create(&sa->full, sizeof(slice_t), offsetof(slice_t, slice_link_node));
+#endif
     
     sa->max_alloc_size = max_alloc_size;
     sa->num_allocs_per_slice = (memory_pool_claim_size() - sizeof(slice_t))/(sizeof(allocatable_row_t) + max_alloc_size);
@@ -711,11 +734,16 @@ void slice_allocator_fini(slice_allocator_t* sa)
 {
     slice_allocator_empty_list(sa, &sa->free);
     slice_allocator_empty_list(sa, &sa->partial);
+   
+#ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
     slice_allocator_empty_list(sa, &sa->full);
+#endif
     
     list_destroy(&sa->free);
     list_destroy(&sa->partial);
+#ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
     list_destroy(&sa->full);
+#endif
 }
 
 sa_size_t slice_allocator_get_allocation_size(slice_allocator_t* sa)
@@ -764,7 +792,10 @@ void* slice_allocator_alloc(slice_allocator_t* sa, sa_size_t size)
     // trying to allocate from it.
     if(slice_is_full(slice)) {
         list_remove(&sa->partial, slice);
+
+#ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
         list_insert_head(&sa->full, slice);
+#endif
     }
     
     osif_mutex_exit(&sa->mutex);
@@ -784,7 +815,11 @@ void slice_allocator_free(slice_allocator_t* sa, void* buf)
     // If the slice was previously full remove it from the free list
     // and place in the available list
     if(slice_is_full(slice)) {
+
+#ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
         list_remove(&sa->full, slice);
+#endif
+        
         list_insert_head(&sa->partial, slice);
     }
     
