@@ -44,10 +44,12 @@
  * ASSERT3S()	- Assert signed X OP Y is true, if not panic.
  * ASSERT3U()	- Assert unsigned X OP Y is true, if not panic.
  * ASSERT3P()	- Assert pointer X OP Y is true, if not panic.
+ * ASSERT0()	- Assert value is zero, if not panic.
  * VERIFY()	- Verify X is true, if not panic.
  * VERIFY3S()	- Verify signed X OP Y is true, if not panic.
  * VERIFY3U()	- Verify unsigned X OP Y is true, if not panic.
  * VERIFY3P()	- Verify pointer X OP Y is true, if not panic.
+ * VERIFY0()	- Verify value is zero, if not panic.
  */
 
 #ifndef _SPL_DEBUG_H
@@ -71,19 +73,12 @@ do {									\
 
 #define __ASSERT(x)			((void)0)
 #define ASSERT(x)			((void)0)
-#define ASSERT0(x)			((void)0)
 #define ASSERTF(x, y, z...)		((void)0)
 #define ASSERTV(x)
 #define VERIFY(cond)							\
 do {									\
 	if (unlikely(!(cond)))						\
 		PANIC("VERIFY(" #cond ") failed\n");			\
-} while (0)
-
-#define VERIFY0(cond)							\
-do {									\
-	if (unlikely((cond)!=0))						\
-		PANIC("VERIFY0(" #cond ") failed\n");			\
 } while (0)
 
 #define VERIFY3_IMPL(LEFT, OP, RIGHT, TYPE, FMT, CAST)			\
@@ -98,10 +93,12 @@ do {									\
 #define VERIFY3U(x,y,z)	VERIFY3_IMPL(x, y, z, uint64_t, "%llu",		\
 				    (unsigned long long))
 #define VERIFY3P(x,y,z)	VERIFY3_IMPL(x, y, z, uintptr_t, "%p", (void *))
+#define VERIFY0(x)	VERIFY3_IMPL(0, ==, x, int64_t, "%lld",	(long long))
 
 #define ASSERT3S(x,y,z)	((void)0)
 #define ASSERT3U(x,y,z)	((void)0)
 #define ASSERT3P(x,y,z)	((void)0)
+#define ASSERT0(x)	((void)0)
 
 #else /* Debugging Enabled */
 
@@ -131,8 +128,6 @@ do {									\
 		PANIC("ASSERTION(" #cond ") failed\n");			\
 } while (0)
 
-#define ASSERT0(cond)	ASSERT((cond)==0)
-
 #define ASSERTF(cond, fmt, a...)					\
 do {									\
 	if (unlikely(!(cond)))						\
@@ -151,14 +146,26 @@ do {									\
 #define VERIFY3U(x,y,z)	VERIFY3_IMPL(x, y, z, uint64_t, "%llu",		\
 				    (unsigned long long))
 #define VERIFY3P(x,y,z)	VERIFY3_IMPL(x, y, z, uintptr_t, "%p", (void *))
+#define VERIFY0(x)	VERIFY3_IMPL(0, ==, x, int64_t, "%lld", (long long))
 
 #define ASSERT3S(x,y,z)	VERIFY3S(x, y, z)
 #define ASSERT3U(x,y,z)	VERIFY3U(x, y, z)
 #define ASSERT3P(x,y,z)	VERIFY3P(x, y, z)
+#define ASSERT0(x)	VERIFY0(x)
 
 #define ASSERTV(x)	x
 #define VERIFY(x)	ASSERT(x)
-#define VERIFY0(x)	ASSERT((x)==0)
 
 #endif /* NDEBUG */
+
+/*
+ * Compile-time assertion. The condition 'x' must be constant.
+ */
+#define	CTASSERT_GLOBAL(x)		_CTASSERT(x, __LINE__)
+#define	CTASSERT(x)			{ _CTASSERT(x, __LINE__); }
+#define	_CTASSERT(x, y)			__CTASSERT(x, y)
+#define	__CTASSERT(x, y)			\
+	typedef char __attribute__ ((unused))	\
+	__compile_time_assertion__ ## y[(x) ? 1 : -1]
+
 #endif /* SPL_DEBUG_H */
