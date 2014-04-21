@@ -118,6 +118,8 @@
 
 #ifdef IN_KERNEL
 #include <sys/list.h>
+#include <sys/timer.h> // FIXME
+#include <osx/condvar.h> // FIXME
 #else
 #include <stdlib.h>
 #include <sys/time.h>
@@ -146,11 +148,11 @@ typedef pthread_mutex_t osif_mutex;
 #define SA_TRUE (sa_bool_t)1;
 #define SA_FALSE (sa_bool_t)0;
 
-#ifdef IN_KERNEL
-#define SA_NSEC_PER_SEC  NSEC_PER_SEC
-#else
+//#ifdef IN_KERNEL
+//#define SA_NSEC_PER_SEC  NSEC_PER_SEC
+//#else
 #define SA_NSEC_PER_SEC  1000000000ULL
-#endif
+//#endif
 
 #define SA_NSEC_PER_USEC  1000;
 
@@ -238,7 +240,7 @@ const sa_hrtime_t SA_MAX_POOL_FREE_MEM_AGE = 120 * SA_NSEC_PER_SEC;
 // SA_MAX_SLICE_FREE_MEM_AGE seconds, the slice is
 // released to the memory pool for allocation
 // by another slice allocator or release to the underlying allocator.
-const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 5 * SA_NSEC_PER_SEC;
+const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 15 * SA_NSEC_PER_SEC;
 
 // Sizes of various slices that are used by zfs
 // This table started out as a naive ^2 table,
@@ -255,6 +257,7 @@ const sa_size_t ALLOCATOR_SLICE_SIZES[] = {
     96,
     128,
     160,
+    192,
     256,
     320,
     384,
@@ -485,7 +488,7 @@ void memory_pool_garbage_collect()
 
     osif_mutex_enter(&list->mutex);
     
-    sa_hrtime_t stale_time = osif_gethrtime() - SA_MAX_POOL_FREE_MEM_AGE;
+    sa_hrtime_t now = osif_gethrtime();
     int done = 0;
     
     do {
@@ -493,7 +496,7 @@ void memory_pool_garbage_collect()
             done = 1;
         } else {
             memory_block_t* block = list_tail(&list->blocks);
-            if(block->time_freed <= stale_time) {
+            if(now - block->time_freed > SA_MAX_POOL_FREE_MEM_AGE) {
                 list_remove_tail(&list->blocks);
                 list->count--;
                 
@@ -844,14 +847,14 @@ void slice_allocator_garbage_collect(slice_allocator_t* sa)
 {
     osif_mutex_enter(&sa->mutex);
     
-    sa_hrtime_t stale_time = osif_gethrtime() - SA_MAX_SLICE_FREE_MEM_AGE;
+    sa_hrtime_t now = osif_gethrtime();
     
     int done = 0;
     
     do {
         if (!list_is_empty(&sa->free)) {
             slice_t* slice = list_tail(&sa->free);
-            if(slice->time_freed <= stale_time) {
+            if(now - slice->time_freed > SA_MAX_SLICE_FREE_MEM_AGE) {
                 list_remove_tail(&sa->free);
                 
 #ifdef SLICE_ALLOCATOR_FINE_LOCKING
@@ -903,6 +906,7 @@ void bmalloc_init()
 {
     printf("[SPL] bmalloc slice allocator initialised\n");
 
+    
     sa_size_t max_allocation_size = ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1];
     
     // Initialise the memory pool
