@@ -31,6 +31,7 @@
 #include <sys/kmem.h>
 #include <sys/tsd.h>
 #include <spl-debug.h>
+#include <sys/vnode.h>
 
 uint32_t zfs_threads = 0;
 

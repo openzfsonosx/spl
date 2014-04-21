@@ -131,7 +131,7 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
         ts.tv_nsec = 100;
 
     if (ts.tv_nsec > 400 * NSEC_PER_SEC)
-        printf("cv_timedwait_hires: will wait %lds\n", ts.tv_sec/NSEC_PER_SEC);
+        printf("cv_timedwait_hires: will wait %llds\n",ts.tv_sec/NSEC_PER_SEC);
 
 
     mp->m_owner = NULL;
