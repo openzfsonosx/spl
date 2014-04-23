@@ -61,9 +61,11 @@ void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
     ASSERT(size);
-    
+
+    if (!size) return NULL; /* ZFS relies on size=0 allocations */
+
     void *p = bmalloc(size);
-    
+
     if (p) {
         if (kmflags & KM_ZERO) {
             bzero(p, size);
@@ -72,7 +74,7 @@ zfs_kmem_alloc(size_t size, int kmflags)
     } else {
         printf("[spl] kmem_alloc(%lu) failed: \n", size);
     }
-    
+
     return (p);
 }
 
@@ -85,8 +87,10 @@ zfs_kmem_zalloc(size_t size, int kmflags)
 void
 zfs_kmem_free(void *buf, size_t size)
 {
+    if (!buf || !size) return;
+
     ASSERT(buf && size);
-    
+
     bfree(buf, size);
     atomic_sub_64(&total_in_use, size);
 }
@@ -125,13 +129,13 @@ kmem_avail(void)
 int spl_vm_pool_low(void)
 {
     static int tick_counter = 0;
-    
+
     int r = vm_pool_low();
-    
+
     if(r) {
         bmalloc_release_memory();
     }
-    
+
     // FIXME - this should be in its own thread
     // that calls garbage collect at least every
     // 5 seconds.
@@ -140,7 +144,7 @@ int spl_vm_pool_low(void)
         tick_counter = 0;
         bmalloc_garbage_collect();
     }
-    
+
     return r;
 }
 
@@ -148,7 +152,7 @@ static int
 kmem_std_constructor(void *mem, int size __unused, void *private, int flags)
 {
 	struct kmem_cache *cache = private;
-    
+
 	return (cache->kc_constructor(mem, cache->kc_private, flags));
 }
 
@@ -156,7 +160,7 @@ static void
 kmem_std_destructor(void *mem, int size __unused, void *private)
 {
 	struct kmem_cache *cache = private;
-    
+
 	cache->kc_destructor(mem, cache->kc_private);
 }
 
@@ -166,9 +170,9 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
                   void (*reclaim)(void *), void *private, vmem_t *vmp, int cflags)
 {
 	kmem_cache_t *cache;
-    
+
 	ASSERT(vmp == NULL);
-    
+
 	cache = zfs_kmem_alloc(sizeof(*cache), KM_SLEEP);
 	strlcpy(cache->kc_name, name, sizeof(cache->kc_name));
 	cache->kc_constructor = constructor;
@@ -176,7 +180,7 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 	cache->kc_reclaim = reclaim;
 	cache->kc_private = private;
 	cache->kc_size = bufsize;
-    
+
 	return (cache);
 }
 
@@ -190,7 +194,7 @@ void *
 kmem_cache_alloc(kmem_cache_t *cache, int flags)
 {
 	void *p;
-    
+
 	p = zfs_kmem_alloc(cache->kc_size, flags);
 	if (p != NULL && cache->kc_constructor != NULL)
 		kmem_std_constructor(p, cache->kc_size, cache, flags);
@@ -242,17 +246,17 @@ char *kvasprintf(const char *fmt, va_list ap)
     unsigned int len;
     char *p;
     va_list aq;
-    
+
     va_copy(aq, ap);
     len = vsnprintf(NULL, 0, fmt, aq);
     va_end(aq);
-    
+
     p = bmalloc(len+1);
     if (!p)
         return NULL;
-    
+
     vsnprintf(p, len+1, fmt, ap);
-    
+
     return p;
 }
 
@@ -261,13 +265,13 @@ kmem_vasprintf(const char *fmt, va_list ap)
 {
     va_list aq;
     char *ptr;
-    
+
     do {
         va_copy(aq, ap);
         ptr = kvasprintf(fmt, aq);
         va_end(aq);
     } while (ptr == NULL);
-    
+
     return ptr;
 }
 
@@ -276,13 +280,13 @@ kmem_asprintf(const char *fmt, ...)
 {
     va_list ap;
     char *ptr;
-    
+
     do {
         va_start(ap, fmt);
         ptr = kvasprintf(fmt, ap);
         va_end(ap);
     } while (ptr == NULL);
-    
+
     return ptr;
 }
 
