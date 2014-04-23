@@ -62,8 +62,6 @@ zfs_kmem_alloc(size_t size, int kmflags)
 {
     ASSERT(size);
 
-    if (!size) return NULL; /* ZFS relies on size=0 allocations */
-
     void *p = bmalloc(size);
 
     if (p) {
@@ -87,8 +85,6 @@ zfs_kmem_zalloc(size_t size, int kmflags)
 void
 zfs_kmem_free(void *buf, size_t size)
 {
-    if (!buf || !size) return;
-
     ASSERT(buf && size);
 
     bfree(buf, size);

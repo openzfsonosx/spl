@@ -1,5 +1,4 @@
-/*
- * CDDL HEADER START
+ /* CDDL HEADER START
  *
  * The contents of this file are subject to the terms of the
  * Common Development and Distribution License (the "License").
@@ -81,25 +80,28 @@
 // It seems that the performance penalty is about 4% on a
 // user space instrumentation tool, apparently within the
 // margin for error when running iozone.
-#define SPACE_EFFICIENT 1
+//#define SPACE_EFFICIENT 1
+
+// Defining this causes the allocator to use
+// smaller chunks of memory from the underlying 
+// allocator in the hope that this will
+// be easier for smaller machines to fulfull
+// these requests.
+#define FINER_POOL_SIZE 1
 
 // Place the allocator in thread safe mode. If you have an application
 // where the allocator does not have to be thread safe then removing
 // the mutexes will improve the allocator performance by about 30%.
 #define THREAD_SAFE 1
 
-// Enable/Disable fine grained locking strategy in the memory
-// The performance benefits of this are not measurable.
-#define MEM_POOL_FINE_LOCKING 1
-
-// Enables finer grained locking in the slice allocator
-// Performance change not measurable.
-#define SLICE_ALLOCATOR_FINE_LOCKING 1
+// Turn on counting of the number of allocations made to each allocator.
+// Major performance killer, keep turned off.
+//#define COUNT_ALLOCATIONS 1
 
 // Borrow an idea from the linux kernel SLUB allocator,
 // that is have the Slice Allocator simply forget about
 // full slices. They are "found" again when a free
-// occurs from the full slice, and added to the 
+// occurs from the full slice, and added to the
 // partial list again. This save a small amount
 // of list processing overhead and storage space.
 // (Performance difference is probably purely academic)
@@ -117,9 +119,9 @@
 #include <string.h>
 
 #ifdef IN_KERNEL
+#include <kern/locks.h>
+#include <sys/atomic.h>
 #include <sys/list.h>
-#include <sys/timer.h> // FIXME
-#include <osx/condvar.h> // FIXME
 #else
 #include <stdlib.h>
 #include <sys/time.h>
@@ -137,24 +139,12 @@ typedef uint8_t sa_byte_t;
 typedef uint8_t sa_bool_t;
 typedef uint64_t sa_hrtime_t;
 typedef uint32_t large_offset_t;
-typedef uint16_t small_offset_t;
-
-#ifdef IN_KERNEL
-typedef kmutex_t osif_mutex;
-#else
-typedef pthread_mutex_t osif_mutex;
-#endif
 
 #define SA_TRUE (sa_bool_t)1;
 #define SA_FALSE (sa_bool_t)0;
 
-//#ifdef IN_KERNEL
-//#define SA_NSEC_PER_SEC  NSEC_PER_SEC
-//#else
 #define SA_NSEC_PER_SEC  1000000000ULL
-//#endif
-
-#define SA_NSEC_PER_USEC  1000;
+#define SA_NSEC_PER_USEC 1000;
 
 typedef struct {
     sa_hrtime_t time_freed;
@@ -162,16 +152,24 @@ typedef struct {
 } memory_block_t;
 
 typedef struct {
-    sa_size_t  count;
-    list_t     blocks;
-    osif_mutex mutex;
+    sa_size_t   count;
+    list_t      blocks;
+    lck_spin_t* spinlock;
 } memory_block_list_t;
 
 typedef struct {
     memory_block_list_t large_blocks;
+#ifdef FINER_POOL_SIZE
+    memory_block_list_t medium_blocks;
+    memory_block_list_t small_blocks;
+#endif
 } memory_pool_t;
 
-// Make sure this structure remains a 
+typedef void* (*memory_pool_claim_memory_fn_t)();
+typedef void (*memory_pool_return_memory_fn_t)(void *memory);
+typedef sa_size_t (*memory_pool_claim_size_fn_t)();
+
+// Make sure this structure remains a
 // multiple of 8 bytes to prevent
 // problems with alignment of memory
 // allocated to the caller.
@@ -201,10 +199,14 @@ typedef struct {
 #ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
     list_t       full;
 #endif
-
+    
     sa_size_t    max_alloc_size;       /* Max alloc size for slice */
     sa_size_t    num_allocs_per_slice; /* Number of rows to be allocated in the Slices */
-    osif_mutex   mutex;
+    lck_spin_t*  spinlock;
+    
+    memory_pool_claim_memory_fn_t  claim_memory_fn;
+    memory_pool_return_memory_fn_t return_memory_fn;
+    memory_pool_claim_size_fn_t    claim_size_fn;
 } slice_allocator_t;
 
 // ============================================================================================
@@ -218,14 +220,23 @@ const sa_size_t RETAIN_MEMORY_SIZE = 10 * 1024 * 1024;   // bytes
 // Block size and free block count for the large_blocks list
 // NOTE: This value must be larger than the largets
 //       configured Slice Allocator max_allocation_size
-const sa_size_t LARGE_BLOCK_SIZE = (128 * 1024) + 4096;  // bytes
+const sa_size_t LARGE_BLOCK_SIZE = (256 * 1024) + 4096;  // bytes
 const sa_size_t LARGE_FREE_MEMORY_BLOCK_COUNT =
 RETAIN_MEMORY_SIZE / LARGE_BLOCK_SIZE;
 
+#ifdef FINER_POOL_SIZE
+
+// Block size and free block count for the medium_blocks list
+const sa_size_t MEDIUM_BLOCK_SIZE = 128 * 1024;            // bytes
+const sa_size_t MEDIUM_FREE_MEMORY_BLOCK_COUNT =
+RETAIN_MEMORY_SIZE / MEDIUM_BLOCK_SIZE;
+
 // Block size and free block count for the small_blocks list
-const sa_size_t SMALL_BLOCK_SIZE = 64 * 1024;            // bytes
+const sa_size_t SMALL_BLOCK_SIZE = 36 * 1024;            // bytes
 const sa_size_t SMALL_FREE_MEMORY_BLOCK_COUNT =
 RETAIN_MEMORY_SIZE / SMALL_BLOCK_SIZE;
+
+#endif
 
 // Slices of memory that have no allocations in them will
 // be returned to the memory pool for use by other slice
@@ -240,7 +251,7 @@ const sa_hrtime_t SA_MAX_POOL_FREE_MEM_AGE = 120 * SA_NSEC_PER_SEC;
 // SA_MAX_SLICE_FREE_MEM_AGE seconds, the slice is
 // released to the memory pool for allocation
 // by another slice allocator or release to the underlying allocator.
-const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 5 * SA_NSEC_PER_SEC;
+const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 15 * SA_NSEC_PER_SEC;
 
 // Sizes of various slices that are used by zfs
 // This table started out as a naive ^2 table,
@@ -252,26 +263,26 @@ const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 5 * SA_NSEC_PER_SEC;
 // memory.
 
 const sa_size_t ALLOCATOR_SLICE_SIZES[] = {
+    8,
+    16, 
     32,
+    40,
+    48,
     64,
+    80,
     96,
     128,
-    160,
-    192,
+    168,
+    224,
     256,
     320,
-    384,
-    448,
     512,
     856,
-    944,
+    936,
     1024,
     1920,
     2048,
     4096,
-    6144,
-    7168,
-    8192,
     12288,
     16384,
     32768,
@@ -280,12 +291,6 @@ const sa_size_t ALLOCATOR_SLICE_SIZES[] = {
     49152,
     57344,
     65536,
-    81920,
-    90112,
-    98304,
-    106496,
-    114688,
-    122880,
     131072
 };
 
@@ -295,15 +300,26 @@ const long NUM_ALLOCATORS = sizeof(ALLOCATOR_SLICE_SIZES)/sizeof(sa_size_t);
 // Variables
 // ============================================================================================
 
+// Lock manager stuff
+static lck_grp_t        *bmalloc_lock_group = NULL;
+static lck_attr_t       *bmalloc_lock_attr = NULL;
+static lck_grp_attr_t   *bmalloc_group_attr = NULL;
+
 // Blocks of memory allocated from the underlying allocator, but not
 // yet used as a slice by one of the slice allocators.
-memory_pool_t pool;
+static memory_pool_t pool;
 
 // Collection of slice allocators
-slice_allocator_t* allocators = 0;
+static slice_allocator_t* allocators = 0;
 
 // Allocation size to slice allocator lookup table
-slice_allocator_t** allocator_lookup_table = 0;
+static slice_allocator_t** allocator_lookup_table = 0;
+
+#ifdef COUNT_ALLOCATIONS
+// Allocation counter array
+static sa_size_t* allocation_counters = 0;
+#endif
+
 
 // ============================================================================================
 // OS Compatability interface
@@ -314,12 +330,12 @@ slice_allocator_t** allocator_lookup_table = 0;
 extern vm_map_t kernel_map;
 
 extern kern_return_t kernel_memory_allocate(vm_map_t       map,
-                                            vm_offset_t   *addrp,
+                                            void         **addrp,
                                             vm_size_t      size,
                                             vm_offset_t    mask,
                                             int            flags);
 
-extern void kmem_free(vm_map_t map, vm_offset_t addr, vm_size_t size);
+extern void kmem_free(vm_map_t map, void* addr, vm_size_t size);
 
 extern int              vm_pool_low(void);
 
@@ -370,50 +386,6 @@ static inline void osif_zero_memory(void* buf, sa_size_t size)
 #endif
 }
 
-static inline void osif_mutex_init(osif_mutex* mutex)
-{
-#ifdef THREAD_SAFE
-#ifdef IN_KERNEL
-    mutex_init(mutex, "bmalloc", MUTEX_DEFAULT, NULL);
-#else
-    pthread_mutex_init(mutex, 0);
-#endif
-#endif
-}
-
-static inline void osif_mutex_enter(osif_mutex* mutex)
-{
-#ifdef THREAD_SAFE
-#ifdef IN_KERNEL
-    mutex_enter(mutex);
-#else
-    pthread_mutex_lock(mutex);
-#endif
-#endif
-}
-
-static inline void osif_mutex_exit(osif_mutex* mutex)
-{
-#ifdef THREAD_SAFE
-#ifdef IN_KERNEL
-    mutex_exit(mutex);
-#else
-    pthread_mutex_unlock(mutex);
-#endif
-#endif
-}
-
-static inline void osif_mutex_destroy(osif_mutex* mutex)
-{
-#ifdef THREAD_SAFE
-#ifdef IN_KERNEL
-    mutex_destroy(mutex);
-#else
-    pthread_mutex_destroy(mutex);
-#endif
-#endif
-}
-
 static inline sa_hrtime_t osif_gethrtime()
 {
 #ifdef IN_KERNEL
@@ -435,7 +407,7 @@ static inline sa_hrtime_t osif_gethrtime()
 void memory_pool_block_list_init(memory_block_list_t* list)
 {
     list->count = 0;
-    osif_mutex_init(&list->mutex);
+    list->spinlock = lck_spin_alloc_init(bmalloc_lock_group, bmalloc_lock_attr);
     list_create(&list->blocks, sizeof(memory_block_t),
                 offsetof(memory_block_t, memory_block_link_node));
 }
@@ -443,50 +415,67 @@ void memory_pool_block_list_init(memory_block_list_t* list)
 void memory_pool_block_list_fini(memory_block_list_t* list)
 {
     list_destroy(&list->blocks);
-    // FIXME - despite the & this still panics.
-    //osif_mutex_destroy(&list->mutex);
+    lck_spin_destroy(list->spinlock, bmalloc_lock_group);
 }
 
 void memory_pool_init()
 {
+#ifdef FINER_POOL_SIZE
+    memory_pool_block_list_init(&pool.small_blocks);
+    memory_pool_block_list_init(&pool.medium_blocks);
+#endif
     memory_pool_block_list_init(&pool.large_blocks);
 }
 
-static inline sa_size_t memory_pool_claim_size()
+#ifdef FINER_POOL_SIZE
+
+sa_size_t memory_pool_claim_size_small()
+{
+    return SMALL_BLOCK_SIZE;
+}
+
+sa_size_t memory_pool_claim_size_medium()
+{
+    return MEDIUM_BLOCK_SIZE;
+}
+
+#endif
+
+sa_size_t memory_pool_claim_size_large()
 {
     return LARGE_BLOCK_SIZE;
 }
 
-void memory_pool_release_memory()
+void memory_pool_release_memory_list(memory_block_list_t* list, sa_size_t block_size)
 {
-    memory_block_list_t* list = &pool.large_blocks;
-
-    osif_mutex_enter(&list->mutex);
+    lck_spin_lock(list->spinlock);
     
     while(!list_is_empty(&list->blocks)) {
         memory_block_t* block = list_head(&list->blocks);
         list_remove_head(&list->blocks);
         list->count--;
         
-#ifdef MEM_POOL_FINE_LOCKING
-        osif_mutex_exit(&list->mutex);
-#endif
-        
-        osif_free(block, LARGE_BLOCK_SIZE);
-        
-#ifdef MEM_POOL_FINE_LOCKING
-        osif_mutex_enter(&list->mutex);
-#endif
+        lck_spin_unlock(list->spinlock);
+        osif_free(block, block_size);
+        lck_spin_lock(list->spinlock);
     }
     
-    osif_mutex_exit(&list->mutex);
+    lck_spin_unlock(list->spinlock);
 }
 
-void memory_pool_garbage_collect()
+void memory_pool_release_memory()
 {
-    memory_block_list_t* list = &pool.large_blocks;
+#ifdef FINER_POOL_SIZE
+    memory_pool_release_memory_list(&pool.small_blocks, SMALL_BLOCK_SIZE);
+    memory_pool_release_memory_list(&pool.medium_blocks, MEDIUM_BLOCK_SIZE);
+#endif
 
-    osif_mutex_enter(&list->mutex);
+    memory_pool_release_memory_list(&pool.large_blocks, LARGE_BLOCK_SIZE);
+}
+
+void memory_pool_garbage_collect_list(memory_block_list_t* list, sa_size_t block_size)
+{
+    lck_spin_lock(list->spinlock);
     
     sa_hrtime_t now = osif_gethrtime();
     int done = 0;
@@ -500,30 +489,33 @@ void memory_pool_garbage_collect()
                 list_remove_tail(&list->blocks);
                 list->count--;
                 
-#ifdef MEM_POOL_FINE_LOCKING
-                osif_mutex_exit(&list->mutex);
-#endif
-                
-                osif_free(block, LARGE_BLOCK_SIZE);
-                
-#ifdef MEM_POOL_FINE_LOCKING
-                osif_mutex_enter(&list->mutex);
-#endif
+                lck_spin_unlock(list->spinlock);
+                osif_free(block, block_size);
+                lck_spin_lock(list->spinlock);
             } else {
                 done = 1;
             }
         }
     } while (!done);
     
-    osif_mutex_exit(&list->mutex);
+    lck_spin_unlock(list->spinlock);
 }
 
-void* memory_pool_claim()
+void memory_pool_garbage_collect()
+{
+#ifdef FINER_POOL_SIZE
+    memory_pool_garbage_collect_list(&pool.small_blocks, SMALL_BLOCK_SIZE);
+    memory_pool_garbage_collect_list(&pool.medium_blocks, MEDIUM_BLOCK_SIZE);
+#endif
+
+    memory_pool_garbage_collect_list(&pool.large_blocks, LARGE_BLOCK_SIZE);
+}
+
+void* memory_pool_claim(memory_block_list_t* list, sa_size_t block_size)
 {
     memory_block_t* block = 0;
-    memory_block_list_t* list = &pool.large_blocks;
     
-    osif_mutex_enter(&list->mutex);
+    lck_spin_lock(list->spinlock);
     
     if (!list_is_empty(&list->blocks)) {
         block = list_tail(&list->blocks);
@@ -531,32 +523,73 @@ void* memory_pool_claim()
         list->count--;
     }
     
-    osif_mutex_exit(&list->mutex);
+    lck_spin_unlock(list->spinlock);
     
     if(!block) {
-        block = (memory_block_t*)osif_malloc(LARGE_BLOCK_SIZE);
+        block = (memory_block_t*)osif_malloc(block_size);
     }
     
     return (void*)block;
 }
 
-void memory_pool_return(void* memory)
+#ifdef FINER_POOL_SIZE
+
+void* memory_pool_claim_small()
+{
+    return memory_pool_claim(&pool.small_blocks, SMALL_BLOCK_SIZE);
+}
+
+void* memory_pool_claim_medium()
+{
+    return memory_pool_claim(&pool.medium_blocks, MEDIUM_BLOCK_SIZE);
+}
+
+#endif
+
+void* memory_pool_claim_large()
+{
+    return memory_pool_claim(&pool.large_blocks, LARGE_BLOCK_SIZE);
+}
+
+void memory_pool_return(void* memory, memory_block_list_t* list)
 {
     memory_block_t* block = (memory_block_t*)(memory);
-    memory_block_list_t* list = &pool.large_blocks;
     
     list_link_init(&block->memory_block_link_node);
     block->time_freed = osif_gethrtime();
     
-    osif_mutex_enter(&list->mutex);
+    lck_spin_lock(list->spinlock);
     list_insert_head(&list->blocks, block);
     list->count++;
-    osif_mutex_exit(&list->mutex);
+    lck_spin_unlock(list->spinlock);
+}
+
+#ifdef FINER_POOL_SIZE
+
+void memory_pool_return_small(void* memory)
+{
+    memory_pool_return(memory, &pool.small_blocks);
+}
+
+void memory_pool_return_medium(void* memory)
+{
+    memory_pool_return(memory, &pool.medium_blocks);
+}
+
+#endif
+
+void memory_pool_return_large(void* memory)
+{
+    memory_pool_return(memory, &pool.large_blocks);
 }
 
 void memory_pool_fini()
 {
     memory_pool_release_memory();
+#ifdef FINER_POOL_SIZE
+    memory_pool_block_list_fini(&pool.small_blocks);
+    memory_pool_block_list_fini(&pool.medium_blocks);
+#endif
     memory_pool_block_list_fini(&pool.large_blocks);
 }
 
@@ -639,9 +672,6 @@ void slice_init(slice_t* slice,
                 sa_size_t allocation_size,
                 sa_size_t num_allocations)
 {
-    // Copy parameters
-    //osif_zero_memory(slice, sizeof(slice_t));
-    
     list_link_init(&slice->slice_link_node);
     slice->free_list = 0;
     slice->alloc_count = 0;
@@ -666,7 +696,7 @@ static inline int slice_is_empty(slice_t* slice)
     return (slice->alloc_count == 0);
 }
 
-void* slice_alloc(slice_t* slice, sa_size_t size)
+void* slice_alloc(slice_t* slice)
 {
     allocatable_row_t* row = slice_get_row(slice);
     if(row) {
@@ -697,32 +727,50 @@ static inline slice_t* slice_get_slice_from_row(void* buf, allocatable_row_t** r
 
 void slice_allocator_empty_list(slice_allocator_t* sa, list_t* list)
 {
-    osif_mutex_enter(&sa->mutex);
+    lck_spin_lock(sa->spinlock);
     
     while(!list_is_empty(list)) {
         slice_t* slice = list_head(list);
         list_remove_head(list);
-
-#ifdef SLICE_ALLOCATOR_FINE_LOCKING
-        osif_mutex_exit(&sa->mutex);
-#endif
-        memory_pool_return(slice);
-
-#ifdef SLICE_ALLOCATOR_FINE_LOCKING
-        osif_mutex_enter(&sa->mutex);
-#endif
-}
+        
+        lck_spin_unlock(sa->spinlock);
+        sa->return_memory_fn(slice);
+        lck_spin_lock(sa->spinlock);
+    }
     
-    osif_mutex_exit(&sa->mutex);
+    lck_spin_unlock(sa->spinlock);
 }
 
 void slice_allocator_init(slice_allocator_t* sa, sa_size_t max_alloc_size)
 {
     osif_zero_memory(sa, sizeof(slice_allocator_t));
-    osif_mutex_init(&sa->mutex);
+
+#ifndef FINER_POOL_SIZE
+    sa->claim_memory_fn = &memory_pool_claim_large;
+    sa->return_memory_fn = &memory_pool_return_large;
+    sa->claim_size_fn = &memory_pool_claim_size_large;
+#else
+    // Select a memory pool allocation size of the allocator
+    if(max_alloc_size <= 16 * 1024) { 
+        sa->claim_memory_fn = &memory_pool_claim_small;
+        sa->return_memory_fn = &memory_pool_return_small;
+        sa->claim_size_fn = &memory_pool_claim_size_small;
+    } else if (max_alloc_size <= 65 * 1024) {
+        sa->claim_memory_fn = &memory_pool_claim_medium;
+        sa->return_memory_fn = &memory_pool_return_medium;
+        sa->claim_size_fn = &memory_pool_claim_size_medium;
+    } else {
+        sa->claim_memory_fn = &memory_pool_claim_large;
+        sa->return_memory_fn = &memory_pool_return_large;
+        sa->claim_size_fn = &memory_pool_claim_size_large;
+    }
+#endif
+
+    
+    sa->spinlock = lck_spin_alloc_init(bmalloc_lock_group, bmalloc_lock_attr);
     
     // Create lists for tracking the state of the slices as memory is allocated
-
+    
     list_create(&sa->free, sizeof(slice_t), offsetof(slice_t, slice_link_node));
     list_create(&sa->partial, sizeof(slice_t), offsetof(slice_t, slice_link_node));
 #ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
@@ -730,14 +778,14 @@ void slice_allocator_init(slice_allocator_t* sa, sa_size_t max_alloc_size)
 #endif
     
     sa->max_alloc_size = max_alloc_size;
-    sa->num_allocs_per_slice = (memory_pool_claim_size() - sizeof(slice_t))/(sizeof(allocatable_row_t) + max_alloc_size);
+    sa->num_allocs_per_slice = (sa->claim_size_fn() - sizeof(slice_t))/(sizeof(allocatable_row_t) + max_alloc_size);
 }
 
 void slice_allocator_fini(slice_allocator_t* sa)
 {
     slice_allocator_empty_list(sa, &sa->free);
     slice_allocator_empty_list(sa, &sa->partial);
-   
+    
 #ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
     slice_allocator_empty_list(sa, &sa->full);
 #endif
@@ -747,6 +795,9 @@ void slice_allocator_fini(slice_allocator_t* sa)
 #ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
     list_destroy(&sa->full);
 #endif
+    
+    // Destroy spinlock
+    lck_spin_destroy(sa->spinlock, bmalloc_lock_group);
 }
 
 sa_size_t slice_allocator_get_allocation_size(slice_allocator_t* sa)
@@ -754,11 +805,11 @@ sa_size_t slice_allocator_get_allocation_size(slice_allocator_t* sa)
     return sa->max_alloc_size;
 }
 
-void* slice_allocator_alloc(slice_allocator_t* sa, sa_size_t size)
+void* slice_allocator_alloc(slice_allocator_t* sa)
 {
     slice_t* slice = 0;
     
-    osif_mutex_enter(&sa->mutex);
+    lck_spin_lock(sa->spinlock);
     
     // Locate a slice with residual capacity, first check for a partially
     // full slice, use some more of its capacity. Next, look to see if we
@@ -771,23 +822,16 @@ void* slice_allocator_alloc(slice_allocator_t* sa, sa_size_t size)
         list_remove_tail(&sa->free);
         list_insert_head(&sa->partial, slice);
     } else {
-
-#ifdef SLICE_ALLOCATOR_FINE_LOCKING
-        osif_mutex_exit(&sa->mutex);
-#endif
-        
-        slice = (slice_t*)memory_pool_claim();
+        lck_spin_unlock(sa->spinlock);
+        slice = (slice_t*)sa->claim_memory_fn();
         slice_init(slice, sa->max_alloc_size, sa->num_allocs_per_slice);
-
-#ifdef SLICE_ALLOCATOR_FINE_LOCKING
-        osif_mutex_enter(&sa->mutex);
-#endif
+        lck_spin_lock(sa->spinlock);
         
         list_insert_head(&sa->partial, slice);
     }
     
     // Grab memory from the slice
-    void *p = slice_alloc(slice, size);
+    void *p = slice_alloc(slice);
     
     // Check to see if the slice buffer has become
     // full. If it has, then move it into the
@@ -795,20 +839,20 @@ void* slice_allocator_alloc(slice_allocator_t* sa, sa_size_t size)
     // trying to allocate from it.
     if(slice_is_full(slice)) {
         list_remove(&sa->partial, slice);
-
+        
 #ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
         list_insert_head(&sa->full, slice);
 #endif
     }
     
-    osif_mutex_exit(&sa->mutex);
+    lck_spin_unlock(sa->spinlock);
     
     return p;
 }
 
 void slice_allocator_free(slice_allocator_t* sa, void* buf)
 {
-    osif_mutex_enter(&sa->mutex);
+    lck_spin_lock(sa->spinlock);
     
     // Locate the slice buffer that the allocation lives within
     slice_t* slice;
@@ -818,7 +862,7 @@ void slice_allocator_free(slice_allocator_t* sa, void* buf)
     // If the slice was previously full remove it from the free list
     // and place in the available list
     if(slice_is_full(slice)) {
-
+        
 #ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
         list_remove(&sa->full, slice);
 #endif
@@ -835,7 +879,7 @@ void slice_allocator_free(slice_allocator_t* sa, void* buf)
         list_insert_head(&sa->free, slice);
     }
     
-    osif_mutex_exit(&sa->mutex);
+    lck_spin_unlock(sa->spinlock);
 }
 
 void slice_allocator_release_memory(slice_allocator_t* sa)
@@ -845,7 +889,7 @@ void slice_allocator_release_memory(slice_allocator_t* sa)
 
 void slice_allocator_garbage_collect(slice_allocator_t* sa)
 {
-    osif_mutex_enter(&sa->mutex);
+    lck_spin_lock(sa->spinlock);
     
     sa_hrtime_t now = osif_gethrtime();
     
@@ -857,15 +901,9 @@ void slice_allocator_garbage_collect(slice_allocator_t* sa)
             if(now - slice->time_freed > SA_MAX_SLICE_FREE_MEM_AGE) {
                 list_remove_tail(&sa->free);
                 
-#ifdef SLICE_ALLOCATOR_FINE_LOCKING
-                osif_mutex_exit(&sa->mutex);
-#endif
-                
-                memory_pool_return(slice);
-                
-#ifdef SLICE_ALLOCATOR_FINE_LOCKING
-                osif_mutex_enter(&sa->mutex);
-#endif
+                lck_spin_unlock(sa->spinlock);
+                sa->return_memory_fn(slice);
+                lck_spin_lock(sa->spinlock);
             } else {
                 done = 1;
             }
@@ -874,7 +912,7 @@ void slice_allocator_garbage_collect(slice_allocator_t* sa)
         }
     } while (!done);
     
-    osif_mutex_exit(&sa->mutex);
+    lck_spin_unlock(sa->spinlock);
 }
 
 // ============================================================================================
@@ -899,13 +937,17 @@ slice_allocator_t* bmalloc_allocator_for_size(sa_size_t size)
 
 static inline sa_size_t bmalloc_allocator_lookup_table_size(sa_size_t max_allocation_size)
 {
-    return max_allocation_size * sizeof(slice_allocator_t*);
+    return max_allocation_size * sizeof(slice_allocator_t*) + 1;
 }
 
 void bmalloc_init()
 {
     printf("[SPL] bmalloc slice allocator initialised\n");
-
+    
+    // Initialise spinlocks
+    bmalloc_lock_attr = lck_attr_alloc_init();
+    bmalloc_group_attr = lck_grp_attr_alloc_init();
+    bmalloc_lock_group  = lck_grp_alloc_init("bmalloc-spinlocks", bmalloc_group_attr);
     
     sa_size_t max_allocation_size = ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1];
     
@@ -923,14 +965,41 @@ void bmalloc_init()
     
     // Create the allocator lookup array
     allocator_lookup_table = osif_malloc(bmalloc_allocator_lookup_table_size(ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]));
-    
     for(int i=1; i<=max_allocation_size; i++) {
-        allocator_lookup_table[i-1] = bmalloc_allocator_for_size(i);
+        allocator_lookup_table[i] = bmalloc_allocator_for_size(i);
     }
+    
+    // There is a requirement for bmalloc(0) to return a valid pointer.  Beyond that
+    // the behavior is implementation dependant. Bmalloc will support bmalloc(0)
+    // by treating it the same a bmalloc(1), which returns a pointer to the smallest
+    // slice of memory supported by the allocator. The returned pointer can be
+    // safely freed.
+    //
+    // This simple implementation preserves maximum performance by not inserting
+    // any conditional behaviour in the path of other non-zero allocations.
+    allocator_lookup_table[0] = allocator_lookup_table[1];
+    
+#ifdef COUNT_ALLOCATIONS
+    // Create the allocation counters
+    allocation_counters = osif_malloc((1 + ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]) * sizeof(sa_size_t));
+    osif_zero_memory(allocation_counters, (1 + ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]) * sizeof(sa_size_t));
+#endif
 }
 
 void bmalloc_fini()
 {
+#ifdef COUNT_ALLOCATIONS
+    // Print out allocation statistics
+    printf("Allocator stats begin\n");
+    for (int i=0; i<ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]; i++) {
+        if(allocation_counters[i]) {
+            printf("%llu %llu\n", i, allocation_counters[i]);
+        }
+    }
+    printf("Allocator stats end\n");
+    
+#endif
+    
     // Clean up the allocators
     for(int i=0; i<NUM_ALLOCATORS; i++) {
         slice_allocator_fini(&allocators[i]);
@@ -943,6 +1012,16 @@ void bmalloc_fini()
     
     // Clean up the memory pool
     memory_pool_fini();
+    
+    // Cleanup our locks
+    lck_attr_free(bmalloc_lock_attr);
+    bmalloc_lock_attr = NULL;
+    
+    lck_grp_attr_free(bmalloc_group_attr);
+    bmalloc_group_attr = NULL;
+    
+    lck_grp_free(bmalloc_lock_group);
+    bmalloc_lock_group = NULL;
 }
 
 void* bmalloc(sa_size_t size)
@@ -950,7 +1029,10 @@ void* bmalloc(sa_size_t size)
     void* p = 0;
     
     if(size <= ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]) {
-        p = slice_allocator_alloc(allocator_lookup_table[size-1], size);
+#ifdef COUNT_ALLOCATIONS
+        atomic_add_64(&allocation_counters[size], 1);
+#endif
+        p = slice_allocator_alloc(allocator_lookup_table[size]);
     } else {
         p = osif_malloc(size);
     }
@@ -961,7 +1043,7 @@ void* bmalloc(sa_size_t size)
 void bfree(void* buf, sa_size_t size)
 {
     if(size <= ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]) {
-        slice_allocator_free(allocator_lookup_table[size-1], buf);
+        slice_allocator_free(allocator_lookup_table[size], buf);
     } else {
         osif_free(buf, size);
     }
