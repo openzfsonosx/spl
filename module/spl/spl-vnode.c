@@ -379,6 +379,7 @@ dnlc_lookup(struct vnode *dvp, char *name)
 
 int dnlc_purge_vfsp(struct mount *mp, int flags)
 {
+    cache_purgevfs(mp);
     return 0;
 }
 
