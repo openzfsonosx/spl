@@ -87,7 +87,10 @@
 // allocator in the hope that this will
 // be easier for smaller machines to fulfull
 // these requests.
-#define FINER_POOL_SIZE 1
+//
+// Do NOT enable this is may cause 
+// memory thrashing under high IO load.
+//#define FINER_POOL_SIZE 1
 
 // Place the allocator in thread safe mode. If you have an application
 // where the allocator does not have to be thread safe then removing
@@ -220,7 +223,7 @@ const sa_size_t RETAIN_MEMORY_SIZE = 10 * 1024 * 1024;   // bytes
 // Block size and free block count for the large_blocks list
 // NOTE: This value must be larger than the largets
 //       configured Slice Allocator max_allocation_size
-const sa_size_t LARGE_BLOCK_SIZE = (256 * 1024) + 4096;  // bytes
+const sa_size_t LARGE_BLOCK_SIZE = (512 * 1024) + 4096;  // bytes
 const sa_size_t LARGE_FREE_MEMORY_BLOCK_COUNT =
 RETAIN_MEMORY_SIZE / LARGE_BLOCK_SIZE;
 
@@ -475,11 +478,12 @@ void memory_pool_release_memory()
 
 void memory_pool_garbage_collect_list(memory_block_list_t* list, sa_size_t block_size)
 {
-    lck_spin_lock(list->spinlock);
     
     sa_hrtime_t now = osif_gethrtime();
     int done = 0;
     
+    lck_spin_lock(list->spinlock);
+
     do {
         if (list->count <= LARGE_FREE_MEMORY_BLOCK_COUNT) {
             done = 1;
@@ -889,12 +893,12 @@ void slice_allocator_release_memory(slice_allocator_t* sa)
 
 void slice_allocator_garbage_collect(slice_allocator_t* sa)
 {
-    lck_spin_lock(sa->spinlock);
     
     sa_hrtime_t now = osif_gethrtime();
-    
     int done = 0;
     
+    lck_spin_lock(sa->spinlock);
+
     do {
         if (!list_is_empty(&sa->free)) {
             slice_t* slice = list_tail(&sa->free);
