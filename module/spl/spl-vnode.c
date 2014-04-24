@@ -219,7 +219,7 @@ int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
     return error;
 }
 
-
+#if 0
 errno_t VNOP_LOOKUP(struct vnode *, struct vnode **, struct componentname *, vfs_context_t);
 
 errno_t VOP_LOOKUP(struct vnode *vp, struct vnode **vpp, struct componentname *cn, vfs_context_t ct)
@@ -256,6 +256,8 @@ errno_t VOP_SYMLINK (struct vnode *vp, struct vnode **vpp,
 {
     return VNOP_SYMLINK(vp, vpp, cn, attr, name, ct);
 }
+#endif
+
 
 #undef VFS_ROOT
 
