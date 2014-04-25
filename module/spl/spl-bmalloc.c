@@ -871,7 +871,7 @@ void slice_allocator_free(slice_allocator_t* sa, void* buf)
         list_remove(&sa->full, slice);
 #endif
         
-        list_insert_head(&sa->partial, slice);
+        list_insert_tail(&sa->partial, slice);
     }
     
     slice_free_row(slice, row);
