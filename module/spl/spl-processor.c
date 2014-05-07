@@ -26,15 +26,11 @@
  */
 
 #include <sys/processor.h>
-#include <i386/cpuid.h>
 
-unsigned int
+extern int cpu_number(void);
+
+uint32_t
 getcpuid()
 {
-	uint32_t cpu_id;
-
-	// FIXME
-	cpuid(&cpu_id);
-
-	return (cpu_id);
+	return ((uint32_t)cpu_number());
 }
