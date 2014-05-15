@@ -66,7 +66,7 @@ tsd_set(uint_t key, void *value)
 
 	pid = proc_pid(current_proc());
 
-	dprintf("tsd_set(pid %u, key %08x, value %p)\n", pid, key, value);
+	//printf("tsd_set(pid %u, key %08x, value %p)\n", pid, key, value);
 
 	mutex_enter(&spl_tsd_mutex);
 	for (entry = list_head(&spl_tsd_list);
@@ -139,8 +139,8 @@ tsd_get(uint_t key)
 	} // for
 	mutex_exit(&spl_tsd_mutex);
 
-	dprintf("tsd_get(pid %u, key %08x, value %p)\n", pid, key,
-		   entry ? entry->tsd_value : NULL);
+	//printf("tsd_get(pid %u, key %08x, value %p)\n", pid, key,
+	//	   entry ? entry->tsd_value : NULL);
 
 	return entry ? entry->tsd_value : NULL;
 }
@@ -172,7 +172,7 @@ tsd_create(uint_t *keyp, dtor_func_t dtor)
 	list_insert_head(&spl_tsd_list, entry);
 	mutex_exit(&spl_tsd_mutex);
 
-	dprintf("tsd_create: %08x\n", *keyp);
+	//printf("tsd_create: %08x\n", *keyp);
 }
 
 void
@@ -192,7 +192,7 @@ tsd_destroy(uint_t *keyp)
 
 	if (!entry) return;
 
-	dprintf("tsd_destroy: %08x\n", *keyp);
+	//printf("tsd_destroy: %08x\n", *keyp);
 
 	mutex_enter(&spl_tsd_mutex);
 	list_remove(&spl_tsd_list, entry);
