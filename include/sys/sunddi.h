@@ -63,6 +63,9 @@ typedef int ddi_devid_t;
 
 #define  xcopyin( src, dst, size, flags)  copyin ((src), (dst), (size))
 #define  xcopyout(src, dst, size, flags)  copyout((src), (dst), (size))
+// Define proper Solaris API calls, and clean ZFS up to use
+int ddi_copyin(const void *from, void *to, size_t len, int flags);
+int ddi_copyout(const void *from, void *to, size_t len, int flags);
 
 
 static inline int

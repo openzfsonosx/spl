@@ -103,6 +103,32 @@ int spl_system_inshutdown(void)
     return system_inshutdown;
 }
 
+int
+ddi_copyin(const void *from, void *to, size_t len, int flags)
+{
+    /* Fake ioctl() issued by kernel, 'from' is a kernel address */
+    if (flags & FKIOCTL) {
+        memcpy(to, from, len);
+        return 0;
+    }
+
+    return copyin((user_addr_t)from, (void *)to, len);
+}
+
+int
+ddi_copyout(const void *from, void *to, size_t len, int flags)
+{
+    /* Fake ioctl() issued by kernel, 'from' is a kernel address */
+    if (flags & FKIOCTL) {
+        memcpy(to, from, len);
+        return 0;
+    }
+
+    return copyout(from, (user_addr_t)to, len);
+}
+
+
+
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
     //max_ncpus = processor_avail_count;
@@ -137,6 +163,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     spl_mutex_subsystem_init();
     bmalloc_init();
     spl_kmem_init(total_memory);
+	spl_tsd_init();
     spl_rwlock_init();
     spl_taskq_init();
     spl_vnode_init();
@@ -152,6 +179,7 @@ kern_return_t spl_stop (kmod_info_t * ki, void * d)
     spl_vnode_fini();
     spl_taskq_fini();
     spl_rwlock_fini();
+	spl_tsd_fini();
     spl_mutex_subsystem_fini();
     spl_kmem_fini();
     bmalloc_fini();

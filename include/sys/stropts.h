@@ -137,6 +137,42 @@ kmemchr(const void *s, int c, size_t n)
     return (NULL);
 }
 
+#define IDX(c)  ((u_char)(c) / LONG_BIT)
+#define BIT(c)  ((u_long)1 << ((u_char)(c) % LONG_BIT))
+
+static inline size_t
+strcspn(const char * __restrict s, const char * __restrict charset)
+{
+    /*
+     * NB: idx and bit are temporaries whose use causes gcc 3.4.2 to
+     * generate better code.  Without them, gcc gets a little confused.
+     */
+    const char *s1;
+    u_long bit;
+    u_long tbl[(UCHAR_MAX + 1) / LONG_BIT];
+    int idx;
+
+    if(*s == '\0')
+        return (0);
+
+    tbl[0] = 1;
+    tbl[3] = tbl[2] = tbl[1] = 0;
+
+    for (; *charset != '\0'; charset++) {
+        idx = IDX(*charset);
+        bit = BIT(*charset);
+        tbl[idx] |= bit;
+    }
+
+    for(s1 = s; ; s1++) {
+        idx = IDX(*s1);
+        bit = BIT(*s1);
+        if ((tbl[idx] & bit) != 0)
+            break;
+    }
+    return (s1 - s);
+}
+
 #ifdef __cplusplus
 }
 #endif
