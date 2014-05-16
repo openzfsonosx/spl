@@ -32,12 +32,12 @@ void bmalloc_init();
 //
 // Allocate <size> bytes of memory for the application
 //
-void* bmalloc(size_t size);
+void* bmalloc(uint64_t size);
 
 //
 // Release memory from the application
 //
-void bfree(void* buf, size_t size);
+void bfree(void* buf, uint64_t size);
 
 //
 // Release all free memory within the allocator
