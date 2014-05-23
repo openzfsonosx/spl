@@ -79,23 +79,7 @@ tsd_set(uint_t key, void *value)
 	mutex_exit(&spl_tsd_mutex);
 
 	if (entry) { // Update entry
-
-		if (!value) {
-
-			// Value is NULL, let's delete it
-			mutex_enter(&spl_tsd_mutex);
-			list_remove(&spl_tsd_list, entry);
-			mutex_exit(&spl_tsd_mutex);
-
-			kmem_free(entry, sizeof(spl_tsd_node_t));
-			entry = NULL;
-
-		} else {
-
-			// Update entry
-			entry->tsd_value = value;
-
-		}
+		entry->tsd_value = value;
 		return 0;
 	}
 
@@ -180,13 +164,29 @@ tsd_destroy(uint_t *keyp)
 {
 	spl_tsd_node_t *entry = NULL;
 
+	/*
+	 * Find all nodes that match keyp, and all pids.
+	 * Remove them all.
+	 */
+
 	mutex_enter(&spl_tsd_mutex);
+
+ restart:
 	for (entry = list_head(&spl_tsd_list);
 		 entry != NULL;
 		 entry = list_next(&spl_tsd_list, entry)) {
 
-		if ((  0   == entry->tsd_pid) &&
-			(*keyp == entry->tsd_key)) break;
+		if ((*keyp == entry->tsd_key)) {
+
+			list_remove(&spl_tsd_list, entry);
+
+			kmem_free(entry, sizeof(spl_tsd_node_t));
+			entry = NULL;
+
+			goto restart;
+
+		} // match node
+
 	} // for
 	mutex_exit(&spl_tsd_mutex);
 
