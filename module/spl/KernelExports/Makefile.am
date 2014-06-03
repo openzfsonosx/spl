@@ -20,6 +20,6 @@ clean:
 	rm -f kextsymboltool.o kextsymboltool
 
 allsymbols:
-	 nm -gj /mach_kernel > allsymbols
+	$(NM) -gj $(MACH_KERNEL) > allsymbols
 
 all:kextsymboltool allsymbols KernelExports

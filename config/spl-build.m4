@@ -22,6 +22,24 @@ AC_DEFUN([SPL_AC_CONFIG_KERNEL], [
 ])
 
 AC_DEFUN([SPL_AC_KERNEL], [
+	AC_MSG_CHECKING([mach_kernel])
+	AS_IF([test -z "$machkernel"], [
+		AS_IF([test -e "/System/Library/Kernels/kernel"], [
+			machkernel="/System/Library/Kernels/kernel"
+		], [test -e "/mach_kernel"], [
+			machkernel="/mach_kernel"
+		], [
+			machkernel="[Not found]"
+		])
+		AS_IF([test ! -f "$machkernel"], [
+			AC_MSG_ERROR([
+	*** mach_kernel file not found. For 10.9 and prior, this should be
+	*** '/mach_kernel' and for 10.10 and following, this should be
+	*** '/System/Library/Kernels/kernel'])
+		])
+	])
+	AC_MSG_RESULT($machkernel)
+
 	AC_ARG_WITH([kernel-modprefix],
 		AS_HELP_STRING([--with-kernel-modprefix=PATH],
 		[Path to kernel module prefix]),
@@ -64,6 +82,9 @@ AC_DEFUN([SPL_AC_KERNEL], [
 	KERNEL_VERSION=`uname -r`
 	AC_MSG_RESULT([$KERNEL_VERSION])
 
+	MACH_KERNEL=${machkernel}
+
+	AC_SUBST(MACH_KERNEL)
 	AC_SUBST(KERNEL_HEADERS)
 	AC_SUBST(KERNEL_MODPREFIX)
 	AC_SUBST(KERNEL_VERSION)
