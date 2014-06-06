@@ -1,8 +1,7 @@
-
 INFO_PLIST = Info.plist
 PLIST_STRING = InfoPlist.strings
 
-SUBDIRS=KernelExports
+SUBDIRS = KernelExports
 
 CFLAGS_KMOD = \
 	${AM_CFLAGS} \
@@ -70,6 +69,7 @@ spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	@cp -f $(PLIST_STRING) spl.kext/Contents/Resources/English.lproj/
 	@cp -f spl spl.kext/Contents/MacOS/
 	@mkdir -p spl.kext/Contents/PlugIns/KernelExports.kext/
+	@cd KernelExports && $(MAKE)
 	@cp -f KernelExports/KernelExports spl.kext/Contents/PlugIns/KernelExports.kext/
 	cp -f KernelExports/Info.plist spl.kext/Contents/PlugIns/KernelExports.kext/
 	cp -f KernelExports/version.plist spl.kext/Contents/PlugIns/KernelExports.kext/
@@ -94,3 +94,4 @@ uninstall-am:
 clean:
 	rm -rf spl.kext/
 	rm -f *.o *.lo spl
+	@cd KernelExports && $(MAKE) clean
