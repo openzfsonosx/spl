@@ -52,8 +52,28 @@ zfs_lbolt(void)
 #define        ddi_get_lbolt()         (zfs_lbolt())
 #define        ddi_get_lbolt64()       (zfs_lbolt())
 
+#define typecheck(type,x) \
+	({      type __dummy;		  \
+		typeof(x) __dummy2;					 \
+		(void)(&__dummy == &__dummy2);		 \
+        1;									 \
+	})
+
+
+
+#define ddi_time_before(a, b)           (typecheck(clock_t, a) && \
+                                        typecheck(clock_t, b) && \
+                                        ((a) - (b) < 0))
+#define ddi_time_after(a, b)            ddi_time_before(b, a)
+
+#define ddi_time_before64(a, b)         (typecheck(int64_t, a) && \
+                                        typecheck(int64_t, b) && \
+                                        ((a) - (b) < 0))
+#define ddi_time_after64(a, b)          ddi_time_before64(b, a)
+
+
+
 extern void delay(clock_t ticks);
 
 
 #endif  /* _SPL_TIMER_H */
-
