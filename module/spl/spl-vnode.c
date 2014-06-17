@@ -448,6 +448,9 @@ extern int fo_read(struct fileproc *fp, struct uio *uio, int flags,
                    vfs_context_t ctx);
 extern int fo_write(struct fileproc *fp, struct uio *uio, int flags,
                     vfs_context_t ctx);
+extern int file_vnode_withvid(int, struct vnode **, uint32_t *);
+extern int file_drop(int);
+
 
 /*
  * getf(int fd) - hold a lock on a file descriptor, to be released by calling
@@ -458,6 +461,8 @@ void *getf(int fd)
 {
     struct fileproc     *fp  = NULL;
     struct spl_fileproc *sfp = NULL;
+	struct vnode *vp;
+	uint32_t vid;
 
     /*
      * We keep the "fp" pointer as well, both for unlocking in releasef() and
@@ -481,6 +486,11 @@ void *getf(int fd)
     sfp->f_offset = 0;
     sfp->f_proc   = current_proc();
     sfp->f_fp     = fp;
+
+	/* Also grab vnode, so we can fish out the minor, for onexit */
+	file_vnode_withvid(fd, &vp, &vid);
+	sfp->f_file = minor(vnode_specrdev(vp));
+	file_drop(fd);
 
 	mutex_enter(&spl_getf_lock);
 	list_insert_tail(&spl_getf_list, sfp);
