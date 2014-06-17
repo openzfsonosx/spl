@@ -451,6 +451,10 @@ extern int fo_write(struct fileproc *fp, struct uio *uio, int flags,
 extern int file_vnode_withvid(int, struct vnode **, uint32_t *);
 extern int file_drop(int);
 
+#if ZFS_LEOPARD_ONLY
+#define file_vnode_withvid(a, b, c) file_vnode(a, b)
+#endif
+
 
 /*
  * getf(int fd) - hold a lock on a file descriptor, to be released by calling
@@ -488,9 +492,10 @@ void *getf(int fd)
     sfp->f_fp     = fp;
 
 	/* Also grab vnode, so we can fish out the minor, for onexit */
-	file_vnode_withvid(fd, &vp, &vid);
-	sfp->f_file = minor(vnode_specrdev(vp));
-	file_drop(fd);
+	if (!file_vnode_withvid(fd, &vp, &vid)) {
+		sfp->f_file = minor(vnode_specrdev(vp));
+		file_drop(fd);
+	}
 
 	mutex_enter(&spl_getf_lock);
 	list_insert_tail(&spl_getf_list, sfp);
