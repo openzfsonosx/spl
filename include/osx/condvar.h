@@ -25,8 +25,9 @@ void spl_cv_init(kcondvar_t *cvp, char *name, kcv_type_t type, void *arg);
 void spl_cv_destroy(kcondvar_t *cvp);
 void spl_cv_signal(kcondvar_t *cvp);
 void spl_cv_broadcast(kcondvar_t *cvp);
-void spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg);
-int  spl_cv_timedwait(kcondvar_t *cvp,kmutex_t *mp, clock_t tim, const char *msg);
+void spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, int flags, const char *msg);
+int  spl_cv_timedwait(kcondvar_t *cvp,kmutex_t *mp, clock_t tim, int flags,
+					  const char *msg);
 clock_t cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp,
                            hrtime_t tim, hrtime_t res, int flag);
 
@@ -37,21 +38,22 @@ clock_t cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp,
  * This name shows up as a thread's wait_event string.
  */
 #define cv_wait(cvp, mp)        \
-        spl_cv_wait((cvp), (mp), #cvp)
+	spl_cv_wait((cvp), (mp), PRIBIO, #cvp)
 
 /* Linux provides a cv_wait_io so the schedular will know why we block.
  * find OSX equivalent?
  */
 #define cv_wait_io(cvp, mp)                     \
-    spl_cv_wait((cvp), (mp), #cvp)
+    spl_cv_wait((cvp), (mp), PRIBIO, #cvp)
 
 #define cv_timedwait(cvp, mp, tim)      \
-        spl_cv_timedwait((cvp), (mp), (tim), #cvp)
+	spl_cv_timedwait((cvp), (mp), (tim), PRIBIO, #cvp)
 
-#define cv_wait_interruptible(cv, mp)  cv_wait(cv, mp)
+#define cv_wait_interruptible(cvp, mp)        \
+	spl_cv_wait((cvp), (mp), PRIBIO|PCATCH, #cvp)
 
 #define cv_timedwait_interruptible(cvp, mp, tim)  \
-        spl_cv_timedwait((cvp), (mp), (tim), #cvp)
+	spl_cv_timedwait((cvp), (mp), (tim), PRIBIO|PCATCH, #cvp)
 
 #define cv_init spl_cv_init
 #define cv_destroy spl_cv_destroy

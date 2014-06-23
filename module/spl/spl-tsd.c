@@ -176,7 +176,7 @@ tsd_destroy(uint_t *keyp)
 		 entry != NULL;
 		 entry = list_next(&spl_tsd_list, entry)) {
 
-		if ((*keyp == entry->tsd_key)) {
+		if (*keyp == entry->tsd_key) {
 
 			list_remove(&spl_tsd_list, entry);
 

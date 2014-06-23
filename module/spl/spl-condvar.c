@@ -59,13 +59,13 @@ spl_cv_broadcast(kcondvar_t *cvp)
  * release the associated mutex while blocked.
  */
 void
-spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg)
+spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, int flags, const char *msg)
 {
     if (msg != NULL && msg[0] == '&')
         ++msg;  /* skip over '&' prefixes */
 
     mp->m_owner = NULL;
-    (void) msleep(cvp, (lck_mtx_t *)mp->m_lock, PRIBIO, msg, 0);
+    (void) msleep(cvp, (lck_mtx_t *)mp->m_lock, flags, msg, 0);
     mp->m_owner = current_thread();
 }
 
@@ -77,7 +77,8 @@ spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, const char *msg)
  * when it was unblocked.
  */
 int
-spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, const char *msg)
+spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, int flags,
+				 const char *msg)
 {
     struct timespec ts;
     int result;
@@ -95,7 +96,7 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, const char *msg)
         printf("cv_timedwait: will wait %lds\n", ts.tv_sec);
 
     mp->m_owner = NULL;
-    result = msleep(cvp, mp->m_lock, PRIBIO, msg, &ts);
+    result = msleep(cvp, mp->m_lock, flags, msg, &ts);
     mp->m_owner = current_thread();
 
     return (result == EWOULDBLOCK ? -1 : 0);
