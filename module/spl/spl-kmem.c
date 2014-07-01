@@ -61,17 +61,22 @@ void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
     ASSERT(size);
+	void *p;
 
-    void *p = bmalloc(size);
+	do {
 
-    if (p) {
-        if (kmflags & KM_ZERO) {
-            bzero(p, size);
-        }
-        atomic_add_64(&total_in_use, size);
-    } else {
-        printf("[spl] kmem_alloc(%lu) failed: \n", size);
-    }
+		p = bmalloc(size);
+
+		if (p) {
+			if (kmflags & KM_ZERO) {
+				bzero(p, size);
+			}
+			atomic_add_64(&total_in_use, size);
+			break;
+		} else {
+			printf("[spl] kmem_alloc(%lu) failed: \n", size);
+		}
+	} while(1);
 
     return (p);
 }
