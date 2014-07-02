@@ -78,6 +78,8 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
     ASSERT(ibc == NULL);
     mp->m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
     mp->m_owner = NULL;
+
+	if (!mp->m_lock) panic("[SPL] Unable to allocate MUTEX\n");
 }
 
 void spl_mutex_destroy(kmutex_t *mp)
