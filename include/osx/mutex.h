@@ -41,14 +41,9 @@ typedef struct kmutex {
     lck_mtx_t *m_lock;
 
 #ifdef MUTEX_LEAK
-    // list_node_t     mutex_leak_node;
-    void *mutex_leak_node;
-    void *mutex_leak_node_donttouch;
 
-#define MUTEX_LEAK_MAXCHAR 32
-	char location_file[MUTEX_LEAK_MAXCHAR];
-	char location_function[MUTEX_LEAK_MAXCHAR];
-	int location_line;
+	void *leak;
+    uint8_t m_padding[6];
 
 #else
 

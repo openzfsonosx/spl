@@ -53,6 +53,18 @@ uint64_t spl_mutex_total = 0;
 #include <sys/list.h>
 static list_t mutex_list;
 static kmutex_t mutex_list_mutex;
+
+
+struct leak {
+    list_node_t     mutex_leak_node;
+
+#define MUTEX_LEAK_MAXCHAR 32
+	char location_file[MUTEX_LEAK_MAXCHAR];
+	char location_function[MUTEX_LEAK_MAXCHAR];
+	uint64_t location_line;
+	void *mp;
+};
+
 #endif
 
 
@@ -64,9 +76,9 @@ int spl_mutex_subsystem_init(void)
 
 
 #ifdef MUTEX_LEAK
-	list_create(&mutex_list, sizeof (kmutex_t),
-				offsetof(kmutex_t, mutex_leak_node));
-	mutex_init(&mutex_list_mutex, NULL, MUTEX_DEFAULT, NULL);
+	list_create(&mutex_list, sizeof (struct leak),
+				offsetof(struct leak, mutex_leak_node));
+	mutex_list_mutex.m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
 #endif
 
     return 0;
@@ -77,27 +89,34 @@ int spl_mutex_subsystem_init(void)
 void spl_mutex_subsystem_fini(void)
 {
 #ifdef MUTEX_LEAK
+	uint64_t total = 0;
 	printf("Dumping leaked mutex allocations...\n");
 
+	mutex_enter(&mutex_list_mutex);
 	while(1) {
-		kmutex_t *mp;
+		struct leak *leak;
 
-		mutex_enter(&mutex_list_mutex);
-		mp = list_head(&mutex_list);
-		if (mp) {
-			list_remove(&mutex_list, mp);
+		leak = list_head(&mutex_list);
+
+		if (leak) {
+			list_remove(&mutex_list, leak);
 		}
-		mutex_exit(&mutex_list_mutex);
-		if (!mp) break;
+		if (!leak) break;
 
-		printf("  mutex %p : %s %s %d\n",
-			   mp,
-			   mp->location_file,
-			   mp->location_function,
-			   mp->location_line);
+		printf("  mutex %p : %s %s %llu\n",
+			   leak->mp,
+			   leak->location_file,
+			   leak->location_function,
+			   leak->location_line);
+
+		FREE(leak, M_TEMP);
+		total++;
+
 	}
+	mutex_exit(&mutex_list_mutex);
+	printf("Dumped %llu leaked allocations\n", total);
 
-	mutex_destroy(&mutex_list_mutex);
+	lck_mtx_free(mutex_list_mutex.m_lock, zfs_mutex_group);
 	list_destroy(&mutex_list);
 #endif
 
@@ -127,14 +146,22 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 	if (!mp->m_lock) panic("[SPL] Unable to allocate MUTEX\n");
 
 #ifdef MUTEX_LEAK
-	if (mp != &mutex_list_mutex) {
-		strlcpy(mp->location_file, file, MUTEX_LEAK_MAXCHAR);
-		strlcpy(mp->location_function, fn, MUTEX_LEAK_MAXCHAR);
-		mp->location_line = line;
+	struct leak *leak;
+
+	MALLOC(leak, struct leak *,
+		   sizeof(struct leak),  M_TEMP, M_WAITOK);
+
+	if (leak) {
+		bzero(leak, sizeof(struct leak));
+		strlcpy(leak->location_file, file, MUTEX_LEAK_MAXCHAR);
+		strlcpy(leak->location_function, fn, MUTEX_LEAK_MAXCHAR);
+		leak->location_line = line;
+		leak->mp = mp;
 
 		mutex_enter(&mutex_list_mutex);
-		list_link_init(&mp->mutex_leak_node);
-		list_insert_tail(&mutex_list, mp);
+		list_link_init(&leak->mutex_leak_node);
+		list_insert_tail(&mutex_list, leak);
+		mp->leak = leak;
 		mutex_exit(&mutex_list_mutex);
 	}
 #endif
@@ -148,10 +175,13 @@ void spl_mutex_destroy(kmutex_t *mp)
     lck_mtx_free(mp->m_lock, zfs_mutex_group);
 	atomic_dec_64(&spl_mutex_total);
 #ifdef MUTEX_LEAK
-	if (mp != &mutex_list_mutex) {
+	if (mp->leak) {
+		struct leak *leak = (struct leak *)mp->leak;
 		mutex_enter(&mutex_list_mutex);
-		list_remove(&mutex_list, mp);
+		list_remove(&mutex_list, leak);
+		mp->leak = NULL;
 		mutex_exit(&mutex_list_mutex);
+		FREE(leak, M_TEMP);
 	}
 #endif
 }
