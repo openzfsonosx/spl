@@ -11,6 +11,10 @@
 #include <kern/thread.h>
 #include <sys/proc.h>
 
+#define MUTEX_LEAK
+
+
+
 typedef enum {
     MUTEX_ADAPTIVE = 0,     /* spin if owner is running, otherwise block */
     MUTEX_SPIN = 1,         /* block interrupts and spin */
@@ -31,14 +35,31 @@ typedef struct {
  * size carefully. It appears to be 32 bytes. Or rather, it needs to be
  * aligned.
  */
+
 typedef struct kmutex {
     void           *m_owner;
     lck_mtx_t *m_lock;
+
+#ifdef MUTEX_LEAK
+    // list_node_t     mutex_leak_node;
+    void *mutex_leak_node;
+    void *mutex_leak_node_donttouch;
+
+#define MUTEX_LEAK_MAXCHAR 32
+	char location_file[MUTEX_LEAK_MAXCHAR];
+	char location_function[MUTEX_LEAK_MAXCHAR];
+	int location_line;
+
+#else
+
 #ifdef __LP64__
     uint8_t m_padding[14];
 #else
     uint8_t m_padding[22];
 #endif
+
+#endif
+
 } kmutex_t;
 
 
@@ -49,7 +70,19 @@ typedef struct kmutex {
  * On OS X, CoreStorage provides these symbols, so we have to redefine them,
  * preferably without having to modify SPL users.
  */
+#ifdef MUTEX_LEAK
+
+#define mutex_init(A,B,C,D) spl_mutex_init(A,B,C,D,__FILE__,__FUNCTION__,__LINE__)
+void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc, const char *f, const char *fn, int l);
+
+#else
+
 #define mutex_init spl_mutex_init
+void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc);
+
+#endif
+
+
 #define	mutex_destroy spl_mutex_destroy
 #define mutex_enter spl_mutex_enter
 #define	mutex_exit spl_mutex_exit
@@ -57,7 +90,6 @@ typedef struct kmutex {
 #define	mutex_owned spl_mutex_owned
 #define	mutex_owner spl_mutex_owner
 
-void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc);
 void spl_mutex_destroy(kmutex_t *mp);
 void spl_mutex_enter(kmutex_t *mp);
 void spl_mutex_exit(kmutex_t *mp);
