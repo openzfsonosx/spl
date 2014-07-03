@@ -47,6 +47,7 @@ static lck_grp_attr_t   *zfs_group_attr = NULL;
 
 static lck_grp_t *zfs_mutex_group = NULL;
 
+uint64_t spl_mutex_total = 0;
 
 
 int spl_mutex_subsystem_init(void)
@@ -80,12 +81,15 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
     mp->m_owner = NULL;
 
 	if (!mp->m_lock) panic("[SPL] Unable to allocate MUTEX\n");
+
+	atomic_inc_64(&spl_mutex_total);
 }
 
 void spl_mutex_destroy(kmutex_t *mp)
 {
     if (!mp) return;
     lck_mtx_free(mp->m_lock, zfs_mutex_group);
+	atomic_dec_64(&spl_mutex_total);
 }
 
 void mutex_enter(kmutex_t *mp)
