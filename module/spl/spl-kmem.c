@@ -73,6 +73,9 @@ zfs_kmem_alloc(size_t size, int kmflags)
 		p = bmalloc(size);
 
 		if (p) {
+
+			memset(p, 0x55, size);
+
 			if (kmflags & KM_ZERO) {
 				bzero(p, size);
 			}
