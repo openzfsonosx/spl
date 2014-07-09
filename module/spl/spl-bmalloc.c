@@ -193,6 +193,7 @@ typedef struct slice {
     sa_size_t    alloc_count;
     sa_hrtime_t  time_freed;
     list_node_t  slice_link_node;
+	lck_spin_t*  spinlock;
 } slice_t;
 
 typedef struct {
@@ -656,9 +657,10 @@ allocatable_row_t* slice_get_row_address(slice_t* slice, int index)
 
 void slice_insert_free_row(slice_t* slice, allocatable_row_t* row)
 {
-
+	lck_spin_lock(slice->spinlock);
 	row->next = slice->free_list;
 	slice->free_list = row;
+	lck_spin_unlock(slice->spinlock);
 
 }
 
@@ -667,9 +669,13 @@ allocatable_row_t* slice_get_row(slice_t* slice)
     if (slice->free_list == 0) {
         return 0;
     } else {
-        allocatable_row_t* row = slice->free_list;
+        allocatable_row_t* row;
+
+		lck_spin_lock(slice->spinlock);
+		row = slice->free_list;
 		slice->free_list = row->next;
 		row->next = NULL;
+		lck_spin_unlock(slice->spinlock);
         return row;
     }
 }
@@ -683,7 +689,8 @@ void slice_init(slice_t* slice,
     slice->alloc_count = 0;
     slice->num_allocations = num_allocations;
     slice->allocation_size = allocation_size;
-
+	slice->spinlock = lck_spin_alloc_init(bmalloc_lock_group,
+										  bmalloc_lock_attr);
     for(int i=0; i < slice->num_allocations; i++) {
         allocatable_row_t* row = slice_get_row_address(slice, i);
         set_slice(row, slice);
@@ -737,9 +744,10 @@ void slice_allocator_empty_list(slice_allocator_t* sa, list_t* list)
 
     while(!list_is_empty(list)) {
         slice_t* slice = list_head(list);
-        list_remove_head(list);
+        list_remove(list, slice);
 
         lck_spin_unlock(sa->spinlock);
+		lck_spin_destroy(slice->spinlock, bmalloc_lock_group);
         sa->return_memory_fn(slice);
         lck_spin_lock(sa->spinlock);
     }
