@@ -53,7 +53,7 @@ zfs_zfree(void *opaque, void *addr)
     struct _zmemheader *hdr;
     hdr = addr;
     hdr--;
-    zfs_kmem_free(hdr, hdr->length);
+    kmem_free(hdr, hdr->length);
 }
 
 /*

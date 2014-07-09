@@ -122,7 +122,7 @@ typedef struct kmem_cache {
 #define vmem_t  void
 
 void *zfs_kmem_alloc(size_t size, int kmflags);
-void zfs_kmem_free(void *buf, size_t size);
+	void zfs_kmem_free(void *buf, size_t size, const char *f, const char *fn, int line);
 uint64_t kmem_size(void);
 uint64_t kmem_used(void);
 uint64_t kmem_avail(void);
@@ -141,11 +141,11 @@ void *calloc(size_t n, size_t s);
 
 #define	vmem_alloc(size, vmflag)	zfs_kmem_alloc((size), (vmflag))
 #define vmem_zalloc(sz, fl)         zfs_kmem_alloc((sz), (fl)|M_ZERO)
-#define	vmem_free(vaddr, size)		zfs_kmem_free((vaddr), (size))
+#define	vmem_free(vaddr, size)		zfs_kmem_free((vaddr), (size), __FILE__, __FUNCTION__, __LINE__)
 
 #define kmem_alloc(size, kmflags)   zfs_kmem_alloc((size), (kmflags))
 #define kmem_zalloc(size, kmflags)  zfs_kmem_alloc((size), (kmflags) | M_ZERO)
-#define kmem_free(buf, size)        zfs_kmem_free((buf), (size))
+#define kmem_free(buf, size)        zfs_kmem_free((buf), (size), __FILE__, __FUNCTION__, __LINE__)
 
 #define kmem_cache_set_move(cache, movefunc)    do { } while (0)
 

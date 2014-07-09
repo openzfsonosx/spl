@@ -64,7 +64,7 @@ kobj_close_file(struct _buf *file)
     (void) vnode_close((struct vnode *)file->_fd, 0, vctx);
     (void) vfs_context_rele(vctx);
 
-    zfs_kmem_free(file, sizeof (struct _buf));
+    kmem_free(file, sizeof (struct _buf));
 }
 
 int

@@ -70,7 +70,7 @@ vn_openat(char *pnamep, enum uio_seg seg, int filemode, int createmode,
                         umask);
     }
 
-    zfs_kmem_free(path, MAXPATHLEN);
+    kmem_free(path, MAXPATHLEN);
     return (error);
 }
 

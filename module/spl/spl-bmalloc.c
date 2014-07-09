@@ -147,7 +147,7 @@ typedef uint32_t large_offset_t;
 #define SA_FALSE (sa_bool_t)0;
 
 #define SA_NSEC_PER_SEC  1000000000ULL
-#define SA_NSEC_PER_USEC 1000;
+#define SA_NSEC_PER_USEC 1000
 
 typedef struct {
     sa_hrtime_t time_freed;
@@ -181,8 +181,12 @@ typedef struct allocatable_row {
     large_offset_t slice_offset;
     large_offset_t next_offset;
 #else
+	uint64_t guard1;
     struct slice* slice;
     struct allocatable_row* next;
+	uint64_t ref;
+	uint64_t nothing;
+	uint64_t guard2;
 #endif
 } allocatable_row_t;
 
@@ -206,6 +210,7 @@ typedef struct {
     sa_size_t    max_alloc_size;       /* Max alloc size for slice */
     sa_size_t    num_allocs_per_slice; /* Number of rows to be allocated in the Slices */
     lck_spin_t*  spinlock;
+    lck_mtx_t* alloc_memory_mutex;
 
     memory_pool_claim_memory_fn_t  claim_memory_fn;
     memory_pool_return_memory_fn_t return_memory_fn;
@@ -412,6 +417,7 @@ void memory_pool_block_list_init(memory_block_list_t* list)
 {
     list->count = 0;
     list->spinlock = lck_spin_alloc_init(bmalloc_lock_group, bmalloc_lock_attr);
+
     list_create(&list->blocks, sizeof(memory_block_t),
                 offsetof(memory_block_t, memory_block_link_node));
 }
@@ -657,18 +663,118 @@ allocatable_row_t* slice_get_row_address(slice_t* slice, int index)
 
 void slice_insert_free_row(slice_t* slice, allocatable_row_t* row)
 {
-    allocatable_row_t* curr_free = slice->free_list;
+    allocatable_row_t* curr_free;
+	int count = 0, nodes= 0, nodes2=0;
+
+	if ((row->guard1 != 0xaaaaaaaabbbbbbbb) ||
+		(row->guard2 != 0xeeeeeeeeffffffff))
+		printf("guard words rogered! %p %llx %llx\n", row,
+			   row->guard1, row->guard2);
+
+	row->next = NULL;
+
+	for (allocatable_row_t*seeker = slice->free_list;
+		 seeker;
+		 seeker = seeker->next) {
+		nodes++;
+		if (seeker == row) 	count++;
+	}
+	if (count) {
+		printf("XyX while freeing %p we found it on the list (count %d)\n",
+			   row, count);
+		slice->alloc_count++;
+		return;
+	}
+
+	//curr_free = slice->free_list;
+	row->next = slice->free_list;
     slice->free_list = row;
-    set_next(slice->free_list, slice, curr_free);
+    //set_next(slice->free_list, slice, curr_free);
+    //set_next(row, slice, curr_free);
+
+	atomic_dec_64(&row->ref);
+	if (row->ref != 0) printf("XyX free %p ref count NOT 0 (%llu)\n",
+							  row, row->ref);
+
+	for (allocatable_row_t*seeker = slice->free_list;
+		 seeker;
+		 seeker = seeker->next) {
+		nodes2++;
+	}
+
+	if (nodes != nodes2-1)
+		printf("slice_insert, but list grew by %d != %d + 1\n",
+			   nodes, nodes2);
 }
 
 allocatable_row_t* slice_get_row(slice_t* slice)
 {
+	int count = 0;
+	int before = 0;
+	int after = 0;
+
+    for (allocatable_row_t*seeker = slice->free_list;
+         seeker;
+         seeker = seeker->next) {
+		before++;
+		if ((seeker->ref != 0))
+			printf("XyX before slice_get_row, we have %p ref %llu\n",
+				   seeker, seeker->ref);
+	}
+
     if (slice->free_list == 0) {
         return 0;
     } else {
-        allocatable_row_t* row = slice->free_list;
-        slice->free_list = get_next(row, slice);
+        allocatable_row_t* row;
+
+		row = slice->free_list;
+        slice->free_list = row->next ; //get_next(row, slice);
+		row->next = NULL;
+
+		if (!slice->free_list) printf("XyX %p was last element\n", row);
+
+		for (allocatable_row_t*seeker = slice->free_list;
+			 seeker;
+			 seeker = seeker->next)
+			if (seeker == row) 	count++;
+
+		if (count) {
+			printf("XyX about to return %p but found it on the list (count %d)\n",
+				   row, count);
+		}
+
+		atomic_inc_64(&row->ref);
+		if (row->ref != 1)
+			printf("XyX ref count on %p NOT one (%llu) base %p\n",
+				   row,row->ref, slice_get_row_address(slice, 0));
+
+
+
+    for (allocatable_row_t*seeker = slice->free_list;
+         seeker;
+         seeker = seeker->next) {
+		after ++;
+		if ((seeker->ref != 0)) {
+			printf("XyX after slice_get_row, we have %p ref %llu - row %p\n",
+				   seeker, seeker->ref, row);
+		}
+	}
+
+	if (before != after + 1)
+		printf("slice_get_row, but list shrunk by %d != %d + 1\n",
+			   before, after);
+
+
+	if ((row->guard1 != 0xaaaaaaaabbbbbbbb) ||
+		(row->guard2 != 0xeeeeeeeeffffffff))
+		printf("guard words rogered! %p %llx %llx\n", row,
+			   row->guard1, row->guard2);
+
+		if (row->ref != 1)
+			printf("XyX reaf count on %p NOT one (%llu) base %p\n",
+				   row,row->ref, slice_get_row_address(slice, 0));
+
+
         return row;
     }
 }
@@ -683,8 +789,12 @@ void slice_init(slice_t* slice,
     slice->num_allocations = num_allocations;
     slice->allocation_size = allocation_size;
 
-    for(int i=0; i < slice->num_allocations; i++) {
+    for(int i=1; i < slice->num_allocations; i++) {
         allocatable_row_t* row = slice_get_row_address(slice, i);
+		row->next = NULL;
+		row->ref = 1; // all used, free'd onto free_list to 0
+		row->guard1 = 0xaaaaaaaabbbbbbbb;
+		row->guard2 = 0xeeeeeeeeffffffff;
         set_slice(row, slice);
         slice_insert_free_row(slice, row);
     }
@@ -773,7 +883,8 @@ void slice_allocator_init(slice_allocator_t* sa, sa_size_t max_alloc_size)
 
 
     sa->spinlock = lck_spin_alloc_init(bmalloc_lock_group, bmalloc_lock_attr);
-
+	if (!sa->spinlock) panic("NULL spinlock");
+    sa->alloc_memory_mutex = lck_mtx_alloc_init(bmalloc_lock_group, bmalloc_lock_attr);
     // Create lists for tracking the state of the slices as memory is allocated
 
     list_create(&sa->free, sizeof(slice_t), offsetof(slice_t, slice_link_node));
@@ -784,6 +895,7 @@ void slice_allocator_init(slice_allocator_t* sa, sa_size_t max_alloc_size)
 
     sa->max_alloc_size = max_alloc_size;
     sa->num_allocs_per_slice = (sa->claim_size_fn() - sizeof(slice_t))/(sizeof(allocatable_row_t) + max_alloc_size);
+
 }
 
 void slice_allocator_fini(slice_allocator_t* sa)
@@ -803,6 +915,8 @@ void slice_allocator_fini(slice_allocator_t* sa)
 
     // Destroy spinlock
     lck_spin_destroy(sa->spinlock, bmalloc_lock_group);
+    lck_mtx_destroy(sa->alloc_memory_mutex, bmalloc_lock_group);
+
 }
 
 sa_size_t slice_allocator_get_allocation_size(slice_allocator_t* sa)
@@ -814,6 +928,20 @@ void* slice_allocator_alloc(slice_allocator_t* sa)
 {
     slice_t* slice = 0;
 
+	lck_mtx_lock(sa->alloc_memory_mutex);
+	if (list_is_empty(&sa->partial) &&
+		list_is_empty(&sa->free)) {
+
+		printf("XyX Asking for more memory yo!\n");
+        slice = (slice_t*)sa->claim_memory_fn();
+        slice_init(slice, sa->max_alloc_size, sa->num_allocs_per_slice);
+        lck_spin_lock(sa->spinlock);
+        list_insert_head(&sa->partial, slice);
+        lck_spin_unlock(sa->spinlock);
+		slice = NULL;
+	}
+	lck_mtx_unlock(sa->alloc_memory_mutex);
+
     lck_spin_lock(sa->spinlock);
 
     // Locate a slice with residual capacity, first check for a partially
@@ -824,25 +952,46 @@ void* slice_allocator_alloc(slice_allocator_t* sa)
         slice = list_head(&sa->partial);
     } else if (!list_is_empty(&sa->free)) {
         slice = list_tail(&sa->free);
-        list_remove_tail(&sa->free);
+        //list_remove_tail(&sa->free);
+        list_remove(&sa->free, slice);
         list_insert_head(&sa->partial, slice);
     } else {
+#if 0
         lck_spin_unlock(sa->spinlock);
+		printf("Asking for more memory yo!\n");
         slice = (slice_t*)sa->claim_memory_fn();
-        slice_init(slice, sa->max_alloc_size, sa->num_allocs_per_slice);
         lck_spin_lock(sa->spinlock);
+        slice_init(slice, sa->max_alloc_size, sa->num_allocs_per_slice);
 
         list_insert_head(&sa->partial, slice);
+#endif
     }
+
+    for (allocatable_row_t*seeker = slice->free_list;
+         seeker;
+         seeker = seeker->next)
+		if ((seeker->ref != 0))
+			printf("XyX before alloc, we have %p ref %llu\n",
+				   seeker, seeker->ref);
+
 
     // Grab memory from the slice
     void *p = slice_alloc(slice);
+
+    for (allocatable_row_t*seeker = slice->free_list;
+         seeker;
+         seeker = seeker->next)
+		if ((seeker->ref != 0))
+			printf("XyX after slice_alloc, we have %p ref %llu\n",
+				   seeker, seeker->ref);
+
 
     // Check to see if the slice buffer has become
     // full. If it has, then move it into the
     // full list so that we no longer keep
     // trying to allocate from it.
     if(slice_is_full(slice)) {
+		printf("slice full - removing from partial\n");
         list_remove(&sa->partial, slice);
 
 #ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
@@ -851,9 +1000,19 @@ void* slice_allocator_alloc(slice_allocator_t* sa)
     }
 
 	if (p == sa->last_return) {
-		panic("returning same addy twice: %p\n", p);
+		printf("returning same addy twice: %p (in %llu)\n", p,
+			   sa->max_alloc_size);
 	}
 	sa->last_return = p;
+
+
+
+    for (allocatable_row_t*seeker = slice->free_list;
+         seeker;
+         seeker = seeker->next)
+		if ((seeker->ref != 0))
+			printf("XyX after alloc, we have %p ref %llu\n",
+				   seeker, seeker->ref);
 
     lck_spin_unlock(sa->spinlock);
 
@@ -868,6 +1027,16 @@ void slice_allocator_free(slice_allocator_t* sa, void* buf)
     slice_t* slice;
     allocatable_row_t* row;
     slice = slice_get_slice_from_row(buf, &row);
+
+    for (allocatable_row_t*seeker = slice->free_list;
+         seeker;
+         seeker = seeker->next)
+		if ((seeker->ref != 0) )
+			printf("XyX before free, we have %p ref %llu\n",
+				   seeker, seeker->ref);
+
+
+
 
     // If the slice was previously full remove it from the free list
     // and place in the available list
@@ -890,6 +1059,13 @@ void slice_allocator_free(slice_allocator_t* sa, void* buf)
     }
 
 	sa->last_return = NULL;
+
+    for (allocatable_row_t*seeker = slice->free_list;
+         seeker;
+         seeker = seeker->next)
+		if ((seeker->ref != 0))
+			printf("XyX after free, we have %p ref %llu\n",
+				   seeker, seeker->ref);
 
     lck_spin_unlock(sa->spinlock);
 }
@@ -1072,6 +1248,7 @@ void bmalloc_release_memory()
 
 void bmalloc_garbage_collect()
 {
+	return ;
     for(int i=0; i<NUM_ALLOCATORS; i++) {
         slice_allocator_garbage_collect(&allocators[i]);
     }

@@ -86,6 +86,8 @@ zfs_kmem_alloc(size_t size, int kmflags)
 		}
 	} while(1);
 
+
+	if (size <= 16) printf("kmem %p (%lu)\n", p, size);
     return (p);
 }
 
@@ -96,10 +98,21 @@ zfs_kmem_zalloc(size_t size, int kmflags)
 }
 
 void
-zfs_kmem_free(void *buf, size_t size)
+zfs_kmem_free(void *buf, size_t size, const char *f, const char *fn, int line)
 {
     ASSERT(buf && size);
+	int i;
+	for (i = 0; i < size; i++)
+		if (((unsigned char *)buf)[i] != 0xAB) break;
+	if (i == size) {
+		printf("*** double free detected on %p %lu: '%s' '%s' %d\n",
+			   buf, size, f, fn, line);
+		return;
+	}
 
+	memset(buf, 0xAB, size);
+	if (size <= 16) printf("free %p (%lu) '%s' '%s' %d\n", buf, size,
+						   f, fn, line);
     bfree(buf, size);
     atomic_sub_64(&total_in_use, size);
 }
@@ -196,7 +209,7 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 void
 kmem_cache_destroy(kmem_cache_t *cache)
 {
-	zfs_kmem_free(cache, sizeof(*cache));
+	kmem_free(cache, sizeof(*cache));
 }
 
 void *
@@ -215,7 +228,7 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
 {
 	if (cache->kc_destructor != NULL)
 		kmem_std_destructor(buf, cache->kc_size, cache);
-	zfs_kmem_free(buf, cache->kc_size);
+	kmem_free(buf, cache->kc_size);
 }
 
 

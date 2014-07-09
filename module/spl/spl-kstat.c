@@ -112,7 +112,7 @@ kstat_delete(kstat_t *ksp)
     ekstat_t *e = (ekstat_t *)ksp;
 
     cv_destroy(&e->e_cv);
-    zfs_kmem_free(e, e->e_size);
+    kmem_free(e, e->e_size);
 }
 
 
