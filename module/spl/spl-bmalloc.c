@@ -916,6 +916,7 @@ void slice_allocator_garbage_collect(slice_allocator_t* sa)
                 list_remove_tail(&sa->free);
 
                 lck_spin_unlock(sa->spinlock);
+				lck_spin_destroy(slice->spinlock, bmalloc_lock_group);
                 sa->return_memory_fn(slice);
                 lck_spin_lock(sa->spinlock);
             } else {
