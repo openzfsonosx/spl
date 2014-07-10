@@ -16,7 +16,6 @@
  * information: Portions Copyright [yyyy] [name of copyright owner]
  *
  * Copyright 2014 Brendon Humphrey (brendon.humphrey@mac.com)
-
  * CDDL HEADER END
  */
 
@@ -147,7 +146,7 @@ typedef uint32_t large_offset_t;
 #define SA_FALSE (sa_bool_t)0;
 
 #define SA_NSEC_PER_SEC  1000000000ULL
-#define SA_NSEC_PER_USEC 1000;
+#define SA_NSEC_PER_USEC 1000
 
 typedef struct {
     sa_hrtime_t time_freed;
@@ -267,7 +266,7 @@ const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 15 * SA_NSEC_PER_SEC;
 // memory.
 
 const sa_size_t ALLOCATOR_SLICE_SIZES[] = {
-    8,
+    /*8,*/
     16,
     32,
     40,
@@ -696,7 +695,6 @@ void slice_init(slice_t* slice,
         set_slice(row, slice);
         slice_insert_free_row(slice, row);
     }
-
 }
 
 static inline int slice_is_full(slice_t* slice)
@@ -941,18 +939,52 @@ static inline sa_size_t bmalloc_allocator_array_size()
 
 slice_allocator_t* bmalloc_allocator_for_size(sa_size_t size)
 {
+#if 0
     for(int i=0; i<NUM_ALLOCATORS; i++) {
         if (slice_allocator_get_allocation_size(&allocators[i]) >= size) {
             return &allocators[i];
         }
     }
+#else
+	/* Since this is an ordered list of sizes, we can use binary search
+	   to look up the size, O(log n)
+	*/
+	uint64_t imin, imax;
+	imin = 1;
+	imax = NUM_ALLOCATORS;
+
+#define midpoint(imin, imax) (imin + ((imax - imin) >> 1))
+
+	while (imin < imax) {
+		int imid = midpoint(imin, imax);
+
+		// code must guarantee the interval is reduced at each iteration
+		ASSERT(imid < imax);
+		// note: 0 <= imin < imax implies imid will always be less than imax
+
+		// reduce the search
+		if (allocators[imid].max_alloc_size < size)
+			imin = imid + 1;
+		else
+			imax = imid;
+    }
+
+	// deferred test for equality
+	if (imax == imin) {
+#ifdef VERBOSE
+		printf("Returning allocator size %llu for size %llu\n",
+			   allocators[imin].max_alloc_size, size);
+#endif
+		return &allocators[imin];
+	}
+#endif
 
     return (void*)0;
 }
 
 static inline sa_size_t bmalloc_allocator_lookup_table_size(sa_size_t max_allocation_size)
 {
-    return max_allocation_size * sizeof(slice_allocator_t*) + 1;
+    return (max_allocation_size + 1) * sizeof(slice_allocator_t*) ;
 }
 
 void bmalloc_init()
@@ -978,10 +1010,17 @@ void bmalloc_init()
         slice_allocator_init(&allocators[i], ALLOCATOR_SLICE_SIZES[i]);
     }
 
-    // Create the allocator lookup array
-    allocator_lookup_table = osif_malloc(bmalloc_allocator_lookup_table_size(ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]));
-    for(int i=1; i<=max_allocation_size; i++) {
-        allocator_lookup_table[i] = bmalloc_allocator_for_size(i);
+    // Create the allocator lookup array, add
+	// add an extra entry for "0".
+    allocator_lookup_table = osif_malloc(NUM_ALLOCATORS *
+										 sizeof(slice_allocator_t*));
+
+    for(int i=1; i<=NUM_ALLOCATORS; i++) {
+        allocator_lookup_table[i] = bmalloc_allocator_for_size(
+			ALLOCATOR_SLICE_SIZES[i-1]);
+		printf("Table position [%d] assigned for size %llu\n",
+			   i,
+			   allocator_lookup_table[i]->max_alloc_size);
     }
 
     // There is a requirement for bmalloc(0) to return a valid pointer.  Beyond that
@@ -1023,7 +1062,7 @@ void bmalloc_fini()
     // Free local resources
     osif_free(allocators, bmalloc_allocator_array_size());
     osif_free(allocator_lookup_table,
-              bmalloc_allocator_lookup_table_size(ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]));
+			  NUM_ALLOCATORS * sizeof(slice_allocator_t*));
 
     // Clean up the memory pool
     memory_pool_fini();
@@ -1047,7 +1086,7 @@ void* bmalloc(sa_size_t size)
 #ifdef COUNT_ALLOCATIONS
         atomic_add_64(&allocation_counters[size], 1);
 #endif
-        p = slice_allocator_alloc(allocator_lookup_table[size]);
+        p = slice_allocator_alloc( bmalloc_allocator_for_size( size ) );
     } else {
         p = osif_malloc(size);
     }
@@ -1058,7 +1097,7 @@ void* bmalloc(sa_size_t size)
 void bfree(void* buf, sa_size_t size)
 {
     if(size <= ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]) {
-        slice_allocator_free(allocator_lookup_table[size], buf);
+        slice_allocator_free( bmalloc_allocator_for_size( size ), buf );
     } else {
         osif_free(buf, size);
     }
