@@ -543,7 +543,7 @@ static sa_size_t memory_pool_claim_size_medium()
 
 #endif
 
-static inline sa_size_t inline memory_pool_claim_size_large()
+static inline sa_size_t memory_pool_claim_size_large()
 {
     return LARGE_BLOCK_SIZE;
 }
@@ -565,7 +565,7 @@ static void memory_pool_release_memory_list(memory_block_list_t* list, sa_size_t
     lck_spin_unlock(list->spinlock);
 }
 
-static inline void inline memory_pool_release_memory()
+static inline void memory_pool_release_memory()
 {
 #ifdef FINER_POOL_SIZE
     memory_pool_release_memory_list(&pool.small_blocks, SMALL_BLOCK_SIZE);
@@ -604,7 +604,7 @@ static void memory_pool_garbage_collect_list(memory_block_list_t* list, sa_size_
     lck_spin_unlock(list->spinlock);
 }
 
-static inline void inline memory_pool_garbage_collect()
+static inline void memory_pool_garbage_collect()
 {
 #ifdef FINER_POOL_SIZE
     memory_pool_garbage_collect_list(&pool.small_blocks, SMALL_BLOCK_SIZE);
@@ -877,7 +877,7 @@ static void slice_init(slice_t* slice,
     }
 }
 
-static inline void inline slice_fini(slice_t* slice)
+static inline void slice_fini(slice_t* slice)
 {
 #ifdef SLICE_SPINLOCK
     lck_spin_destroy(slice->spinlock, bmalloc_lock_group);
