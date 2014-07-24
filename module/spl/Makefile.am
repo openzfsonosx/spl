@@ -1,3 +1,5 @@
+include $(top_srcdir)/config/Rules.am
+
 INFO_PLIST = Info.plist
 PLIST_STRING = InfoPlist.strings
 

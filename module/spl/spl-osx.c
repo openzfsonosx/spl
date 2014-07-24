@@ -168,7 +168,9 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     spl_taskq_init();
     spl_vnode_init();
 
-    IOLog("SPL: Loaded module v0.01 (ncpu %d, memsize %llu, pages %llu)\n",
+    IOLog("SPL: Loaded module v%s-%s%s, "
+          "(ncpu %d, memsize %llu, pages %llu)\n",
+          SPL_META_VERSION, SPL_META_RELEASE, SPL_DEBUG_STR,
           max_ncpus, total_memory, physmem);
     return KERN_SUCCESS;
 }
