@@ -397,9 +397,9 @@ dnl #
 AC_DEFUN([SPL_AC_DEBUG_LOG], [
 	AC_ARG_ENABLE([debug-log],
 		[AS_HELP_STRING([--enable-debug-log],
-		[Enable basic debug logging @<:@default=yes@:>@])],
+		[Enable basic debug logging @<:@default=no@:>@])],
 		[],
-		[enable_debug_log=yes])
+		[enable_debug_log=no])
 
 	AS_IF([test "x$enable_debug_log" = xyes],
 	[
