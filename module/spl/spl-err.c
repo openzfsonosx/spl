@@ -35,6 +35,10 @@
 
 #define SS_DEBUG_SUBSYS SS_GENERIC
 
+#ifdef DEBUG_LOG
+static char ce_prefix[CE_IGNORE][10] = { "", "NOTICE: ", "WARNING: ", "" };
+static char ce_suffix[CE_IGNORE][2] = { "", "\n", "\n", "" };
+#endif
 
 void
 vpanic(const char *fmt, va_list ap)
