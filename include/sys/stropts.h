@@ -44,7 +44,7 @@ extern "C" {
  * High order bit is 31 (or 63 in _LP64 kernel).
  */
 static inline int
-highbit(unsigned long long i)
+highbit64(unsigned long long i)
 {
     register int h = 1;
 

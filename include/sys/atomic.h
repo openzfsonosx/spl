@@ -234,6 +234,12 @@ atomic_cas_64(volatile uint64_t *_target, uint64_t _cmp, uint64_t _new)
     return __sync_val_compare_and_swap(_target, _cmp, _new);
 }
 
+static inline uint64_t
+atomic_swap_64(volatile uint64_t *_target, uint64_t _new)
+{
+    return __sync_lock_test_and_set(_target, _new);
+}
+
 extern void *atomic_cas_ptr(volatile void *_target, void *_cmp, void *_new);
 
 static inline void membar_producer(void) { /* nothing */ }
