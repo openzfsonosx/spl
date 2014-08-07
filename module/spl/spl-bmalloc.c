@@ -424,6 +424,9 @@ static slice_allocator_t **allocator_lookup_table = 0;
 static sa_size_t *allocation_counters = 0;
 #endif /* COUNT_ALLOCATIONS */
 
+/* Total memory held allocated */
+uint64_t bmalloc_allocated_total = 0;
+
 
 // =============================================================================
 // OS Compatability interface
@@ -450,6 +453,7 @@ osif_malloc(sa_size_t size)
 	kr = kernel_memory_allocate(kernel_map, &tr, size, 0, 0);
 
 	if (kr == KERN_SUCCESS) {
+		atomic_add_64(&bmalloc_allocated_total, size);
 		return (tr);
 	} else {
 		return (NULL);
@@ -464,6 +468,7 @@ osif_free(void* buf, sa_size_t size)
 {
 #ifdef IN_KERNEL
 	kmem_free(kernel_map, buf, size);
+	atomic_sub_64(&bmalloc_allocated_total, size);
 #else
 	free(buf);
 #endif /* IN_KERNEL */

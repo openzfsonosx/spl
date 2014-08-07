@@ -36,6 +36,7 @@
 
 uint64_t physmem = 0;
 static uint64_t total_in_use = 0;
+extern uint64_t bmalloc_allocated_total;
 
 extern int vm_pool_low(void);
 
@@ -50,7 +51,10 @@ SYSCTL_NODE( , OID_AUTO, spl, CTLFLAG_RW, 0, "Solaris Porting Layer");
 struct sysctl_oid_list sysctl__spl_children;
 
 SYSCTL_QUAD(_spl, OID_AUTO, kmem_bytes_total, CTLFLAG_RD,
-            &total_in_use, "kmem.total bytes allocated");
+            &total_in_use, "kmem.total bytes allocated to ZFS");
+
+SYSCTL_QUAD(_spl, OID_AUTO, bmalloc_allocated_total, CTLFLAG_RD,
+            &bmalloc_allocated_total, "kmem.total bytes allocated by SPL");
 
 extern uint32_t zfs_threads;
 SYSCTL_INT(_spl, OID_AUTO, num_threads,
@@ -291,6 +295,7 @@ void spl_register_oids(void)
     sysctl_register_oid(&sysctl__spl);
     sysctl_register_oid(&sysctl__spl_kmem_bytes_total);
     sysctl_register_oid(&sysctl__spl_num_threads);
+    sysctl_register_oid(&sysctl__spl_bmalloc_allocated_total);
 }
 
 void spl_unregister_oids(void)
@@ -298,4 +303,5 @@ void spl_unregister_oids(void)
     sysctl_unregister_oid(&sysctl__spl);
     sysctl_unregister_oid(&sysctl__spl_kmem_bytes_total);
     sysctl_unregister_oid(&sysctl__spl_num_threads);
+    sysctl_unregister_oid(&sysctl__spl_bmalloc_allocated_total);
 }
