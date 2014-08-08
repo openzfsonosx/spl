@@ -29,10 +29,15 @@
 #ifndef _SPL_POLICY_H
 #define _SPL_POLICY_H
 
+#include <sys/cred.h>
+
 // These calls are slowly being moved into spl-vnode.c
 #define	secpolicy_fs_unmount(c,vfs)			(0)
 #define	secpolicy_nfs(c)				(0)
-#define	secpolicy_sys_config(c,co)			(0)
+//#define	secpolicy_sys_config(c,co)			(0)
+
+int secpolicy_sys_config(const cred_t *, boolean_t);
+
 #define	secpolicy_zfs(c)				(0)
 #define	secpolicy_zinject(c)				(0)
 //#define	secpolicy_vnode_setids_setgids(c,id)		(0)
