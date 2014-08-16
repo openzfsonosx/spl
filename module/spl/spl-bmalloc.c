@@ -663,37 +663,42 @@ memory_pool_claim_large()
 }
 
 static void
-memory_pool_return(void *memory, memory_block_list_t *list)
+memory_pool_return(void *memory, memory_block_list_t *list,
+				   sa_size_t block_size)
 {
-	memory_block_t *block = (memory_block_t *)memory;
+	if (unlikely(vm_pool_low())) {
+		osif_free(memory, block_size);
+	} else {
+		memory_block_t *block = (memory_block_t *)memory;
 
-	list_link_init(&block->memory_block_link_node);
-	block->time_freed = osif_gethrtime();
+		list_link_init(&block->memory_block_link_node);
+		block->time_freed = osif_gethrtime();
 
-	lck_spin_lock(list->spinlock);
-	list_insert_head(&list->blocks, block);
-	list->count++;
-	lck_spin_unlock(list->spinlock);
+		lck_spin_lock(list->spinlock);
+		list_insert_head(&list->blocks, block);
+		list->count++;
+		lck_spin_unlock(list->spinlock);
+	}
 }
 
 #ifdef FINER_POOL_SIZE
 static void
 memory_pool_return_small(void *memory)
 {
-	memory_pool_return(memory, &pool.small_blocks);
+	memory_pool_return(memory, &pool.small_blocks, SMALL_BLOCK_SIZE);
 }
 
 static void
 memory_pool_return_medium(void *memory)
 {
-	memory_pool_return(memory, &pool.medium_blocks);
+	memory_pool_return(memory, &pool.medium_blocks, MEDIUM_BLOCK_SIZE);
 }
 #endif /* FINER_POOL_SIZE */
 
 static void
 memory_pool_return_large(void *memory)
 {
-	memory_pool_return(memory, &pool.large_blocks);
+	memory_pool_return(memory, &pool.large_blocks, LARGE_BLOCK_SIZE);
 }
 
 static void
@@ -1234,8 +1239,16 @@ slice_allocator_free(slice_allocator_t *sa, void *buf, sa_size_t size)
 	/* Finally migrate to the free list if needed. */
 	if (slice_is_empty(slice)) {
 		list_remove(&sa->partial, slice);
-		slice->time_freed = osif_gethrtime();
-		list_insert_head(&sa->free, slice);
+        
+		if (unlikely(vm_pool_low())) {
+			slice_fini(slice);
+			lck_spin_unlock(sa->spinlock);
+			sa->return_memory_fn(slice);
+			return;
+		} else {
+			slice->time_freed = osif_gethrtime();
+			list_insert_head(&sa->free, slice);
+		}
 	}
 
 	lck_spin_unlock(sa->spinlock);

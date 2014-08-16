@@ -32,7 +32,31 @@
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/sysctl.h>
+#include <sys/thread.h>
+#include <kern/sched_prim.h>
 #include "spl-bmalloc.h"
+
+// This variable is a count of the number of threads
+// blocked waiting for memory pages to become free.
+// The VM subsystem wakes these threads when memory
+// becomes available (see http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L2141)
+//
+// This provides an early indication of paging? activity to
+// the SPL before, will react by releasing any memory it
+// can, as well as providing stimulus to
+// ZFS causing it to moderate the behaviour of the ARC.
+extern unsigned int    vm_page_free_wanted;
+
+// Measure the wakeup count of the memory monitor thread
+unsigned long wake_count = 0;
+
+// Indicates that the machine is believed to be swapping
+// due to thread waking. This is reset when spl_vm_pool_low()
+// is called and reports the activity to ZFS.
+int machine_is_swapping = 0;
+
+// Flag to cause the memory monitor thread to terminate.
+int memory_monitor_terminate = 0;
 
 uint64_t physmem = 0;
 static uint64_t total_in_use = 0;
@@ -95,17 +119,61 @@ zfs_kmem_free(void *buf, size_t size)
     atomic_sub_64(&total_in_use, size);
 }
 
+void memory_monitor_thread_continue()
+{
+	wake_count++;
+	machine_is_swapping = 1;
+    
+    if(memory_monitor_terminate) {
+        thread_exit();
+    } else {
+        // Rate limit the thread. Without this in place
+        // the machine can become rather unresponsive.
+        // Requires further investigation.
+        delay(100);
+        
+        // Wait until the VM system feels like expressing its
+        // displeasure again.
+        assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
+        thread_block((thread_continue_t)memory_monitor_thread_continue);
+    }
+}
+
+void memory_monitor_thread_start()
+{
+	printf("memory monitor thread init\n");
+    assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
+	thread_block((thread_continue_t)memory_monitor_thread_continue);
+}
+
+static void start_memory_monitor()
+{
+	thread_create(NULL, 0, memory_monitor_thread_start, 0, 0, 0, 0, 0);
+}
+
+static void stop_memory_monitor()
+{
+    memory_monitor_terminate = 1;
+    thread_wakeup((event_t) &vm_page_free_count);
+    printf("wait\n");
+    delay(100);
+    printf("wait over\n");
+}
+
 void
 spl_kmem_init(uint64_t total_memory)
 {
     printf("SPL: Total memory %llu\n", total_memory);
+	printf("SPL: this is instrumented\n");
     spl_register_oids();
+	start_memory_monitor();
 }
 
 void
 spl_kmem_fini(void)
 {
     spl_unregister_oids();
+    stop_memory_monitor();
 }
 
 uint64_t
@@ -130,9 +198,13 @@ int spl_vm_pool_low(void)
 {
     static int tick_counter = 0;
 
-    int r = vm_pool_low();
+    printf("trigger count -> (%lu)\n", wake_count);
+    
+	int r = machine_is_swapping;
+	machine_is_swapping = 0;
 
     if(r) {
+		printf("vm pool low triggered\n");
         bmalloc_release_memory();
     }
 
