@@ -167,6 +167,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     spl_rwlock_init();
     spl_taskq_init();
     spl_vnode_init();
+	spl_kmem_tasks_init();
 
     IOLog("SPL: Loaded module v%s-%s%s, "
           "(ncpu %d, memsize %llu, pages %llu)\n",
@@ -178,6 +179,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 
 kern_return_t spl_stop (kmod_info_t * ki, void * d)
 {
+	spl_kmem_tasks_fini();
     spl_vnode_fini();
     spl_taskq_fini();
     spl_rwlock_fini();

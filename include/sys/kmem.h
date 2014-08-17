@@ -36,6 +36,7 @@
 #include <sys/vmsystm.h>
 #include <sys/kstat.h>
 #include <sys/malloc.h>
+#include <sys/list.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -106,17 +107,18 @@ sanitize_flags(struct task_struct *p, gfp_t *flags)
 #define KM_NOSLEEP              M_NOWAIT
 #define KM_ZERO                 M_ZERO
 #define KM_NODEBUG              0
-#define    KMC_NODEBUG     0x00020000
+#define KMC_NODEBUG             0x00020000
 #define KMC_NOTOUCH             0
 
 
 typedef struct kmem_cache {
-        char            kc_name[32];
-        size_t          kc_size;
-        int             (*kc_constructor)(void *, void *, int);
-        void            (*kc_destructor)(void *, void *);
-        void            (*kc_reclaim)(void *);
-        void            *kc_private;
+	char            kc_name[32];
+	size_t          kc_size;
+	int             (*kc_constructor)(void *, void *, int);
+	void            (*kc_destructor)(void *, void *);
+	void            (*kc_reclaim)(void *);
+	void            *kc_private;
+	list_node_t     kc_cache_link_node;             /* internal */
 } kmem_cache_t;
 
 #define vmem_t  void
@@ -156,6 +158,8 @@ extern void strfree(char *str);
 extern char *kmem_vasprintf(const char *fmt, va_list ap);
 
 void spl_kmem_init(uint64_t);
+void spl_kmem_tasks_init();
+void spl_kmem_tasks_fini();
 void spl_kmem_fini(void);
 
 #ifdef	__cplusplus

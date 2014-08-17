@@ -33,42 +33,85 @@
 #include <sys/systm.h>
 #include <sys/sysctl.h>
 #include <sys/thread.h>
+#include <sys/taskq.h>
 #include <kern/sched_prim.h>
 #include "spl-bmalloc.h"
 
+//===============================================================
+// OS Interface
+//===============================================================
+
 // This variable is a count of the number of threads
 // blocked waiting for memory pages to become free.
-// The VM subsystem wakes these threads when memory
-// becomes available (see http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L2141)
+// The variable is also used as an event to wake
+// threads waiting for memory pages to become free.
+// http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L2141)
+// and other locations.
 //
-// This provides an early indication of paging? activity to
-// the SPL before, will react by releasing any memory it
-// can, as well as providing stimulus to
-// ZFS causing it to moderate the behaviour of the ARC.
+// We are using wake indications on this event as a
+// indication of paging activity, and therefore as a
+// proxy to the machine experiencing memory pressure.
 extern unsigned int    vm_page_free_wanted;
 
+extern unsigned int vm_page_free_count;
+extern unsigned int vm_page_speculative_count;
+
+// Can be polled to determine if the VM is experiecing
+// a shortage of free pages.
+extern int vm_pool_low(void);
+
+//===============================================================
+// Variables
+//===============================================================
+
 // Measure the wakeup count of the memory monitor thread
-unsigned long wake_count = 0;
+unsigned long wake_count = 0; // DEBUG
 
 // Indicates that the machine is believed to be swapping
 // due to thread waking. This is reset when spl_vm_pool_low()
 // is called and reports the activity to ZFS.
 int machine_is_swapping = 0;
 
-// Flag to cause the memory monitor thread to terminate.
-int memory_monitor_terminate = 0;
+// Flag to cause tasks and threads to terminate as
+// the kmem module is preparing to unload.
+int shutting_down = 0;
 
 uint64_t physmem = 0;
+
+// Size in bytes of the memory allocated by ZFS in calls to the SPL,
 static uint64_t total_in_use = 0;
+
+// Size in bytes of the memory allocated by bmalloc resuling from
+// allocation calls to the SPL. The ratio of
+// total_in_use :bmalloc_allocated_total is an indication of
+// the space efficiency of bmalloc.
 extern uint64_t bmalloc_allocated_total;
 
-extern int vm_pool_low(void);
+// Protects the list of kmem_caches
+static kmutex_t   kmem_cache_lock;
 
-extern unsigned int vm_page_free_count;
-extern unsigned int vm_page_speculative_count;
+// List of kmem_caches
+static list_t  kmem_caches;
+
+// Task queue for processing kmem internal tasks.
+static taskq_t* kmem_taskq;
+
+static struct timespec bmalloc_task_timeout = {5, 0}; // 5 Seconds
+
+//===============================================================
+// Forward Declarations
+//===============================================================
 
 void spl_register_oids(void);
 void spl_unregister_oids(void);
+
+static void bmalloc_maintenance_task_proc(void *p);
+
+void bmalloc_release_memory_task();
+
+//===============================================================
+// Sysctls
+//===============================================================
 
 SYSCTL_DECL(_spl);
 SYSCTL_NODE( , OID_AUTO, spl, CTLFLAG_RW, 0, "Solaris Porting Layer");
@@ -84,6 +127,11 @@ extern uint32_t zfs_threads;
 SYSCTL_INT(_spl, OID_AUTO, num_threads,
            CTLFLAG_RD, &zfs_threads, 0,
            "Num threads");
+
+
+//===============================================================
+// Allocation and release calls
+//===============================================================
 
 void *
 zfs_kmem_alloc(size_t size, int kmflags)
@@ -119,62 +167,15 @@ zfs_kmem_free(void *buf, size_t size)
     atomic_sub_64(&total_in_use, size);
 }
 
-void memory_monitor_thread_continue()
+void *
+calloc(size_t n, size_t s)
 {
-	wake_count++;
-	machine_is_swapping = 1;
-    
-    if(memory_monitor_terminate) {
-        thread_exit();
-    } else {
-        // Rate limit the thread. Without this in place
-        // the machine can become rather unresponsive.
-        // Requires further investigation.
-        delay(100);
-        
-        // Wait until the VM system feels like expressing its
-        // displeasure again.
-        assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
-        thread_block((thread_continue_t)memory_monitor_thread_continue);
-    }
+	return (kmem_zalloc(n * s, KM_NOSLEEP));
 }
 
-void memory_monitor_thread_start()
-{
-	printf("memory monitor thread init\n");
-    assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
-	thread_block((thread_continue_t)memory_monitor_thread_continue);
-}
-
-static void start_memory_monitor()
-{
-	thread_create(NULL, 0, memory_monitor_thread_start, 0, 0, 0, 0, 0);
-}
-
-static void stop_memory_monitor()
-{
-    memory_monitor_terminate = 1;
-    thread_wakeup((event_t) &vm_page_free_count);
-    printf("wait\n");
-    delay(100);
-    printf("wait over\n");
-}
-
-void
-spl_kmem_init(uint64_t total_memory)
-{
-    printf("SPL: Total memory %llu\n", total_memory);
-	printf("SPL: this is instrumented\n");
-    spl_register_oids();
-	start_memory_monitor();
-}
-
-void
-spl_kmem_fini(void)
-{
-    spl_unregister_oids();
-    stop_memory_monitor();
-}
+//===============================================================
+// Status
+//===============================================================
 
 uint64_t
 kmem_size(void)
@@ -192,6 +193,12 @@ uint64_t
 kmem_avail(void)
 {
     return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+}
+
+int
+kmem_debugging(void)
+{
+	return (0);
 }
 
 int spl_vm_pool_low(void)
@@ -220,11 +227,15 @@ int spl_vm_pool_low(void)
     return r;
 }
 
+
+//===============================================================
+// Object Caches
+//===============================================================
+
 static int
 kmem_std_constructor(void *mem, int size __unused, void *private, int flags)
 {
 	struct kmem_cache *cache = private;
-
 	return (cache->kc_constructor(mem, cache->kc_private, flags));
 }
 
@@ -232,14 +243,15 @@ static void
 kmem_std_destructor(void *mem, int size __unused, void *private)
 {
 	struct kmem_cache *cache = private;
-
 	cache->kc_destructor(mem, cache->kc_private);
 }
 
 kmem_cache_t *
 kmem_cache_create(char *name, size_t bufsize, size_t align,
-                  int (*constructor)(void *, void *, int), void (*destructor)(void *, void *),
-                  void (*reclaim)(void *), void *private, vmem_t *vmp, int cflags)
+                  int (*constructor)(void *, void *, int),
+				  void (*destructor)(void *, void *),
+                  void (*reclaim)(void *),
+				  void *private, vmem_t *vmp, int cflags)
 {
 	kmem_cache_t *cache;
 
@@ -253,12 +265,29 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 	cache->kc_private = private;
 	cache->kc_size = bufsize;
 
+	/*
+     * Add the cache to the global list.  This makes it visible
+     * to kmem_update(), so the cache must be ready for business.
+     */
+    mutex_enter(&kmem_cache_lock);
+    list_insert_tail(&kmem_caches, cache);
+    mutex_exit(&kmem_cache_lock);
+	
 	return (cache);
 }
 
 void
 kmem_cache_destroy(kmem_cache_t *cache)
 {
+    /*
+     * Remove the cache from the global cache list so that no one else
+     * can schedule tasks on its behalf, wait for any pending tasks to
+     * complete, purge the cache, and then destroy it.
+     */
+    mutex_enter(&kmem_cache_lock);
+    list_remove(&kmem_caches, cache);
+    mutex_exit(&kmem_cache_lock);
+	
 	zfs_kmem_free(cache, sizeof(*cache));
 }
 
@@ -281,6 +310,29 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
 	zfs_kmem_free(buf, cache->kc_size);
 }
 
+/*
+ * Call the registered reclaim function for a cache.  Depending on how
+ * many and which objects are released it may simply repopulate the
+ * local magazine which will then need to age-out.  Objects which cannot
+ * fit in the magazine we will be released back to their slabs which will
+ * also need to age out before being release.  This is all just best
+ * effort and we do not want to thrash creating and destroying slabs.
+ */
+void
+kmem_cache_reap(kmem_cache_t *cache)
+{
+	printf("kmem_cache_reap\n");
+    /*
+     * Ask the cache's owner to free some memory if possible.
+     * The idea is to handle things like the inode cache, which
+     * typically sits on a bunch of memory that it doesn't truly
+     * *need*.  Reclaim policy is entirely up to the owner; this
+     * callback is just an advisory plea for help.
+     */
+    if (cache->kc_reclaim != NULL) {
+		cache->kc_reclaim(cache->kc_private);
+	}
+}
 
 /*
  * Call the registered reclaim function for a cache.  Depending on how
@@ -291,21 +343,39 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
  * effort and we do not want to thrash creating and destroying slabs.
  */
 void
-kmem_cache_reap_now(kmem_cache_t *skc)
+kmem_cache_reap_now(kmem_cache_t *cache)
 {
+	printf("kmem_cache_reap now\n");
+
+	/*
+	(void)taskq_dispatch(kmem_taskq,
+						 (task_func_t *)kmem_cache_reap,
+						 cache,
+						 TQ_NOSLEEP);
+	 */
 }
 
-int
-kmem_debugging(void)
+static void
+kmem_cache_applyall(void (*func)(kmem_cache_t *), taskq_t *tq, int tqflag)
 {
-	return (0);
+	kmem_cache_t *cp;
+    
+	printf("kmem cache apply all\n");
+	return;
+	mutex_enter(&kmem_cache_lock);
+	for (cp = list_head(&kmem_caches); cp != NULL;
+         cp = list_next(&kmem_caches, cp))
+		if (tq != NULL)
+			(void) taskq_dispatch(tq, (task_func_t *)func, cp,
+                                  tqflag);
+		else
+			func(cp);
+	mutex_exit(&kmem_cache_lock);
 }
 
-void *
-calloc(size_t n, size_t s)
-{
-	return (kmem_zalloc(n * s, KM_NOSLEEP));
-}
+//===============================================================
+// String handling
+//===============================================================
 
 void
 strfree(char *str)
@@ -362,6 +432,90 @@ kmem_asprintf(const char *fmt, ...)
     return ptr;
 }
 
+//===============================================================
+// Memory pressure monitor thread
+//===============================================================
+
+void memory_monitor_thread_continue()
+{
+	wake_count++; // DEBUG
+    
+    if(unlikely(shutting_down)) {
+        thread_exit();
+    } else {
+		// Set flag for spl_vm_pool_low callers
+		machine_is_swapping = 1;
+		
+		// Cause bmalloc to release some cached memory
+		//taskq_dispatch(kmem_taskq, bmalloc_release_memory_task, 0, TQ_PUSHPAGE);
+		bmalloc_release_memory();
+		
+		// Cause all caches to be reaped
+		kmem_cache_applyall(kmem_cache_reap, 0 /*kmem_taskq*/, TQ_NOSLEEP);
+		
+        // Rate limit the thread. Without this in place
+        // the machine can become rather unresponsive.
+        // Requires further investigation - maybe increase to
+		// between 2 and 4 Hz activation rate?
+        delay(100);
+        
+        // Wait until the VM system feels like expressing its
+        // displeasure again.
+        assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
+        thread_block((thread_continue_t)memory_monitor_thread_continue);
+    }
+}
+
+void memory_monitor_thread_start()
+{
+	//printf("memory monitor thread init\n");
+    assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
+	thread_block((thread_continue_t)memory_monitor_thread_continue);
+}
+
+static void start_memory_monitor()
+{
+	thread_create(NULL, 0, memory_monitor_thread_start, 0, 0, 0, 0, 0);
+}
+
+static void stop_memory_monitor()
+{
+    shutting_down = 1;
+    thread_wakeup((event_t) &vm_page_free_count);
+    printf("wait\n");
+    delay(100);
+    printf("wait over\n");
+}
+
+//===============================================================
+// Tasks
+//===============================================================
+
+void bmalloc_maintenance_task()
+{
+	printf("bmalloc gc\n");
+	
+    bmalloc_garbage_collect();
+    if(!shutting_down) {
+        bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
+    }
+}
+
+static void bmalloc_maintenance_task_proc(void *p)
+{
+	taskq_dispatch(kmem_taskq, bmalloc_maintenance_task, 0, TQ_PUSHPAGE);
+}
+
+void bmalloc_release_memory_task()
+{
+	printf("bmalloc_release_memory_task\n");
+	bmalloc_release_memory();
+}
+
+//===============================================================
+// Initialisation/Finalisation
+//===============================================================
+
 void spl_register_oids(void)
 {
     sysctl_register_oid(&sysctl__spl);
@@ -377,3 +531,58 @@ void spl_unregister_oids(void)
     sysctl_unregister_oid(&sysctl__spl_num_threads);
     sysctl_unregister_oid(&sysctl__spl_bmalloc_allocated_total);
 }
+
+void
+spl_kmem_init(uint64_t total_memory)
+{
+    printf("SPL: Total memory %llu\n", total_memory);
+	
+	printf("SPL: WARNING:\n");
+    printf("SPL: This is an experimental branch of OpenZFS.\n");
+    printf("SPL: It relies on kernel notifications to control\n");
+	printf("SPL: memory allocation and release under load.\n");
+	printf("SPL: It might be faster/better/shinier than master.\n");
+    printf("SPL: but it may also eat your datasets and take your.\n");
+    printf("SPL: firstborn child.\n");
+    printf("SPL: Then again it might just work! Over to you.\n");
+	
+    spl_register_oids();
+	
+    // Initialise the cache list
+    mutex_init(&kmem_cache_lock, "kmem", MUTEX_DEFAULT, NULL);
+    list_create(&kmem_caches, sizeof(kmem_cache_t), offsetof(kmem_cache_t, kc_cache_link_node));
+}
+
+void spl_kmem_tasks_init()
+{
+	printf("tasks init\n");
+    kmem_taskq = taskq_create("kmem-taskq",
+                              1,
+                              minclsyspri,
+                              300, INT_MAX, TASKQ_PREPOPULATE);
+    
+    bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
+	start_memory_monitor();
+}
+
+void spl_kmem_tasks_fini()
+{
+	printf("Tasks fini");
+	
+    // FIXME - might have to put a flush-through task into the task q
+    // in here somewhere to ensure that all tasks are dead during
+    // shutdown.
+    
+    bsd_untimeout(bmalloc_maintenance_task_proc, 0);
+    
+    shutting_down = 1;
+    taskq_destroy(kmem_taskq);
+	stop_memory_monitor();
+}
+
+void
+spl_kmem_fini(void)
+{
+    spl_unregister_oids();
+}
+
