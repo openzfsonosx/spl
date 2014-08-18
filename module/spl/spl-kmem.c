@@ -60,6 +60,13 @@ extern unsigned int vm_page_speculative_count;
 // a shortage of free pages.
 extern int vm_pool_low(void);
 
+// Kernel API for monitoring memory pressure.
+extern kern_return_t
+mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
+						 unsigned int	nsecs_monitored,
+						 unsigned int	*pages_reclaimed_p,
+						 unsigned int	*pages_wanted_p);
+
 //===============================================================
 // Variables
 //===============================================================
@@ -361,7 +368,7 @@ kmem_cache_applyall(void (*func)(kmem_cache_t *), taskq_t *tq, int tqflag)
 	kmem_cache_t *cp;
     
 	printf("kmem cache apply all\n");
-	return;
+	
 	mutex_enter(&kmem_cache_lock);
 	for (cp = list_head(&kmem_caches); cp != NULL;
          cp = list_next(&kmem_caches, cp))
@@ -370,6 +377,7 @@ kmem_cache_applyall(void (*func)(kmem_cache_t *), taskq_t *tq, int tqflag)
                                   tqflag);
 		else
 			func(cp);
+	
 	mutex_exit(&kmem_cache_lock);
 }
 
@@ -436,54 +444,52 @@ kmem_asprintf(const char *fmt, ...)
 // Memory pressure monitor thread
 //===============================================================
 
-void memory_monitor_thread_continue()
+void memory_monitor_thread()
 {
-	wake_count++; // DEBUG
+	kern_return_t kr;
+	unsigned int nsecs_monitored = 1000000000 / 4;
+	unsigned int pages_reclaimed = 0;
+	unsigned int pages_wanted = 0;
     
-    if(unlikely(shutting_down)) {
-        thread_exit();
-    } else {
-		// Set flag for spl_vm_pool_low callers
-		machine_is_swapping = 1;
+	printf("memory pressure monitor thread started\n");
+	
+	while (!shutting_down) {
+		kr = mach_vm_pressure_monitor(TRUE,
+									  nsecs_monitored,
+									  &pages_reclaimed,
+									  &pages_wanted);
 		
-		// Cause bmalloc to release some cached memory
-		//taskq_dispatch(kmem_taskq, bmalloc_release_memory_task, 0, TQ_PUSHPAGE);
-		bmalloc_release_memory();
-		
-		// Cause all caches to be reaped
-		kmem_cache_applyall(kmem_cache_reap, 0 /*kmem_taskq*/, TQ_NOSLEEP);
-		
-        // Rate limit the thread. Without this in place
-        // the machine can become rather unresponsive.
-        // Requires further investigation - maybe increase to
-		// between 2 and 4 Hz activation rate?
-        delay(100);
-        
-        // Wait until the VM system feels like expressing its
-        // displeasure again.
-        assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
-        thread_block((thread_continue_t)memory_monitor_thread_continue);
+		if (kr == KERN_SUCCESS) {
+			wake_count++; // DEBUG
+			
+			// Set flag for spl_vm_pool_low callers
+			machine_is_swapping = 1;
+			
+			// Cause bmalloc to release some cached memory
+			//taskq_dispatch(kmem_taskq, bmalloc_release_memory_task, 0, TQ_PUSHPAGE);
+			bmalloc_release_memory();
+			
+			// Cause all caches to be reaped
+			kmem_cache_applyall(kmem_cache_reap, 0 /*kmem_taskq*/, TQ_NOSLEEP);
+		}
     }
-}
-
-void memory_monitor_thread_start()
-{
-	//printf("memory monitor thread init\n");
-    assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
-	thread_block((thread_continue_t)memory_monitor_thread_continue);
+	
+	printf("memory monitor thread exiting\n");
+	thread_exit();
 }
 
 static void start_memory_monitor()
 {
-	thread_create(NULL, 0, memory_monitor_thread_start, 0, 0, 0, 0, 0);
+	kthread_t* thread = thread_create(NULL, 0, memory_monitor_thread, 0, 0, 0, 0, 0);
 }
 
 static void stop_memory_monitor()
 {
+	return;
     shutting_down = 1;
     thread_wakeup((event_t) &vm_page_free_count);
     printf("wait\n");
-    delay(100);
+    delay(1000);
     printf("wait over\n");
 }
 
