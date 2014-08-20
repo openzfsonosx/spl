@@ -568,6 +568,30 @@ memory_pool_release_memory_list(memory_block_list_t *list, sa_size_t block_size)
 	lck_spin_unlock(list->spinlock);
 }
 
+static int
+memory_pool_release_memory_list_num(memory_block_list_t *list,
+									sa_size_t block_size, uint64_t num_pages)
+{
+	lck_spin_lock(list->spinlock);
+	
+	int num_blocks_to_release = block_size / 4096;
+	
+	while ((!list_is_empty(&list->blocks)) && (num_blocks_to_release > 0)) {
+		memory_block_t *block = list_head(&list->blocks);
+		list_remove_head(&list->blocks);
+		list->count--;
+		num_blocks_to_release--;
+		
+		lck_spin_unlock(list->spinlock);
+		osif_free(block, block_size);
+		lck_spin_lock(list->spinlock);
+	}
+	
+	lck_spin_unlock(list->spinlock);
+	
+	return (num_blocks_to_release) <= 0;
+}
+
 static inline void
 memory_pool_release_memory()
 {
@@ -576,6 +600,13 @@ memory_pool_release_memory()
 	memory_pool_release_memory_list(&pool.medium_blocks, MEDIUM_BLOCK_SIZE);
 #endif /* FINER_POOL_SIZE */
 	memory_pool_release_memory_list(&pool.large_blocks, LARGE_BLOCK_SIZE);
+}
+
+static inline int
+memory_pool_release_memory_num(uint64_t num_pages)
+{
+	return memory_pool_release_memory_list_num(&pool.large_blocks,
+											   LARGE_BLOCK_SIZE, num_pages);
 }
 
 static void
@@ -1503,6 +1534,12 @@ bmalloc_release_memory()
 	}
 
 	memory_pool_release_memory();
+}
+
+int
+bmalloc_release_memory_num(uint64_t num_pages)
+{
+	return memory_pool_release_memory_num(num_pages);
 }
 
 void

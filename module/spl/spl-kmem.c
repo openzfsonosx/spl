@@ -117,6 +117,7 @@ void spl_unregister_oids(void);
 static void bmalloc_maintenance_task_proc(void *p);
 
 void bmalloc_release_memory_task();
+void memory_pressure_task();
 
 //===============================================================
 // Sysctls
@@ -446,101 +447,69 @@ kmem_asprintf(const char *fmt, ...)
 // Memory pressure monitor thread
 //===============================================================
 
-kcondvar_t monitor_condvar;
-kmutex_t   monitor_condvar_mutex;
-static struct timespec memory_pressure_timeout = {0, 250000000}; // 0.5 Seconds
+static struct timespec memory_pressure_timeout = {0, 25000000}; // 0.25 Seconds
 
 static void my_test_event_proc(void *p)
 {
 	printf("my test event\n");
-	thread_wakeup((event_t) &my_test_event);
-    bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
+	//thread_wakeup((event_t) &my_test_event);
 }
 
 void memory_monitor_thread_continue()
 {
-	kern_return_t kr;
-	unsigned int nsecs_monitored = 1000000000 / 4;
-	unsigned int pages_reclaimed = 0;
-	unsigned int pages_wanted = 0;
-    
-	printf("memory pressure monitor thread started\n");
-	
-	while (!shutting_down) {
-		printf("memory pressure thread wake\n");
-		wake_count++;
-		/*
-		kr = mach_vm_pressure_monitor(TRUE,
-									  nsecs_monitored,
-									  &pages_reclaimed,
-									  &pages_wanted);
-		
-		if (kr == KERN_SUCCESS && pages_wanted) {
-			wake_count++; // DEBUG
-			
-			// Set flag for spl_vm_pool_low callers
-			machine_is_swapping = 1;
-			
-			// Cause bmalloc to release some cached memory
-			//taskq_dispatch(kmem_taskq, bmalloc_release_memory_task, 0, TQ_PUSHPAGE);
-			bmalloc_release_memory();
-			
-			// Cause all caches to be reaped
-			kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-		}
-*/
-		
-		// Set flag for spl_vm_pool_low callers
-		machine_is_swapping = 1;
-		
-		// Cause bmalloc to release some cached memory
-		//taskq_dispatch(kmem_taskq, bmalloc_release_memory_task, 0, TQ_PUSHPAGE);
-		//bmalloc_release_memory();
-		
-		// Cause all caches to be reaped
-		kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-		
-		assert_wait((event_t) &my_test_event, THREAD_UNINT);
+	static int first_time = 1;
+
+	if (first_time) {
+		printf("memory pressure monitor thread started\n");
+		first_time = 0;
+		assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
 		thread_block((thread_continue_t)memory_monitor_thread_continue);
+	} else {
+		kern_return_t kr;
+		unsigned int nsecs_monitored = 1000000000 / 4;
+		unsigned int pages_reclaimed = 0;
+		unsigned int pages_wanted = 0;
 		
-		//mutex_enter(&monitor_condvar_mutex);
-		//cv_timedwait_interruptible(&monitor_condvar,
-		//						   &monitor_condvar_mutex,
-		//						   ddi_get_lbolt() + hz/4);
-		//mutex_exit(&monitor_condvar_mutex);
-		
+		while (!shutting_down) {
+			wake_count++;
+			
+			 kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
+										   &pages_reclaimed, &pages_wanted);
+			 
+			 if (kr == KERN_SUCCESS && pages_wanted) {
+				 // Asynchronously react to the memory pressure notification
+				 taskq_dispatch(kmem_taskq, memory_pressure_task,
+								(void *)pages_wanted, TQ_PUSHPAGE);
+			 }
+			 
+			if (!shutting_down) {
+				assert_wait((event_t) &vm_page_free_wanted, THREAD_INTERRUPTIBLE);
+				//bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
+				thread_block(THREAD_CONTINUE_NULL);
+			}
+		}
 	}
-	
-	
 	
 	printf("memory monitor thread exiting\n");
 	thread_exit();
 }
 
-void memory_monitor_thread_start()
-{
-	printf("memory monitor thread init\n");
-	assert_wait((event_t) &my_test_event, THREAD_UNINT);
-	thread_block((thread_continue_t)memory_monitor_thread_continue);
-}
-
-
 static void start_memory_monitor()
 {
-	kthread_t* thread = thread_create(NULL, 0, memory_monitor_thread_start, 0, 0, 0, 0, 0);
-	    bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
+	kthread_t* thread = thread_create(NULL, 0, memory_monitor_thread_continue, 0, 0, 0, 0, 0);
+	//bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
 }
 
 static void stop_memory_monitor()
 {
     shutting_down = 1;
 	bsd_untimeout(my_test_event_proc, 0);
+	
 	thread_wakeup((event_t) &my_test_event);
+	thread_wakeup((event_t) &vm_page_free_wanted);
 	return;
-    cv_broadcast(&monitor_condvar);
-    printf("wait\n");
+
     delay(1000);
-    printf("wait over\n");
 }
 
 //===============================================================
@@ -555,6 +524,24 @@ void bmalloc_maintenance_task()
     if(!shutting_down) {
         bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
     }
+}
+
+void memory_pressure_task(void *p)
+{
+	int num_pages = (int)(p);
+	
+	// Attempt to give the OS as many pages as it is
+	// seeking from the memory cached by bmalloc.
+	//
+	// If bmalloc cant satisfy the request completely
+	// then we have to resort to having ZFS start releasing memory.
+	if (!bmalloc_release_memory_num(num_pages)) {
+		// Set flag for spl_vm_pool_low callers
+		machine_is_swapping = 1;
+		
+		// And request memory holders release memory.
+		kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+	}
 }
 
 static void bmalloc_maintenance_task_proc(void *p)
@@ -607,12 +594,6 @@ spl_kmem_init(uint64_t total_memory)
     // Initialise the cache list
     mutex_init(&kmem_cache_lock, "kmem", MUTEX_DEFAULT, NULL);
     list_create(&kmem_caches, sizeof(kmem_cache_t), offsetof(kmem_cache_t, kc_cache_link_node));
-
-	// Memory monitor resources
-	mutex_init(&monitor_condvar_mutex, NULL, MUTEX_DEFAULT, NULL);
-	cv_init(&monitor_condvar, NULL, CV_DEFAULT, NULL);
-	
-	
 }
 
 void spl_kmem_tasks_init()

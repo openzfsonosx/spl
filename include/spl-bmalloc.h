@@ -47,6 +47,12 @@ void bfree(void* buf, uint64_t size);
 void bmalloc_release_memory();
 
 //
+// Attempt to release <num_pages> pages of
+// memory from the free memory block collection.
+// Returns true if request was met, false otherwise.
+int bmalloc_release_memory_num(uint64_t num_pages);
+
+//
 // Manages from free memory within the allocator.
 // Should be called periodically (say at least
 // every 10 seconds).
