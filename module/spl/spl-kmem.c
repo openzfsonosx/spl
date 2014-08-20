@@ -71,6 +71,8 @@ mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
 // Variables
 //===============================================================
 
+unsigned int my_test_event = 0;
+
 // Measure the wakeup count of the memory monitor thread
 unsigned long wake_count = 0; // DEBUG
 
@@ -328,7 +330,7 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
 void
 kmem_cache_reap(kmem_cache_t *cache)
 {
-	printf("kmem_cache_reap\n");
+	//printf("kmem_cache_reap\n");
     /*
      * Ask the cache's owner to free some memory if possible.
      * The idea is to handle things like the inode cache, which
@@ -444,7 +446,18 @@ kmem_asprintf(const char *fmt, ...)
 // Memory pressure monitor thread
 //===============================================================
 
-void memory_monitor_thread()
+kcondvar_t monitor_condvar;
+kmutex_t   monitor_condvar_mutex;
+static struct timespec memory_pressure_timeout = {0, 250000000}; // 0.5 Seconds
+
+static void my_test_event_proc(void *p)
+{
+	printf("my test event\n");
+	thread_wakeup((event_t) &my_test_event);
+    bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
+}
+
+void memory_monitor_thread_continue()
 {
 	kern_return_t kr;
 	unsigned int nsecs_monitored = 1000000000 / 4;
@@ -454,12 +467,15 @@ void memory_monitor_thread()
 	printf("memory pressure monitor thread started\n");
 	
 	while (!shutting_down) {
+		printf("memory pressure thread wake\n");
+		wake_count++;
+		/*
 		kr = mach_vm_pressure_monitor(TRUE,
 									  nsecs_monitored,
 									  &pages_reclaimed,
 									  &pages_wanted);
 		
-		if (kr == KERN_SUCCESS) {
+		if (kr == KERN_SUCCESS && pages_wanted) {
 			wake_count++; // DEBUG
 			
 			// Set flag for spl_vm_pool_low callers
@@ -470,24 +486,58 @@ void memory_monitor_thread()
 			bmalloc_release_memory();
 			
 			// Cause all caches to be reaped
-			kmem_cache_applyall(kmem_cache_reap, 0 /*kmem_taskq*/, TQ_NOSLEEP);
+			kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
 		}
-    }
+*/
+		
+		// Set flag for spl_vm_pool_low callers
+		machine_is_swapping = 1;
+		
+		// Cause bmalloc to release some cached memory
+		//taskq_dispatch(kmem_taskq, bmalloc_release_memory_task, 0, TQ_PUSHPAGE);
+		//bmalloc_release_memory();
+		
+		// Cause all caches to be reaped
+		kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+		
+		assert_wait((event_t) &my_test_event, THREAD_UNINT);
+		thread_block((thread_continue_t)memory_monitor_thread_continue);
+		
+		//mutex_enter(&monitor_condvar_mutex);
+		//cv_timedwait_interruptible(&monitor_condvar,
+		//						   &monitor_condvar_mutex,
+		//						   ddi_get_lbolt() + hz/4);
+		//mutex_exit(&monitor_condvar_mutex);
+		
+	}
+	
+	
 	
 	printf("memory monitor thread exiting\n");
 	thread_exit();
 }
 
+void memory_monitor_thread_start()
+{
+	printf("memory monitor thread init\n");
+	assert_wait((event_t) &my_test_event, THREAD_UNINT);
+	thread_block((thread_continue_t)memory_monitor_thread_continue);
+}
+
+
 static void start_memory_monitor()
 {
-	kthread_t* thread = thread_create(NULL, 0, memory_monitor_thread, 0, 0, 0, 0, 0);
+	kthread_t* thread = thread_create(NULL, 0, memory_monitor_thread_start, 0, 0, 0, 0, 0);
+	    bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
 }
 
 static void stop_memory_monitor()
 {
-	return;
     shutting_down = 1;
-    thread_wakeup((event_t) &vm_page_free_count);
+	bsd_untimeout(my_test_event_proc, 0);
+	thread_wakeup((event_t) &my_test_event);
+	return;
+    cv_broadcast(&monitor_condvar);
     printf("wait\n");
     delay(1000);
     printf("wait over\n");
@@ -557,6 +607,12 @@ spl_kmem_init(uint64_t total_memory)
     // Initialise the cache list
     mutex_init(&kmem_cache_lock, "kmem", MUTEX_DEFAULT, NULL);
     list_create(&kmem_caches, sizeof(kmem_cache_t), offsetof(kmem_cache_t, kc_cache_link_node));
+
+	// Memory monitor resources
+	mutex_init(&monitor_condvar_mutex, NULL, MUTEX_DEFAULT, NULL);
+	cv_init(&monitor_condvar, NULL, CV_DEFAULT, NULL);
+	
+	
 }
 
 void spl_kmem_tasks_init()
