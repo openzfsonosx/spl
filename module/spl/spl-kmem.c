@@ -60,13 +60,6 @@ extern unsigned int vm_page_speculative_count;
 // a shortage of free pages.
 extern int vm_pool_low(void);
 
-// Kernel API for monitoring memory pressure.
-extern kern_return_t
-mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
-						 unsigned int	nsecs_monitored,
-						 unsigned int	*pages_reclaimed_p,
-						 unsigned int	*pages_wanted_p);
-
 //===============================================================
 // Variables
 //===============================================================
@@ -96,8 +89,11 @@ static uint64_t total_in_use = 0;
 // the space efficiency of bmalloc.
 extern uint64_t bmalloc_allocated_total;
 
+// Number of pages the OS last reported that it needed freed
+unsigned int num_pages_wanted = 0;
+
 // Protects the list of kmem_caches
-static kmutex_t   kmem_cache_lock;
+static kmutex_t kmem_cache_lock;
 
 // List of kmem_caches
 static list_t  kmem_caches;
@@ -147,9 +143,9 @@ void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
     ASSERT(size);
-
+	
     void *p = bmalloc(size);
-
+	
     if (p) {
         if (kmflags & KM_ZERO) {
             bzero(p, size);
@@ -158,7 +154,7 @@ zfs_kmem_alloc(size_t size, int kmflags)
     } else {
         printf("[spl] kmem_alloc(%lu) failed: \n", size);
     }
-
+	
     return (p);
 }
 
@@ -172,7 +168,7 @@ void
 zfs_kmem_free(void *buf, size_t size)
 {
     ASSERT(buf && size);
-
+	
     bfree(buf, size);
     atomic_sub_64(&total_in_use, size);
 }
@@ -186,6 +182,14 @@ calloc(size_t n, size_t s)
 //===============================================================
 // Status
 //===============================================================
+
+uint64_t
+kmem_num_pages_wanted()
+{
+	uint64_t tmp = num_pages_wanted;
+	num_pages_wanted = 0;
+	return tmp;
+}
 
 uint64_t
 kmem_size(void)
@@ -213,27 +217,8 @@ kmem_debugging(void)
 
 int spl_vm_pool_low(void)
 {
-    static int tick_counter = 0;
-
-    printf("trigger count -> (%lu)\n", wake_count);
-    
 	int r = machine_is_swapping;
 	machine_is_swapping = 0;
-
-    if(r) {
-		printf("vm pool low triggered\n");
-        bmalloc_release_memory();
-    }
-
-    // FIXME - this should be in its own thread
-    // that calls garbage collect at least every
-    // 5 seconds.
-    tick_counter++;
-    if(tick_counter % 5 == 0) {
-        tick_counter = 0;
-        bmalloc_garbage_collect();
-    }
-
     return r;
 }
 
@@ -264,9 +249,9 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 				  void *private, vmem_t *vmp, int cflags)
 {
 	kmem_cache_t *cache;
-
+	
 	ASSERT(vmp == NULL);
-
+	
 	cache = zfs_kmem_alloc(sizeof(*cache), KM_SLEEP);
 	strlcpy(cache->kc_name, name, sizeof(cache->kc_name));
 	cache->kc_constructor = constructor;
@@ -274,7 +259,7 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 	cache->kc_reclaim = reclaim;
 	cache->kc_private = private;
 	cache->kc_size = bufsize;
-
+	
 	/*
      * Add the cache to the global list.  This makes it visible
      * to kmem_update(), so the cache must be ready for business.
@@ -305,7 +290,7 @@ void *
 kmem_cache_alloc(kmem_cache_t *cache, int flags)
 {
 	void *p;
-
+	
 	p = zfs_kmem_alloc(cache->kc_size, flags);
 	if (p != NULL && cache->kc_constructor != NULL)
 		kmem_std_constructor(p, cache->kc_size, cache, flags);
@@ -355,14 +340,12 @@ kmem_cache_reap(kmem_cache_t *cache)
 void
 kmem_cache_reap_now(kmem_cache_t *cache)
 {
-	printf("kmem_cache_reap now\n");
-
-	/*
+	//printf("kmem_cache_reap now\n");
+	
 	(void)taskq_dispatch(kmem_taskq,
 						 (task_func_t *)kmem_cache_reap,
 						 cache,
 						 TQ_NOSLEEP);
-	 */
 }
 
 static void
@@ -370,7 +353,7 @@ kmem_cache_applyall(void (*func)(kmem_cache_t *), taskq_t *tq, int tqflag)
 {
 	kmem_cache_t *cp;
     
-	printf("kmem cache apply all\n");
+	//printf("kmem cache apply all\n");
 	
 	mutex_enter(&kmem_cache_lock);
 	for (cp = list_head(&kmem_caches); cp != NULL;
@@ -399,17 +382,17 @@ char *kvasprintf(const char *fmt, va_list ap)
     unsigned int len;
     char *p;
     va_list aq;
-
+	
     va_copy(aq, ap);
     len = vsnprintf(NULL, 0, fmt, aq);
     va_end(aq);
-
+	
     p = bmalloc(len+1);
     if (!p)
         return NULL;
-
+	
     vsnprintf(p, len+1, fmt, ap);
-
+	
     return p;
 }
 
@@ -418,13 +401,13 @@ kmem_vasprintf(const char *fmt, va_list ap)
 {
     va_list aq;
     char *ptr;
-
+	
     do {
         va_copy(aq, ap);
         ptr = kvasprintf(fmt, aq);
         va_end(aq);
     } while (ptr == NULL);
-
+	
     return ptr;
 }
 
@@ -433,13 +416,13 @@ kmem_asprintf(const char *fmt, ...)
 {
     va_list ap;
     char *ptr;
-
+	
     do {
         va_start(ap, fmt);
         ptr = kvasprintf(fmt, ap);
         va_end(ap);
     } while (ptr == NULL);
-
+	
     return ptr;
 }
 
@@ -451,16 +434,16 @@ static struct timespec memory_pressure_timeout = {0, 25000000}; // 0.25 Seconds
 
 static void my_test_event_proc(void *p)
 {
-	printf("my test event\n");
+	//printf("my test event\n");
 	//thread_wakeup((event_t) &my_test_event);
 }
 
 void memory_monitor_thread_continue()
 {
 	static int first_time = 1;
-
+	
 	if (first_time) {
-		printf("memory pressure monitor thread started\n");
+		//printf("memory pressure monitor thread started\n");
 		first_time = 0;
 		assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
 		thread_block((thread_continue_t)memory_monitor_thread_continue);
@@ -468,29 +451,34 @@ void memory_monitor_thread_continue()
 		kern_return_t kr;
 		unsigned int nsecs_monitored = 1000000000 / 4;
 		unsigned int pages_reclaimed = 0;
-		unsigned int pages_wanted = 0;
 		
 		while (!shutting_down) {
 			wake_count++;
 			
-			 kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
-										   &pages_reclaimed, &pages_wanted);
-			 
-			 if (kr == KERN_SUCCESS && pages_wanted) {
-				 // Asynchronously react to the memory pressure notification
-				 taskq_dispatch(kmem_taskq, memory_pressure_task,
-								(void *)pages_wanted, TQ_PUSHPAGE);
-			 }
-			 
-			if (!shutting_down) {
-				assert_wait((event_t) &vm_page_free_wanted, THREAD_INTERRUPTIBLE);
-				//bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
-				thread_block(THREAD_CONTINUE_NULL);
+			kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
+										  &pages_reclaimed, &num_pages_wanted);
+			
+			if (kr == KERN_SUCCESS && num_pages_wanted) {
+				// Asynchronously react to the memory pressure notification
+				taskq_dispatch(kmem_taskq, memory_pressure_task,
+							   (void *)num_pages_wanted, TQ_PUSHPAGE);
 			}
+			
+			/*
+			 // Rate limiting mechanism - not sure the we should enable this.
+			 // Note though that this thread can be waken a LOT of times per
+			 // second in the absence of the throttle. But this is load
+			 // is representing the real VM behavior when the machine is under load.
+			 if (!shutting_down) {
+			 assert_wait((event_t) &vm_page_free_wanted, THREAD_INTERRUPTIBLE);
+			 //bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
+			 thread_block(THREAD_CONTINUE_NULL);
+			 }
+			 */
 		}
 	}
 	
-	printf("memory monitor thread exiting\n");
+	//printf("memory monitor thread exiting\n");
 	thread_exit();
 }
 
@@ -508,7 +496,7 @@ static void stop_memory_monitor()
 	thread_wakeup((event_t) &my_test_event);
 	thread_wakeup((event_t) &vm_page_free_wanted);
 	return;
-
+	
     delay(1000);
 }
 
@@ -518,7 +506,7 @@ static void stop_memory_monitor()
 
 void bmalloc_maintenance_task()
 {
-	printf("bmalloc gc\n");
+	//printf("bmalloc gc\n");
 	
     bmalloc_garbage_collect();
     if(!shutting_down) {
@@ -528,7 +516,7 @@ void bmalloc_maintenance_task()
 
 void memory_pressure_task(void *p)
 {
-	int num_pages = (int)(p);
+	uint64_t num_pages = (uint64_t)(p);
 	
 	// Attempt to give the OS as many pages as it is
 	// seeking from the memory cached by bmalloc.
@@ -551,7 +539,7 @@ static void bmalloc_maintenance_task_proc(void *p)
 
 void bmalloc_release_memory_task()
 {
-	printf("bmalloc_release_memory_task\n");
+	//printf("bmalloc_release_memory_task\n");
 	bmalloc_release_memory();
 }
 
