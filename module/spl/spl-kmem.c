@@ -60,6 +60,13 @@ extern unsigned int vm_page_speculative_count;
 // a shortage of free pages.
 extern int vm_pool_low(void);
 
+// Kernel API for monitoring memory pressure.
+extern kern_return_t
+mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
+						 unsigned int	nsecs_monitored,
+						 unsigned int	*pages_reclaimed_p,
+						 unsigned int	*pages_wanted_p);
+
 //===============================================================
 // Variables
 //===============================================================
@@ -188,6 +195,9 @@ kmem_num_pages_wanted()
 {
 	uint64_t tmp = num_pages_wanted;
 	num_pages_wanted = 0;
+	
+	printf("num pages wanted -> %llu\n", tmp);
+	
 	return tmp;
 }
 
