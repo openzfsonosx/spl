@@ -118,6 +118,7 @@ typedef struct kmem_cache {
 	void            (*kc_destructor)(void *, void *);
 	void            (*kc_reclaim)(void *);
 	void            *kc_private;
+	uint64_t        kc_allocated;
 	list_node_t     kc_cache_link_node;             /* internal */
 } kmem_cache_t;
 

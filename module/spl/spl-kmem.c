@@ -38,6 +38,11 @@
 #include "spl-bmalloc.h"
 
 //===============================================================
+// Options
+//===============================================================
+#define PRINT_CACHE_STATS 1
+
+//===============================================================
 // OS Interface
 //===============================================================
 
@@ -111,6 +116,10 @@ static taskq_t* kmem_taskq;
 static struct timespec bmalloc_task_timeout = {5, 0}; // 5 Seconds
 static struct timespec reap_finish_task_timeout = {0, 500000000}; // 0.5 seconds
 
+#ifdef PRINT_CACHE_STATS
+static struct timespec print_all_cache_stats_task_timeout = {60, 0};
+#endif
+
 //===============================================================
 // Forward Declarations
 //===============================================================
@@ -126,6 +135,11 @@ void memory_pressure_task();
 
 static void kmem_reap_task_finish(void *p);
 static void reap_finish_task_proc();
+
+#ifdef PRINT_CACHE_STATS
+static void print_all_cache_stats_task();
+static void print_all_cache_stats_task_proc();
+#endif
 
 //===============================================================
 // Sysctls
@@ -275,6 +289,8 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 	cache->kc_private = private;
 	cache->kc_size = bufsize;
 	
+	cache->kc_allocated = 0;
+	
 	/*
      * Add the cache to the global list.  This makes it visible
      * to kmem_update(), so the cache must be ready for business.
@@ -309,6 +325,8 @@ kmem_cache_alloc(kmem_cache_t *cache, int flags)
 	p = zfs_kmem_alloc(cache->kc_size, flags);
 	if (p != NULL && cache->kc_constructor != NULL)
 		kmem_std_constructor(p, cache->kc_size, cache, flags);
+	
+	atomic_add_64(&cache->kc_allocated, cache->kc_size);
 	return (p);
 }
 
@@ -318,6 +336,8 @@ kmem_cache_free(kmem_cache_t *cache, void *buf)
 	if (cache->kc_destructor != NULL)
 		kmem_std_destructor(buf, cache->kc_size, cache);
 	zfs_kmem_free(buf, cache->kc_size);
+	
+	atomic_sub_64(&cache->kc_allocated, cache->kc_size);
 }
 
 /*
@@ -343,6 +363,15 @@ kmem_cache_reap(kmem_cache_t *cache)
 		cache->kc_reclaim(cache->kc_private);
 	}
 }
+
+#ifdef PRINT_CACHE_STATS
+
+static void print_cache_stats(kmem_cache_t *cache)
+{
+	printf("Cache ->%s<- size=%llu\n", cache->kc_name, cache->kc_allocated);
+}
+
+#endif
 
 /*
  * Call the registered reclaim function for a cache.  Depending on how
@@ -600,6 +629,24 @@ static void reap_finish_task_proc()
     }
 }
 
+
+#ifdef PRINT_CACHE_STATS
+
+static void print_all_cache_stats_task()
+{
+	kmem_cache_applyall(print_cache_stats, 0, TQ_NOSLEEP);
+	bsd_timeout(print_all_cache_stats_task_proc, 0, &print_all_cache_stats_task_timeout);
+}
+
+static void print_all_cache_stats_task_proc()
+{
+	if(!shutting_down) {
+		taskq_dispatch(kmem_taskq, print_all_cache_stats_task, 0, TQ_PUSHPAGE);
+    }
+}
+
+#endif
+
 //===============================================================
 // Initialisation/Finalisation
 //===============================================================
@@ -650,6 +697,11 @@ void spl_kmem_tasks_init()
                               300, INT_MAX, TASKQ_PREPOPULATE);
     
     bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
+
+#ifdef PRINT_CACHE_STATS
+	bsd_timeout(print_all_cache_stats_task_proc, 0, &print_all_cache_stats_task_timeout);
+#endif
+	
 	start_memory_monitor();
 }
 
@@ -663,6 +715,10 @@ void spl_kmem_tasks_fini()
     
     bsd_untimeout(bmalloc_maintenance_task_proc, 0);
     bsd_untimeout(reap_finish_task_proc, 0);
+
+#ifdef PRINT_CACHE_STATS
+	bsd_untimeout(print_all_cache_stats_task_proc, 0);
+#endif
 	
     shutting_down = 1;
     taskq_destroy(kmem_taskq);
