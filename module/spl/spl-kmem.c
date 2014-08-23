@@ -196,7 +196,7 @@ kmem_num_pages_wanted()
 	uint64_t tmp = num_pages_wanted;
 	num_pages_wanted = 0;
 	
-	printf("num pages wanted -> %llu\n", tmp);
+	//printf("num pages wanted -> %llu\n", tmp);
 	
 	return tmp;
 }
@@ -440,12 +440,12 @@ kmem_asprintf(const char *fmt, ...)
 // Memory pressure monitor thread
 //===============================================================
 
-static struct timespec memory_pressure_timeout = {0, 25000000}; // 0.25 Seconds
+static struct timespec memory_pressure_timeout = {0, 12500000}; // 0.125 Seconds
 
 static void my_test_event_proc(void *p)
 {
 	//printf("my test event\n");
-	//thread_wakeup((event_t) &my_test_event);
+	thread_wakeup((event_t) &my_test_event);
 }
 
 void memory_monitor_thread_continue()
@@ -474,17 +474,17 @@ void memory_monitor_thread_continue()
 							   (void *)num_pages_wanted, TQ_PUSHPAGE);
 			}
 			
-			/*
-			 // Rate limiting mechanism - not sure the we should enable this.
-			 // Note though that this thread can be waken a LOT of times per
-			 // second in the absence of the throttle. But this is load
-			 // is representing the real VM behavior when the machine is under load.
-			 if (!shutting_down) {
-			 assert_wait((event_t) &vm_page_free_wanted, THREAD_INTERRUPTIBLE);
-			 //bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
-			 thread_block(THREAD_CONTINUE_NULL);
-			 }
-			 */
+			
+			// Rate limiting mechanism - not sure the we should enable this.
+			// Note though that this thread can be waken a LOT of times per
+			// second in the absence of the throttle. But this is load
+			// is representing the real VM behavior when the machine is under load.
+			if (!shutting_down) {
+				assert_wait((event_t) &vm_page_free_wanted, THREAD_INTERRUPTIBLE);
+				bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
+				thread_block(THREAD_CONTINUE_NULL);
+			}
+			
 		}
 	}
 	
