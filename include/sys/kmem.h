@@ -139,6 +139,7 @@ void *kmem_cache_alloc(kmem_cache_t *cache, int flags);
 void kmem_cache_free(kmem_cache_t *cache, void *buf);
 void kmem_cache_reap_now(kmem_cache_t *cache);
 void kmem_reap(void);
+void kmem_flush();
 int kmem_debugging(void);
 void *calloc(size_t n, size_t s);
 

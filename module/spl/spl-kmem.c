@@ -109,6 +109,7 @@ static list_t  kmem_caches;
 static taskq_t* kmem_taskq;
 
 static struct timespec bmalloc_task_timeout = {5, 0}; // 5 Seconds
+static struct timespec reap_finish_task_timeout = {0, 500000000}; // 0.5 seconds
 
 //===============================================================
 // Forward Declarations
@@ -118,9 +119,13 @@ void spl_register_oids(void);
 void spl_unregister_oids(void);
 
 static void bmalloc_maintenance_task_proc(void *p);
+static void kmem_reap_task(void *p);
 
 void bmalloc_release_memory_task();
 void memory_pressure_task();
+
+static void kmem_reap_task_finish(void *p);
+static void reap_finish_task_proc();
 
 //===============================================================
 // Sysctls
@@ -358,6 +363,20 @@ kmem_cache_reap_now(kmem_cache_t *cache)
 						 TQ_NOSLEEP);
 }
 
+void
+kmem_reap()
+{
+	(void)taskq_dispatch(kmem_taskq,
+						 (task_func_t *)kmem_reap_task,
+						 0,
+						 TQ_NOSLEEP);
+}
+
+void kmem_flush()
+{
+	(void)taskq_dispatch(kmem_taskq, kmem_reap_task_finish, 0, TQ_PUSHPAGE);
+}
+
 static void
 kmem_cache_applyall(void (*func)(kmem_cache_t *), taskq_t *tq, int tqflag)
 {
@@ -539,6 +558,10 @@ void memory_pressure_task(void *p)
 		
 		// And request memory holders release memory.
 		kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+		
+		// Cache reaping is likely to be async, give the memory owners some
+		// time to implement before cleaning out unwanted memory.
+		bsd_timeout(reap_finish_task_proc, 0, &reap_finish_task_timeout);
 	}
 }
 
@@ -551,6 +574,30 @@ void bmalloc_release_memory_task()
 {
 	//printf("bmalloc_release_memory_task\n");
 	bmalloc_release_memory();
+}
+
+static void kmem_reap_task(void *p)
+{
+	// Request memory holders release memory.
+	kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+	
+	// Cache reaping is likely to be async, give the memory owners some
+	// time to implement before cleaning out unwanted memory.
+	bsd_timeout(reap_finish_task_proc, 0, &reap_finish_task_timeout);
+}
+
+static void kmem_reap_task_finish(void *p)
+{
+	// Drop all unwanted cached memory out of bmalloc
+	bmalloc_garbage_collect();
+	bmalloc_release_memory();
+}
+
+static void reap_finish_task_proc()
+{
+	if(!shutting_down) {
+		taskq_dispatch(kmem_taskq, kmem_reap_task_finish, 0, TQ_PUSHPAGE);
+    }
 }
 
 //===============================================================
@@ -615,7 +662,8 @@ void spl_kmem_tasks_fini()
     // shutdown.
     
     bsd_untimeout(bmalloc_maintenance_task_proc, 0);
-    
+    bsd_untimeout(reap_finish_task_proc, 0);
+	
     shutting_down = 1;
     taskq_destroy(kmem_taskq);
 	stop_memory_monitor();
