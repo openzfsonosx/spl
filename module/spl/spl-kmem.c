@@ -202,15 +202,14 @@ static lck_grp_t        *kmem_lock_group = NULL;
 static lck_attr_t       *kmem_lock_attr = NULL;
 static lck_grp_attr_t   *kmem_group_attr = NULL;
 
-// Maintenance tasks
-static struct timespec kmem_reap_interval = {15, 0};
-
 size_t	kmem_max_cached = KMEM_BIG_MAXBUF;	/* maximum kmem_alloc cache */
 
 static int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 
+static struct timespec kmem_reap_all_task_timeout = {15, 0}; // 15 seconds
 static struct timespec bmalloc_task_timeout = {5, 0}; // 5 Seconds
 static struct timespec reap_finish_task_timeout = {0, 500000000}; // 0.5 seconds
+static struct timespec kmem_update_interval = {15, 0}; // 15 seconds
 
 #ifdef PRINT_CACHE_STATS
 static struct timespec print_all_cache_stats_task_timeout = {60, 0};
@@ -231,6 +230,9 @@ void memory_pressure_task();
 
 static void kmem_reap_task_finish(void *p);
 static void reap_finish_task_proc();
+
+static void kmem_reap_all_task();
+static void kmem_reap_all_task_proc();
 
 #ifdef PRINT_CACHE_STATS
 static void print_all_cache_stats_task();
@@ -1086,13 +1088,10 @@ kmem_alloc_caches_create(const int *array, size_t count,
 	size_t size = table_unit;
 	int i;
     
-    printf("Create maxbuf=%zu\n", maxbuf);
-    
 	for (i = 0; i < count; i++) {
 		size_t cache_size = array[i];
 		size_t align = KMEM_ALIGN;
         
-        printf("considering size=%zu, shift = %zu\n", cache_size, align);
 		kmem_cache_t *cp;
         
 		/* if the table has an entry for maxbuf, we're done */
@@ -1112,8 +1111,6 @@ kmem_alloc_caches_create(const int *array, size_t count,
 			align = PAGESIZE;
 		(void) snprintf(name, sizeof (name),
                         "kmem_alloc_%lu", cache_size);
-        
-        printf("Created kmem_alloc cache ->%s\n", name);
         
 		cp = kmem_cache_create(name, cache_size, align,
                                NULL, NULL, NULL, NULL, NULL, KMC_KMEM_ALLOC);
@@ -1138,11 +1135,9 @@ kmem_cache_init(int pass, int use_large_pages)
 	 * Set up the default caches to back kmem_alloc()
 	 */
     
-    printf("Creating small caches\n");
 	kmem_alloc_caches_create(kmem_alloc_sizes, sizeof (kmem_alloc_sizes) / sizeof (int),
                              kmem_alloc_table, KMEM_MAXBUF, KMEM_ALIGN_SHIFT);
 
-    printf("Creating large caches\n");
 	kmem_alloc_caches_create(kmem_big_alloc_sizes, sizeof (kmem_big_alloc_sizes) / sizeof (int),
                              kmem_big_alloc_table, maxbuf, KMEM_BIG_SHIFT);
     
@@ -1465,7 +1460,7 @@ kmem_cache_update(kmem_cache_t *cp)
 static void
 kmem_update_timeout(void *dummy)
 {
-    (void) bsd_timeout(kmem_update, dummy, &kmem_reap_interval);
+    bsd_timeout(kmem_update, dummy, &kmem_update_interval);
 }
 
 static void
@@ -1482,6 +1477,16 @@ kmem_update(void *dummy)
         kmem_update_timeout(NULL);
 }
 
+static void kmem_reap_all_task()
+{
+	kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+    bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
+}
+
+static void kmem_reap_all_task_proc()
+{
+    taskq_dispatch(kmem_taskq, kmem_reap_all_task, 0, TQ_NOSLEEP);
+}
 
 //===============================================================
 // Initialisation/Finalisation
@@ -1553,6 +1558,7 @@ void spl_kmem_tasks_init()
                               300, INT_MAX, TASKQ_PREPOPULATE);
     
     bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
+    bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
 	start_memory_monitor();
     kmem_update_timeout(NULL);
     
@@ -1573,6 +1579,7 @@ void spl_kmem_tasks_fini()
     
     bsd_untimeout(kmem_update, 0);
     bsd_untimeout(bmalloc_maintenance_task_proc, 0);
+    bsd_untimeout(kmem_reap_all_task_proc, 0);
     bsd_untimeout(reap_finish_task_proc, 0);
     
 	stop_memory_monitor();
