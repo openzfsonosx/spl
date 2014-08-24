@@ -84,7 +84,7 @@ tsd_set(uint_t key, void *value)
 	}
 
 	// Create new entry.
-	entry = kmem_zalloc(sizeof (spl_tsd_node_t), KM_SLEEP | KM_NODEBUG);
+	entry = kmem_zalloc(sizeof (spl_tsd_node_t), KM_SLEEP);
 	list_link_init(&entry->tsd_link_node);
 
 	entry->tsd_pid   = pid;
@@ -144,7 +144,7 @@ tsd_create(uint_t *keyp, dtor_func_t dtor)
 	if (*keyp) return; // Should be 0
 
 	// Create new entry.
-	entry = kmem_zalloc(sizeof (spl_tsd_node_t), KM_SLEEP | KM_NODEBUG);
+	entry = kmem_zalloc(sizeof (spl_tsd_node_t), KM_SLEEP);
 	list_link_init(&entry->tsd_link_node);
 
 	entry->tsd_pid   = 0;

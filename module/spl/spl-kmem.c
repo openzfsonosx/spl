@@ -287,11 +287,7 @@ zfs_kmem_alloc(size_t size, int kmflags)
         
 		buf = bmalloc(size, kmflags);
         
-        // This is also superflous bmalloc should honor KM_XERO I guess
         if (buf) {
-            if (kmflags & KM_ZERO) {
-                bzero(buf, size);
-            }
             atomic_add_64(&total_in_use, size);
         }
         
@@ -300,7 +296,6 @@ zfs_kmem_alloc(size_t size, int kmflags)
     
 	buf = kmem_cache_alloc(cp, kmflags);
 	
-    
     /*
      if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp) && buf != NULL) {
 		kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
@@ -313,13 +308,7 @@ zfs_kmem_alloc(size_t size, int kmflags)
 	}
     */
     
-    // Not illumos - is this needed or handled lower down in the cache?
-    if (buf) {
-        if (kmflags & KM_ZERO) {
-            bzero(buf, size);
-        }
-        atomic_add_64(&total_in_use, size);
-    } else {
+    if (!buf) {
         printf("[spl] kmem_alloc(%lu) failed: \n", size);
     }
 
@@ -329,7 +318,13 @@ zfs_kmem_alloc(size_t size, int kmflags)
 void *
 zfs_kmem_zalloc(size_t size, int kmflags)
 {
-    return zfs_kmem_alloc(size, kmflags | KM_ZERO);
+	void *buf = kmem_alloc(size, kmflags);
+	
+    if (buf) {
+		bzero(buf, size);
+	}
+	
+	return (buf);
 }
 
 void

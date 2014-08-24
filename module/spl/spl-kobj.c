@@ -49,7 +49,7 @@ kobj_open_file(char *name)
 
         return ((struct _buf *)-1);
     }
-    file = (struct _buf *)zfs_kmem_alloc(sizeof (struct _buf *), KM_SLEEP);
+    file = (struct _buf *)kmem_alloc(sizeof (struct _buf *), KM_SLEEP);
     file->_fd = (intptr_t)vp;
 
     return (file);
@@ -64,7 +64,7 @@ kobj_close_file(struct _buf *file)
     (void) vnode_close((struct vnode *)file->_fd, 0, vctx);
     (void) vfs_context_rele(vctx);
 
-    zfs_kmem_free(file, sizeof (struct _buf));
+    kmem_free(file, sizeof (struct _buf));
 }
 
 int

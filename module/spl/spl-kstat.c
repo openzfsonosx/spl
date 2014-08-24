@@ -66,7 +66,7 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
      * Allocate memory for the new kstat header.
      */
     size = sizeof (ekstat_t);
-    e = (ekstat_t *)zfs_kmem_alloc(size, KM_SLEEP);
+    e = (ekstat_t *)kmem_alloc(size, KM_SLEEP);
     if (e == NULL) {
         cmn_err(CE_NOTE, "kstat_create('%s', %d, '%s'): "
                 "insufficient kernel memory",
@@ -112,7 +112,7 @@ kstat_delete(kstat_t *ksp)
     ekstat_t *e = (ekstat_t *)ksp;
 
     cv_destroy(&e->e_cv);
-    zfs_kmem_free(e, e->e_size);
+    kmem_free(e, e->e_size);
 }
 
 

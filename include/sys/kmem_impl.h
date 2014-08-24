@@ -222,5 +222,99 @@ extern "C" {
    
 #define KMEM_CACHE_NAMELEN 31
 
+    /*
+     * Cache callback function types
+     */
+    typedef int (*constructor_fn_t)(void*, void*, int);
+    typedef void (*destructor_fn_t)(void*, void*);
+    typedef void (*reclaim_fn_t)(void*);
+	
+	/*
+     *   Cache internal strategys
+     */
+    typedef void* (*cache_alloc_strategy_t)();
+    typedef void (*cache_free_strategy_t)();
+    
+    /*
+     * Magazine
+     */
+    typedef struct kmem_magazine {
+        list_node_t mag_node;     /* Unused Magazines cached */
+        void       *mag_round[1]; /* Magazine round(s) */
+    } kmem_magazine_t;
+    
+    /*
+     * The magazine lists used in the depot.
+     */
+    typedef struct kmem_maglist {
+        list_t      ml_list;       /* magazine list */
+        long        ml_total;      /* number of magazines */
+        long        ml_min;        /* min since last update */
+        long        ml_reaplimit;  /* max reapable magazines */
+        uint64_t    ml_alloc;      /* allocations from this list */
+    } kmem_maglist_t;
+    
+    /*
+     * Per CPU cache data
+     */
+    typedef struct kmem_cpu_cache {
+        kmutex_t          cc_lock;     /* protects this cpu's local cache */
+        
+        uint64_t          cc_alloc;    /* allocations from this cpu */
+        uint64_t          cc_free;     /* frees to this cpu */
+        kmem_magazine_t  *cc_loaded;   /* the currently loaded magazine */
+        kmem_magazine_t  *cc_ploaded;  /* the previously loaded magazine */
+        int               cc_flags;    /* CPU-local copy of cache_flags */
+        short             cc_rounds;   /* number of objects in loaded mag */
+        short             cc_prounds;  /* number of objects in previous mag */
+        short             cc_magsize;  /* number of rounds in a full mag */
+    } kmem_cpu_cache_t;
+    
+    /*
+     * Cache
+     */
+    typedef struct kmem_cache {
+        /*
+         * Cache
+         */
+        char                 kc_name[KMEM_CACHE_NAMELEN + 1];
+        uint64_t             kc_size;
+        constructor_fn_t     kc_constructor;
+        destructor_fn_t      kc_destructor;
+        reclaim_fn_t         kc_reclaim;
+        void                *kc_private;
+        
+        uint64_t             kc_alloc_count;
+        
+        // FIXME
+        //cache_alloc_strategy_t kc_alloc_strategy;
+        //cache_free_strategy_t  kc_free_strategy;
+        
+        /*
+         * Slab layer
+         */
+        size_t               kc_cache_chunksize;             /* buf + alignment [+ debug] */
+        
+        /*
+         * Depot
+         */
+        kmutex_t             kc_cache_depot_lock;            /* protects depot */
+        uint64_t             kc_cache_depot_contention;      /* contention count */
+        uint64_t             kc_cache_depot_contention_prev; /* previous snapshot */
+        kmem_maglist_t       kc_cache_full;                  /* full magazines */
+        kmem_maglist_t       kc_cache_empty;                 /* empty magazines */
+        struct kmem_magtype *kc_magtype;                     /* magazine */
+        
+        /*
+         * Per CPU structures
+         */
+        kmem_cpu_cache_t    *kc_cache_cpu;                   /* per-cpu data */
+        
+        /*
+         * Managements structures
+         */
+        list_node_t          kc_cache_link_node;             /* internal */
+    } kmem_cache_t;
+	
 
 #endif
