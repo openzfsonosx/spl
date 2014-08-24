@@ -32,7 +32,8 @@ void bmalloc_init();
 //
 // Allocate <size> bytes of memory for the application
 //
-void* bmalloc(uint64_t size);
+void* bmalloc(uint64_t size, int flags);
+void* bzmalloc(uint64_t size, int flags);
 
 //
 // Release memory from the application

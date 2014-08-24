@@ -1492,7 +1492,7 @@ bmalloc_fini()
 }
 
 void *
-bmalloc(sa_size_t size)
+bmalloc(sa_size_t size, int flags)
 {
 	void *p = 0;
 
@@ -1510,6 +1510,15 @@ bmalloc(sa_size_t size)
 	}
 
 	return (p);
+}
+
+void* bzmalloc(sa_size_t size, int flags)
+{
+    void* p = bmalloc(size, flags);
+    if(likely(p)) {
+        osif_zero_memory(p, size);
+    }
+    return p;
 }
 
 void
