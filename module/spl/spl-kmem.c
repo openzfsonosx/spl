@@ -34,6 +34,7 @@
 #include <sys/sysctl.h>
 #include <sys/thread.h>
 #include <sys/taskq.h>
+#include <sys/kmem_impl.h>
 #include <kern/sched_prim.h>
 #include "spl-bmalloc.h"
 
@@ -127,6 +128,59 @@ static list_t  kmem_caches;
 // Task queue for processing kmem internal tasks.
 static taskq_t* kmem_taskq;
 
+
+/*
+ * The default set of caches to back kmem_alloc().
+ * These sizes should be reevaluated periodically.
+ *
+ * We want allocations that are multiples of the coherency granularity
+ * (64 bytes) to be satisfied from a cache which is a multiple of 64
+ * bytes, so that it will be 64-byte aligned.  For all multiples of 64,
+ * the next kmem_cache_size greater than or equal to it must be a
+ * multiple of 64.
+ *
+ * We split the table into two sections:  size <= 4k and size > 4k.  This
+ * saves a lot of space and cache footprint in our cache tables.
+ */
+static const int kmem_alloc_sizes[] = {
+	1 * 8,
+	2 * 8,
+	3 * 8,
+	4 * 8,		5 * 8,		6 * 8,		7 * 8,
+	4 * 16,		5 * 16,		6 * 16,		7 * 16,
+	4 * 32,		5 * 32,		6 * 32,		7 * 32,
+	4 * 64,		5 * 64,		6 * 64,		7 * 64,
+	4 * 128,	5 * 128,	6 * 128,	7 * 128,
+	P2ALIGN(8192 / 7, 64),
+	P2ALIGN(8192 / 6, 64),
+	P2ALIGN(8192 / 5, 64),
+	P2ALIGN(8192 / 4, 64),
+	P2ALIGN(8192 / 3, 64),
+	P2ALIGN(8192 / 2, 64),
+};
+
+static const int kmem_big_alloc_sizes[] = {
+	2 * 4096,	3 * 4096,
+	2 * 8192,	3 * 8192,
+	4 * 8192,	5 * 8192,	6 * 8192,	7 * 8192,
+	8 * 8192,	9 * 8192,	10 * 8192,	11 * 8192,
+	12 * 8192,	13 * 8192,	14 * 8192,	15 * 8192,
+	16 * 8192
+};
+
+#define	KMEM_MAXBUF		4096
+#define	KMEM_BIG_MAXBUF_32BIT	32768
+#define	KMEM_BIG_MAXBUF		131072
+
+#define	KMEM_BIG_MULTIPLE	4096	/* big_alloc_sizes must be a multiple */
+#define	KMEM_BIG_SHIFT		12	/* lg(KMEM_BIG_MULTIPLE) */
+
+static kmem_cache_t *kmem_alloc_table[KMEM_MAXBUF >> KMEM_ALIGN_SHIFT];
+static kmem_cache_t *kmem_big_alloc_table[KMEM_BIG_MAXBUF >> KMEM_BIG_SHIFT];
+
+#define	KMEM_ALLOC_TABLE_MAX	(KMEM_MAXBUF >> KMEM_ALIGN_SHIFT)
+static size_t kmem_big_alloc_table_max = 0;	/* # of filled elements */
+
 static kmem_magtype_t kmem_magtype[] = {
 	{ 1,	8,	3200,	131072	},
 	{ 3,	16,	256,	32768	},
@@ -150,6 +204,8 @@ static lck_grp_attr_t   *kmem_group_attr = NULL;
 
 // Maintenance tasks
 static struct timespec kmem_reap_interval = {15, 0};
+
+size_t	kmem_max_cached = KMEM_BIG_MAXBUF;	/* maximum kmem_alloc cache */
 
 static int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 
@@ -210,20 +266,62 @@ SYSCTL_INT(_spl, OID_AUTO, num_threads,
 void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
-    ASSERT(size);
+    size_t index;
+	kmem_cache_t *cp;
+	void *buf;
+    
+	if ((index = ((size - 1) >> KMEM_ALIGN_SHIFT)) < KMEM_ALLOC_TABLE_MAX) {
+		cp = kmem_alloc_table[index];
+		/* fall through to kmem_cache_alloc() */
+        
+	} else if ((index = ((size - 1) >> KMEM_BIG_SHIFT)) <
+               kmem_big_alloc_table_max) {
+		cp = kmem_big_alloc_table[index];
+		/* fall through to kmem_cache_alloc() */
+        
+	} else {
+		if (size == 0)
+			return (NULL);
+        
+		buf = bmalloc(size, kmflags);
+        
+        // This is also superflous bmalloc should honor KM_XERO I guess
+        if (buf) {
+            if (kmflags & KM_ZERO) {
+                bzero(buf, size);
+            }
+            atomic_add_64(&total_in_use, size);
+        }
+        
+		return (buf);
+	}
+    
+	buf = kmem_cache_alloc(cp, kmflags);
 	
-    void *p = bmalloc(size, kmflags);
-	
-    if (p) {
+    
+    /*
+     if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp) && buf != NULL) {
+		kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
+		((uint8_t *)buf)[size] = KMEM_REDZONE_BYTE;
+		((uint32_t *)btp)[1] = KMEM_SIZE_ENCODE(size);
+        
+		if (cp->cache_flags & KMF_LITE) {
+			KMEM_BUFTAG_LITE_ENTER(btp, kmem_lite_count, caller());
+		}
+	}
+    */
+    
+    // Not illumos - is this needed or handled lower down in the cache?
+    if (buf) {
         if (kmflags & KM_ZERO) {
-            bzero(p, size);
+            bzero(buf, size);
         }
         atomic_add_64(&total_in_use, size);
     } else {
         printf("[spl] kmem_alloc(%lu) failed: \n", size);
     }
-	
-    return (p);
+
+	return (buf);
 }
 
 void *
@@ -235,10 +333,57 @@ zfs_kmem_zalloc(size_t size, int kmflags)
 void
 zfs_kmem_free(void *buf, size_t size)
 {
+    size_t index;
+	kmem_cache_t *cp;
+    
     ASSERT(buf && size);
-	
-    bfree(buf, size);
-    atomic_sub_64(&total_in_use, size);
+    
+	if ((index = (size - 1) >> KMEM_ALIGN_SHIFT) < KMEM_ALLOC_TABLE_MAX) {
+		cp = kmem_alloc_table[index];
+		/* fall through to kmem_cache_free() */
+        
+	} else if ((index = ((size - 1) >> KMEM_BIG_SHIFT)) <
+               kmem_big_alloc_table_max) {
+		cp = kmem_big_alloc_table[index];
+		/* fall through to kmem_cache_free() */
+        
+	} else {
+		//EQUIV(buf == NULL, size == 0);
+		if (buf == NULL && size == 0)
+			return;
+		bfree(buf, size);
+		return;
+	}
+    
+    /*
+	if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp)) {
+		kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
+		uint32_t *ip = (uint32_t *)btp;
+		if (ip[1] != KMEM_SIZE_ENCODE(size)) {
+			if (*(uint64_t *)buf == KMEM_FREE_PATTERN) {
+				kmem_error(KMERR_DUPFREE, cp, buf);
+				return;
+			}
+			if (KMEM_SIZE_VALID(ip[1])) {
+				ip[0] = KMEM_SIZE_ENCODE(size);
+				kmem_error(KMERR_BADSIZE, cp, buf);
+			} else {
+				kmem_error(KMERR_REDZONE, cp, buf);
+			}
+			return;
+		}
+		if (((uint8_t *)buf)[size] != KMEM_REDZONE_BYTE) {
+			kmem_error(KMERR_REDZONE, cp, buf);
+			return;
+		}
+		btp->bt_redzone = KMEM_REDZONE_PATTERN;
+		if (cp->cache_flags & KMF_LITE) {
+			KMEM_BUFTAG_LITE_ENTER(btp, kmem_lite_count,
+                                   caller());
+		}
+	}
+     */
+	kmem_cache_free(cp, buf);
 }
 
 void *
@@ -929,6 +1074,82 @@ void kmem_flush()
 }
 
 //===============================================================
+// Caches for serving kmem_?alloc requests
+//===============================================================
+
+static void
+kmem_alloc_caches_create(const int *array, size_t count,
+                         kmem_cache_t **alloc_table, size_t maxbuf, uint_t shift)
+{
+	char name[KMEM_CACHE_NAMELEN + 1];
+	size_t table_unit = (1 << shift); /* range of one alloc_table entry */
+	size_t size = table_unit;
+	int i;
+    
+    printf("Create maxbuf=%zu\n", maxbuf);
+    
+	for (i = 0; i < count; i++) {
+		size_t cache_size = array[i];
+		size_t align = KMEM_ALIGN;
+        
+        printf("considering size=%zu, shift = %zu\n", cache_size, align);
+		kmem_cache_t *cp;
+        
+		/* if the table has an entry for maxbuf, we're done */
+		if (size > maxbuf)
+			break;
+        
+		/* cache size must be a multiple of the table unit */
+		ASSERT(P2PHASE(cache_size, table_unit) == 0);
+        
+		/*
+		 * If they allocate a multiple of the coherency granularity,
+		 * they get a coherency-granularity-aligned address.
+		 */
+		if (IS_P2ALIGNED(cache_size, 64))
+			align = 64;
+		if (IS_P2ALIGNED(cache_size, PAGESIZE))
+			align = PAGESIZE;
+		(void) snprintf(name, sizeof (name),
+                        "kmem_alloc_%lu", cache_size);
+        
+        printf("Created kmem_alloc cache ->%s\n", name);
+        
+		cp = kmem_cache_create(name, cache_size, align,
+                               NULL, NULL, NULL, NULL, NULL, KMC_KMEM_ALLOC);
+        
+		while (size <= cache_size) {
+			alloc_table[(size - 1) >> shift] = cp;
+			size += table_unit;
+		}
+	}
+    
+	ASSERT(size > maxbuf);		/* i.e. maxbuf <= max(cache_size) */
+}
+
+static void
+kmem_cache_init(int pass, int use_large_pages)
+{
+	size_t maxbuf = KMEM_BIG_MAXBUF;
+    
+    kmem_max_cached = KMEM_BIG_MAXBUF;
+    
+    /*
+	 * Set up the default caches to back kmem_alloc()
+	 */
+    
+    printf("Creating small caches\n");
+	kmem_alloc_caches_create(kmem_alloc_sizes, sizeof (kmem_alloc_sizes) / sizeof (int),
+                             kmem_alloc_table, KMEM_MAXBUF, KMEM_ALIGN_SHIFT);
+
+    printf("Creating large caches\n");
+	kmem_alloc_caches_create(kmem_big_alloc_sizes, sizeof (kmem_big_alloc_sizes) / sizeof (int),
+                             kmem_big_alloc_table, maxbuf, KMEM_BIG_SHIFT);
+    
+	kmem_big_alloc_table_max = maxbuf >> KMEM_BIG_SHIFT;
+}
+
+//===============================================================
 // String handling
 //===============================================================
 
@@ -1316,6 +1537,11 @@ spl_kmem_init(uint64_t total_memory)
         mtp->mt_lock = lck_spin_alloc_init(kmem_lock_group, kmem_lock_attr);
         list_create(&mtp->mt_list, sizeof(kmem_magazine_t), offsetof(kmem_magazine_t, mag_node));
     }
+    
+    // Initialise the backing store for kmem_alloc et al
+    // We dont read no config files, just pretend....
+    kmem_cache_init(2, FALSE);
+    
 }
 
 void spl_kmem_tasks_init()
