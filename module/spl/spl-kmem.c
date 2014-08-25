@@ -72,22 +72,6 @@ mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
 extern int cpu_number();
 
 //===============================================================
-// Types
-//===============================================================
-
-/*
- * The magazine types for fast per-cpu allocation
- */
-typedef struct kmem_magtype {
-	short		mt_magsize;	/* magazine size (number of rounds) */
-	int	        mt_align;	/* magazine alignment */
-	uint32_t	mt_minbuf;	/* all smaller buffers qualify */
-	uint32_t	mt_maxbuf;	/* no larger buffers qualify */
-    lck_spin_t *mt_lock;    /* protect the list of magazines */
-    list_t      mt_list;    /* cache of magazines of this size */
-} kmem_magtype_t;
-
-//===============================================================
 // Variables
 //===============================================================
 
@@ -436,6 +420,434 @@ int spl_vm_pool_low(void)
 }
 
 // ===========================================================
+// Slab
+// ===========================================================
+
+#if 0
+
+/*
+ * Create a new slab for cache cp.
+ */
+static kmem_slab_t *
+kmem_slab_create(kmem_cache_t *cp, int kmflag)
+{
+	size_t slabsize = cp->cache_slabsize;
+	size_t chunksize = cp->cache_chunksize;
+	int cache_flags = cp->cache_flags;
+	size_t color, chunks;
+	char *buf, *slab;
+	kmem_slab_t *sp;
+	kmem_bufctl_t *bcp;
+	vmem_t *vmp = cp->cache_arena;
+	
+	ASSERT(MUTEX_NOT_HELD(&cp->cache_lock));
+	
+	color = cp->cache_color + cp->cache_align;
+	if (color > cp->cache_maxcolor)
+		color = cp->cache_mincolor;
+	cp->cache_color = color;
+	
+	slab = vmem_alloc(vmp, slabsize, kmflag & KM_VMFLAGS);
+	
+	if (slab == NULL)
+		goto vmem_alloc_failure;
+	
+	ASSERT(P2PHASE((uintptr_t)slab, vmp->vm_quantum) == 0);
+	
+	/*
+	 * Reverify what was already checked in kmem_cache_set_move(), since the
+	 * consolidator depends (for correctness) on slabs being initialized
+	 * with the 0xbaddcafe memory pattern (setting a low order bit usable by
+	 * clients to distinguish uninitialized memory from known objects).
+	 */
+	ASSERT((cp->cache_move == NULL) || !(cp->cache_cflags & KMC_NOTOUCH));
+	if (!(cp->cache_cflags & KMC_NOTOUCH))
+		copy_pattern(KMEM_UNINITIALIZED_PATTERN, slab, slabsize);
+	
+	if (cache_flags & KMF_HASH) {
+		if ((sp = kmem_cache_alloc(kmem_slab_cache, kmflag)) == NULL)
+			goto slab_alloc_failure;
+		chunks = (slabsize - color) / chunksize;
+	} else {
+		sp = KMEM_SLAB(cp, slab);
+		chunks = (slabsize - sizeof (kmem_slab_t) - color) / chunksize;
+	}
+	
+	sp->slab_cache	= cp;
+	sp->slab_head	= NULL;
+	sp->slab_refcnt	= 0;
+	sp->slab_base	= buf = slab + color;
+	sp->slab_chunks	= chunks;
+	sp->slab_stuck_offset = (uint32_t)-1;
+	sp->slab_later_count = 0;
+	sp->slab_flags = 0;
+	
+	ASSERT(chunks > 0);
+	while (chunks-- != 0) {
+		if (cache_flags & KMF_HASH) {
+			bcp = kmem_cache_alloc(cp->cache_bufctl_cache, kmflag);
+			if (bcp == NULL)
+				goto bufctl_alloc_failure;
+			if (cache_flags & KMF_AUDIT) {
+				kmem_bufctl_audit_t *bcap =
+				(kmem_bufctl_audit_t *)bcp;
+				bzero(bcap, sizeof (kmem_bufctl_audit_t));
+				bcap->bc_cache = cp;
+			}
+			bcp->bc_addr = buf;
+			bcp->bc_slab = sp;
+		} else {
+			bcp = KMEM_BUFCTL(cp, buf);
+		}
+		if (cache_flags & KMF_BUFTAG) {
+			kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
+			btp->bt_redzone = KMEM_REDZONE_PATTERN;
+			btp->bt_bufctl = bcp;
+			btp->bt_bxstat = (intptr_t)bcp ^ KMEM_BUFTAG_FREE;
+			if (cache_flags & KMF_DEADBEEF) {
+				copy_pattern(KMEM_FREE_PATTERN, buf,
+							 cp->cache_verify);
+			}
+		}
+		bcp->bc_next = sp->slab_head;
+		sp->slab_head = bcp;
+		buf += chunksize;
+	}
+	
+	kmem_log_event(kmem_slab_log, cp, sp, slab);
+	
+	return (sp);
+	
+bufctl_alloc_failure:
+	
+	while ((bcp = sp->slab_head) != NULL) {
+		sp->slab_head = bcp->bc_next;
+		kmem_cache_free(cp->cache_bufctl_cache, bcp);
+	}
+	kmem_cache_free(kmem_slab_cache, sp);
+	
+slab_alloc_failure:
+	
+	vmem_free(vmp, slab, slabsize);
+	
+vmem_alloc_failure:
+	
+	kmem_log_event(kmem_failure_log, cp, NULL, NULL);
+	atomic_inc_64(&cp->cache_alloc_fail);
+	
+	return (NULL);
+}
+
+/*
+ * Destroy a slab.
+ */
+static void
+kmem_slab_destroy(kmem_cache_t *cp, kmem_slab_t *sp)
+{
+	vmem_t *vmp = cp->cache_arena;
+	void *slab = (void *)P2ALIGN((uintptr_t)sp->slab_base, vmp->vm_quantum);
+	
+	ASSERT(MUTEX_NOT_HELD(&cp->cache_lock));
+	ASSERT(sp->slab_refcnt == 0);
+	
+	if (cp->cache_flags & KMF_HASH) {
+		kmem_bufctl_t *bcp;
+		while ((bcp = sp->slab_head) != NULL) {
+			sp->slab_head = bcp->bc_next;
+			kmem_cache_free(cp->cache_bufctl_cache, bcp);
+		}
+		kmem_cache_free(kmem_slab_cache, sp);
+	}
+	vmem_free(vmp, slab, cp->cache_slabsize);
+}
+
+static void *
+kmem_slab_alloc_impl(kmem_cache_t *cp, kmem_slab_t *sp, boolean_t prefill)
+{
+	kmem_bufctl_t *bcp, **hash_bucket;
+	void *buf;
+	boolean_t new_slab = (sp->slab_refcnt == 0);
+	
+	ASSERT(MUTEX_HELD(&cp->cache_lock));
+	/*
+	 * kmem_slab_alloc() drops cache_lock when it creates a new slab, so we
+	 * can't ASSERT(avl_is_empty(&cp->cache_partial_slabs)) here when the
+	 * slab is newly created.
+	 */
+	ASSERT(new_slab || (KMEM_SLAB_IS_PARTIAL(sp) &&
+						(sp == avl_first(&cp->cache_partial_slabs))));
+	ASSERT(sp->slab_cache == cp);
+	
+	cp->cache_slab_alloc++;
+	cp->cache_bufslab--;
+	sp->slab_refcnt++;
+	
+	bcp = sp->slab_head;
+	sp->slab_head = bcp->bc_next;
+	
+	if (cp->cache_flags & KMF_HASH) {
+		/*
+		 * Add buffer to allocated-address hash table.
+		 */
+		buf = bcp->bc_addr;
+		hash_bucket = KMEM_HASH(cp, buf);
+		bcp->bc_next = *hash_bucket;
+		*hash_bucket = bcp;
+		if ((cp->cache_flags & (KMF_AUDIT | KMF_BUFTAG)) == KMF_AUDIT) {
+			KMEM_AUDIT(kmem_transaction_log, cp, bcp);
+		}
+	} else {
+		buf = KMEM_BUF(cp, bcp);
+	}
+	
+	ASSERT(KMEM_SLAB_MEMBER(sp, buf));
+	
+	if (sp->slab_head == NULL) {
+		ASSERT(KMEM_SLAB_IS_ALL_USED(sp));
+		if (new_slab) {
+			ASSERT(sp->slab_chunks == 1);
+		} else {
+			ASSERT(sp->slab_chunks > 1); /* the slab was partial */
+			avl_remove(&cp->cache_partial_slabs, sp);
+			sp->slab_later_count = 0; /* clear history */
+			sp->slab_flags &= ~KMEM_SLAB_NOMOVE;
+			sp->slab_stuck_offset = (uint32_t)-1;
+		}
+		list_insert_head(&cp->cache_complete_slabs, sp);
+		cp->cache_complete_slab_count++;
+		return (buf);
+	}
+	
+	ASSERT(KMEM_SLAB_IS_PARTIAL(sp));
+	/*
+	 * Peek to see if the magazine layer is enabled before
+	 * we prefill.  We're not holding the cpu cache lock,
+	 * so the peek could be wrong, but there's no harm in it.
+	 */
+	if (new_slab && prefill && (cp->cache_flags & KMF_PREFILL) &&
+	    (KMEM_CPU_CACHE(cp)->cc_magsize != 0))  {
+		kmem_slab_prefill(cp, sp);
+		return (buf);
+	}
+	
+	if (new_slab) {
+		avl_add(&cp->cache_partial_slabs, sp);
+		return (buf);
+	}
+	
+	/*
+	 * The slab is now more allocated than it was, so the
+	 * order remains unchanged.
+	 */
+	ASSERT(!avl_update(&cp->cache_partial_slabs, sp));
+	return (buf);
+}
+
+/*
+ * Allocate a raw (unconstructed) buffer from cp's slab layer.
+ */
+static void *
+kmem_slab_alloc(kmem_cache_t *cp, int kmflag)
+{
+	kmem_slab_t *sp;
+	void *buf;
+	boolean_t test_destructor;
+	
+	mutex_enter(&cp->cache_lock);
+	test_destructor = (cp->cache_slab_alloc == 0);
+	sp = avl_first(&cp->cache_partial_slabs);
+	if (sp == NULL) {
+		ASSERT(cp->cache_bufslab == 0);
+		
+		/*
+		 * The freelist is empty.  Create a new slab.
+		 */
+		mutex_exit(&cp->cache_lock);
+		if ((sp = kmem_slab_create(cp, kmflag)) == NULL) {
+			return (NULL);
+		}
+		mutex_enter(&cp->cache_lock);
+		cp->cache_slab_create++;
+		if ((cp->cache_buftotal += sp->slab_chunks) > cp->cache_bufmax)
+			cp->cache_bufmax = cp->cache_buftotal;
+		cp->cache_bufslab += sp->slab_chunks;
+	}
+	
+	buf = kmem_slab_alloc_impl(cp, sp, B_TRUE);
+	ASSERT((cp->cache_slab_create - cp->cache_slab_destroy) ==
+		   (cp->cache_complete_slab_count +
+			avl_numnodes(&cp->cache_partial_slabs) +
+			(cp->cache_defrag == NULL ? 0 : cp->cache_defrag->kmd_deadcount)));
+	mutex_exit(&cp->cache_lock);
+	
+	if (test_destructor && cp->cache_destructor != NULL) {
+		/*
+		 * On the first kmem_slab_alloc(), assert that it is valid to
+		 * call the destructor on a newly constructed object without any
+		 * client involvement.
+		 */
+		if ((cp->cache_constructor == NULL) ||
+		    cp->cache_constructor(buf, cp->cache_private,
+								  kmflag) == 0) {
+				cp->cache_destructor(buf, cp->cache_private);
+			}
+		copy_pattern(KMEM_UNINITIALIZED_PATTERN, buf,
+					 cp->cache_bufsize);
+		if (cp->cache_flags & KMF_DEADBEEF) {
+			copy_pattern(KMEM_FREE_PATTERN, buf, cp->cache_verify);
+		}
+	}
+	
+	return (buf);
+}
+
+static void kmem_slab_move_yes(kmem_cache_t *, kmem_slab_t *, void *);
+
+/*
+ * Free a raw (unconstructed) buffer to cp's slab layer.
+ */
+static void
+kmem_slab_free(kmem_cache_t *cp, void *buf)
+{
+	kmem_slab_t *sp;
+	kmem_bufctl_t *bcp, **prev_bcpp;
+	
+	ASSERT(buf != NULL);
+	
+	mutex_enter(&cp->cache_lock);
+	cp->cache_slab_free++;
+	
+	if (cp->cache_flags & KMF_HASH) {
+		/*
+		 * Look up buffer in allocated-address hash table.
+		 */
+		prev_bcpp = KMEM_HASH(cp, buf);
+		while ((bcp = *prev_bcpp) != NULL) {
+			if (bcp->bc_addr == buf) {
+				*prev_bcpp = bcp->bc_next;
+				sp = bcp->bc_slab;
+				break;
+			}
+			cp->cache_lookup_depth++;
+			prev_bcpp = &bcp->bc_next;
+		}
+	} else {
+		bcp = KMEM_BUFCTL(cp, buf);
+		sp = KMEM_SLAB(cp, buf);
+	}
+	
+	if (bcp == NULL || sp->slab_cache != cp || !KMEM_SLAB_MEMBER(sp, buf)) {
+		mutex_exit(&cp->cache_lock);
+		kmem_error(KMERR_BADADDR, cp, buf);
+		return;
+	}
+	
+	if (KMEM_SLAB_OFFSET(sp, buf) == sp->slab_stuck_offset) {
+		/*
+		 * If this is the buffer that prevented the consolidator from
+		 * clearing the slab, we can reset the slab flags now that the
+		 * buffer is freed. (It makes sense to do this in
+		 * kmem_cache_free(), where the client gives up ownership of the
+		 * buffer, but on the hot path the test is too expensive.)
+		 */
+		kmem_slab_move_yes(cp, sp, buf);
+	}
+	
+	if ((cp->cache_flags & (KMF_AUDIT | KMF_BUFTAG)) == KMF_AUDIT) {
+		if (cp->cache_flags & KMF_CONTENTS)
+			((kmem_bufctl_audit_t *)bcp)->bc_contents =
+			kmem_log_enter(kmem_content_log, buf,
+						   cp->cache_contents);
+		KMEM_AUDIT(kmem_transaction_log, cp, bcp);
+	}
+	
+	bcp->bc_next = sp->slab_head;
+	sp->slab_head = bcp;
+	
+	cp->cache_bufslab++;
+	ASSERT(sp->slab_refcnt >= 1);
+	
+	if (--sp->slab_refcnt == 0) {
+		/*
+		 * There are no outstanding allocations from this slab,
+		 * so we can reclaim the memory.
+		 */
+		if (sp->slab_chunks == 1) {
+			list_remove(&cp->cache_complete_slabs, sp);
+			cp->cache_complete_slab_count--;
+		} else {
+			avl_remove(&cp->cache_partial_slabs, sp);
+		}
+		
+		cp->cache_buftotal -= sp->slab_chunks;
+		cp->cache_bufslab -= sp->slab_chunks;
+		/*
+		 * Defer releasing the slab to the virtual memory subsystem
+		 * while there is a pending move callback, since we guarantee
+		 * that buffers passed to the move callback have only been
+		 * touched by kmem or by the client itself. Since the memory
+		 * patterns baddcafe (uninitialized) and deadbeef (freed) both
+		 * set at least one of the two lowest order bits, the client can
+		 * test those bits in the move callback to determine whether or
+		 * not it knows about the buffer (assuming that the client also
+		 * sets one of those low order bits whenever it frees a buffer).
+		 */
+		if (cp->cache_defrag == NULL ||
+		    (avl_is_empty(&cp->cache_defrag->kmd_moves_pending) &&
+			 !(sp->slab_flags & KMEM_SLAB_MOVE_PENDING))) {
+				cp->cache_slab_destroy++;
+				mutex_exit(&cp->cache_lock);
+				kmem_slab_destroy(cp, sp);
+			} else {
+				list_t *deadlist = &cp->cache_defrag->kmd_deadlist;
+				/*
+				 * Slabs are inserted at both ends of the deadlist to
+				 * distinguish between slabs freed while move callbacks
+				 * are pending (list head) and a slab freed while the
+				 * lock is dropped in kmem_move_buffers() (list tail) so
+				 * that in both cases slab_destroy() is called from the
+				 * right context.
+				 */
+				if (sp->slab_flags & KMEM_SLAB_MOVE_PENDING) {
+					list_insert_tail(deadlist, sp);
+				} else {
+					list_insert_head(deadlist, sp);
+				}
+				cp->cache_defrag->kmd_deadcount++;
+				mutex_exit(&cp->cache_lock);
+			}
+		return;
+	}
+	
+	if (bcp->bc_next == NULL) {
+		/* Transition the slab from completely allocated to partial. */
+		ASSERT(sp->slab_refcnt == (sp->slab_chunks - 1));
+		ASSERT(sp->slab_chunks > 1);
+		list_remove(&cp->cache_complete_slabs, sp);
+		cp->cache_complete_slab_count--;
+		avl_add(&cp->cache_partial_slabs, sp);
+	} else {
+#ifdef	DEBUG
+		if (avl_update_gt(&cp->cache_partial_slabs, sp)) {
+			KMEM_STAT_ADD(kmem_move_stats.kms_avl_update);
+		} else {
+			KMEM_STAT_ADD(kmem_move_stats.kms_avl_noupdate);
+		}
+#else
+		(void) avl_update_gt(&cp->cache_partial_slabs, sp);
+#endif
+	}
+	
+	ASSERT((cp->cache_slab_create - cp->cache_slab_destroy) ==
+		   (cp->cache_complete_slab_count +
+			avl_numnodes(&cp->cache_partial_slabs) +
+			(cp->cache_defrag == NULL ? 0 : cp->cache_defrag->kmd_deadcount)));
+	mutex_exit(&cp->cache_lock);
+}
+
+#endif
+
+// ===========================================================
 // CACHE - iteration
 // ===========================================================
 
@@ -467,7 +879,7 @@ static kmem_magazine_t*
 kmem_magazine_alloc_init(kmem_cache_t* cp, int flags)
 {
     kmem_magazine_t* mag = 0;
-    kmem_magtype_t *mtp = cp->kc_magtype;
+    kmem_magtype_t *mtp = cp->cache_magtype;
     
     // Illumos uses a kmem_cache of magazines, but I dont understand how
     // nested manazines work, so will just use a simple linked
@@ -492,7 +904,7 @@ kmem_magazine_alloc_init(kmem_cache_t* cp, int flags)
 static void
 kmem_magazine_release(kmem_cache_t *cp, kmem_magazine_t *mp)
 {
-    kmem_magtype_t *mtp = cp->kc_magtype;
+    kmem_magtype_t *mtp = cp->cache_magtype;
     
     lck_spin_lock(mtp->mt_lock);
     list_link_init(&mp->mag_node);
@@ -504,16 +916,16 @@ static void
 kmem_magazine_destroy(kmem_cache_t *cp, kmem_magazine_t *mp, uint64_t nrounds)
 {
     int round;
-    //kmem_magtype_t *mtp = cp->kc_magtype;
+    //kmem_magtype_t *mtp = cp->cache_magtype;
     
     for (round = 0; round < nrounds; round++) {
         void *buf = mp->mag_round[round];
         
-        if (cp->kc_destructor) {
-            cp->kc_destructor(buf, cp->kc_private);
+        if (cp->cache_destructor) {
+            cp->cache_destructor(buf, cp->cache_private);
         }
         
-        bfree(buf, cp->kc_size);
+        bfree(buf, cp->cache_bufsize);
     }
     
     // Place the magazine in the freelist for reuse
@@ -541,9 +953,9 @@ static void kmem_magazine_list_init(kmem_maglist_t* mag_list)
 static void
 kmem_depot_init(kmem_cache_t* cp)
 {
-    mutex_init(&cp->kc_cache_depot_lock, "kmem", MUTEX_DEFAULT, NULL);
-    kmem_magazine_list_init(&cp->kc_cache_full);
-    kmem_magazine_list_init(&cp->kc_cache_empty);
+    mutex_init(&cp->cache_depot_lock, "kmem", MUTEX_DEFAULT, NULL);
+    kmem_magazine_list_init(&cp->cache_full);
+    kmem_magazine_list_init(&cp->cache_empty);
 }
 
 static kmem_magazine_t*
@@ -557,9 +969,9 @@ kmem_depot_alloc(kmem_cache_t *cp, kmem_maglist_t *mlp)
      * contention rate to determine whether we need to
      * increase the magazine size for better scalability.
      */
-    if (likely(!mutex_tryenter(&cp->kc_cache_depot_lock))) {
-        mutex_enter(&cp->kc_cache_depot_lock);
-        cp->kc_cache_depot_contention++;
+    if (likely(!mutex_tryenter(&cp->cache_depot_lock))) {
+        mutex_enter(&cp->cache_depot_lock);
+        cp->cache_depot_contention++;
     }
     
     if (likely(!list_is_empty(&mlp->ml_list))) {
@@ -573,7 +985,7 @@ kmem_depot_alloc(kmem_cache_t *cp, kmem_maglist_t *mlp)
         mlp->ml_alloc++;
     }
     
-    mutex_exit(&cp->kc_cache_depot_lock);
+    mutex_exit(&cp->cache_depot_lock);
     
     return (mp);
 }
@@ -584,22 +996,22 @@ kmem_depot_alloc(kmem_cache_t *cp, kmem_maglist_t *mlp)
 static void
 kmem_depot_free(kmem_cache_t *cp, kmem_maglist_t *mlp, kmem_magazine_t *mp)
 {
-    mutex_enter(&cp->kc_cache_depot_lock);
+    mutex_enter(&cp->cache_depot_lock);
     list_link_init(&mp->mag_node);
     list_insert_head(&mlp->ml_list, mp);
     mlp->ml_total++;
-    mutex_exit(&cp->kc_cache_depot_lock);
+    mutex_exit(&cp->cache_depot_lock);
 }
 
 static void
 kmem_depot_ws_update(kmem_cache_t *cp)
 {
-    mutex_enter(&cp->kc_cache_depot_lock);
-    cp->kc_cache_full.ml_reaplimit = cp->kc_cache_full.ml_min;
-    cp->kc_cache_full.ml_min = cp->kc_cache_full.ml_total;
-    cp->kc_cache_empty.ml_reaplimit = cp->kc_cache_empty.ml_min;
-    cp->kc_cache_empty.ml_min = cp->kc_cache_empty.ml_total;
-    mutex_exit(&cp->kc_cache_depot_lock);
+    mutex_enter(&cp->cache_depot_lock);
+    cp->cache_full.ml_reaplimit = cp->cache_full.ml_min;
+    cp->cache_full.ml_min = cp->cache_full.ml_total;
+    cp->cache_empty.ml_reaplimit = cp->cache_empty.ml_min;
+    cp->cache_empty.ml_min = cp->cache_empty.ml_total;
+    mutex_exit(&cp->cache_depot_lock);
 }
 
 static void
@@ -608,12 +1020,12 @@ kmem_depot_ws_reap(kmem_cache_t *cp)
     long reap;
     kmem_magazine_t *mp;
     
-    reap = MIN(cp->kc_cache_full.ml_reaplimit, cp->kc_cache_full.ml_min);
-    while (reap-- && (mp = kmem_depot_alloc(cp, &cp->kc_cache_full)) != NULL)
-        kmem_magazine_destroy(cp, mp, cp->kc_magtype->mt_magsize);
+    reap = MIN(cp->cache_full.ml_reaplimit, cp->cache_full.ml_min);
+    while (reap-- && (mp = kmem_depot_alloc(cp, &cp->cache_full)) != NULL)
+        kmem_magazine_destroy(cp, mp, cp->cache_magtype->mt_magsize);
     
-    reap = MIN(cp->kc_cache_empty.ml_reaplimit, cp->kc_cache_empty.ml_min);
-    while (reap-- && (mp = kmem_depot_alloc(cp, &cp->kc_cache_empty)) != NULL)
+    reap = MIN(cp->cache_empty.ml_reaplimit, cp->cache_empty.ml_min);
+    while (reap-- && (mp = kmem_depot_alloc(cp, &cp->cache_empty)) != NULL)
         kmem_magazine_destroy(cp, mp, 0);
 }
 
@@ -621,7 +1033,7 @@ static void
 kmem_depot_fini(kmem_cache_t *cp)
 {
     // FIXME - empty the linked lists, release all memory
-    mutex_destroy(&cp->kc_cache_depot_lock);
+    mutex_destroy(&cp->cache_depot_lock);
 }
 
 // ===========================================================
@@ -658,10 +1070,10 @@ kmem_cpu_cache_magazine_alloc(kmem_cpu_cache_t *ccp, kmem_cache_t *cp)
     kmem_magazine_t *emp;
 	kmem_magtype_t *mtp;
     
-    emp = kmem_depot_alloc(cp, &cp->kc_cache_empty);
+    emp = kmem_depot_alloc(cp, &cp->cache_empty);
     if (emp != NULL) {
         if (ccp->cc_ploaded != NULL)
-            kmem_depot_free(cp, &cp->kc_cache_full, ccp->cc_ploaded);
+            kmem_depot_free(cp, &cp->cache_full, ccp->cc_ploaded);
         kmem_cpu_cache_reload(ccp, emp, 0);
         return (1);
     }
@@ -670,7 +1082,7 @@ kmem_cpu_cache_magazine_alloc(kmem_cpu_cache_t *ccp, kmem_cache_t *cp)
      * There are no empty magazines in the depot,
      * so try to allocate a new one.
      */
-    mtp = cp->kc_magtype;
+    mtp = cp->cache_magtype;
     mutex_exit(&ccp->cc_lock);
     
     emp = kmem_magazine_alloc_init(cp, KM_NOSLEEP);  //  FIXME flags KM_NOSLEEP);
@@ -696,7 +1108,7 @@ kmem_cpu_cache_magazine_alloc(kmem_cpu_cache_t *ccp, kmem_cache_t *cp)
          * We got a magazine of the right size.  Add it to
          * the depot and try the whole dance again.
          */
-        kmem_depot_free(cp, &cp->kc_cache_empty, emp);
+        kmem_depot_free(cp, &cp->cache_empty, emp);
         return (1);
     }
     
@@ -718,10 +1130,10 @@ void kmem_cache_magazine_enable(kmem_cache_t* cp)
     int cpu_seqid;
     
     for (cpu_seqid = 0; cpu_seqid < max_ncpus; cpu_seqid++) {
-        kmem_cpu_cache_t *ccp = &cp->kc_cache_cpu[cpu_seqid];
+        kmem_cpu_cache_t *ccp = &cp->cache_cpu[cpu_seqid];
         
         mutex_enter(&ccp->cc_lock);
-        ccp->cc_magsize = cp->kc_magtype->mt_magsize;
+        ccp->cc_magsize = cp->cache_magtype->mt_magsize;
         mutex_exit(&ccp->cc_lock);
     }
 }
@@ -734,7 +1146,7 @@ kmem_cache_magazine_purge(kmem_cache_t *cp)
     int rounds, prounds, cpu_seqid;
     
     for (cpu_seqid = 0; cpu_seqid < max_ncpus; cpu_seqid++) {
-        ccp = &cp->kc_cache_cpu[cpu_seqid];
+        ccp = &cp->cache_cpu[cpu_seqid];
         
         mutex_enter(&ccp->cc_lock);
         
@@ -780,21 +1192,21 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
     cache = bmalloc(sizeof(*cache), KM_SLEEP);
     bzero(cache, sizeof(kmem_cache_t));
     
-    strlcpy(cache->kc_name, name, sizeof(cache->kc_name));
-    cache->kc_constructor = constructor;
-    cache->kc_destructor = destructor;
-    cache->kc_reclaim = reclaim;
-    cache->kc_private = private;
-    cache->kc_size = bufsize;
+    strlcpy(cache->cache_name, name, sizeof(cache->cache_name));
+    cache->cache_constructor = constructor;
+    cache->cache_destructor = destructor;
+    cache->cache_reclaim = reclaim;
+    cache->cache_private = private;
+    cache->cache_bufsize = bufsize;
     
-    cache->kc_alloc_count = 0;
+    cache->cache_alloc_count = 0;
     
     kmem_depot_init(cache);
     
     // FIXME check this is 64 bit aligned
-    cache->kc_cache_cpu = bmalloc(max_ncpus * sizeof(kmem_cpu_cache_t), KM_SLEEP);
+    cache->cache_cpu = bmalloc(max_ncpus * sizeof(kmem_cpu_cache_t), KM_SLEEP);
     for (int i=0; i<max_ncpus; i++) {
-        kmem_cpu_cache_init(&cache->kc_cache_cpu[i]);
+        kmem_cpu_cache_init(&cache->cache_cpu[i]);
     }
     
     /*
@@ -806,12 +1218,12 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
      * Select magazine to use etc
      */
     chunksize = bufsize;
-    cache->kc_cache_chunksize = chunksize;
+    cache->cache_chunksize = chunksize;
     
     for (mtp = kmem_magtype; chunksize <= mtp->mt_minbuf; mtp++)
         continue;
     
-    cache->kc_magtype = mtp;
+    cache->cache_magtype = mtp;
     
     /*
      * Add the cache to the global list.  This makes it visible
@@ -846,13 +1258,13 @@ kmem_cache_destroy(kmem_cache_t *cp)
      * reclaim, and move routines that induce a kernel text fault if
      * invoked.
      */
-    cp->kc_constructor = (int (*)(void *, void *, int))1;
-    cp->kc_destructor = (void (*)(void *, void *))2;
-    cp->kc_reclaim = (void (*)(void *))3;
+    cp->cache_constructor = (int (*)(void *, void *, int))1;
+    cp->cache_destructor = (void (*)(void *, void *))2;
+    cp->cache_reclaim = (void (*)(void *))3;
     
     // Terminate cache internals
     for (int i=0; i<max_ncpus; i++) {
-        kmem_cpu_cache_fini(&cp->kc_cache_cpu[i]);
+        kmem_cpu_cache_fini(&cp->cache_cpu[i]);
     }
     kmem_depot_fini(cp);
     
@@ -863,7 +1275,7 @@ kmem_cache_destroy(kmem_cache_t *cp)
 void *
 kmem_cache_alloc(kmem_cache_t *cp, int flags)
 {
-    kmem_cpu_cache_t *ccp = &cp->kc_cache_cpu[cpu_number()];
+    kmem_cpu_cache_t *ccp = &cp->cache_cpu[cpu_number()];
     kmem_magazine_t *fmp = 0;
     void *buf = 0;
     
@@ -875,7 +1287,7 @@ kmem_cache_alloc(kmem_cache_t *cp, int flags)
             void *obj = mp->mag_round[--ccp->cc_rounds];
             ccp->cc_alloc++;
             mutex_exit(&ccp->cc_lock);
-   atomic_add_64(&cp->kc_alloc_count,1);
+   atomic_add_64(&cp->cache_alloc_count,1);
             return (obj);
         }
         
@@ -897,10 +1309,10 @@ kmem_cache_alloc(kmem_cache_t *cp, int flags)
         /*
          * Try to get a full magazine from the depot.
          */
-        fmp = kmem_depot_alloc(cp, &cp->kc_cache_full);
+        fmp = kmem_depot_alloc(cp, &cp->cache_full);
         if (fmp != NULL) {
             if (ccp->cc_ploaded != NULL)
-                kmem_depot_free(cp, &cp->kc_cache_empty, ccp->cc_ploaded);
+                kmem_depot_free(cp, &cp->cache_empty, ccp->cc_ploaded);
             kmem_cpu_cache_reload(ccp, fmp, ccp->cc_magsize);
             continue;
         }
@@ -918,11 +1330,11 @@ kmem_cache_alloc(kmem_cache_t *cp, int flags)
      * We couldn't allocate a constructed object from the magazine layer,
      * so get a raw buffer from the slab layer and apply its constructor.
      */
-    buf = bmalloc(cp->kc_size, flags);
-    if (buf && cp->kc_constructor)
-        cp->kc_constructor(buf, cp->kc_private, flags);
+    buf = bmalloc(cp->cache_bufsize, flags);
+    if (buf && cp->cache_constructor)
+        cp->cache_constructor(buf, cp->cache_private, flags);
     
-   atomic_add_64(&cp->kc_alloc_count,1);
+   atomic_add_64(&cp->cache_alloc_count,1);
     
     return buf;
 }
@@ -930,11 +1342,11 @@ kmem_cache_alloc(kmem_cache_t *cp, int flags)
 void
 kmem_cache_free(kmem_cache_t *cp, void *buf)
 {
-    kmem_cpu_cache_t *ccp = &cp->kc_cache_cpu[cpu_number()];
+    kmem_cpu_cache_t *ccp = &cp->cache_cpu[cpu_number()];
     
     mutex_enter(&ccp->cc_lock);
     
-    atomic_sub_64(&cp->kc_alloc_count,1);
+    atomic_sub_64(&cp->cache_alloc_count,1);
     
     for (;;) {
         
@@ -979,11 +1391,11 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
     
     mutex_exit(&ccp->cc_lock);
     
-    if (cp->kc_destructor) {
-        cp->kc_destructor(buf, cp->kc_private);
+    if (cp->cache_destructor) {
+        cp->cache_destructor(buf, cp->cache_private);
     }
     
-    bfree(buf, cp->kc_size);
+    bfree(buf, cp->cache_bufsize);
 }
 
 
@@ -1005,21 +1417,21 @@ kmem_cache_reap(kmem_cache_t *cp)
      * *need*.  Reclaim policy is entirely up to the owner; this
      * callback is just an advisory plea for help.
      */
-    if (cp->kc_reclaim != NULL) {
+    if (cp->cache_reclaim != NULL) {
         long delta;
         
         /*
          * Reclaimed memory should be reapable (not included in the
          * depot's working set).
          */
-        delta = cp->kc_cache_full.ml_total;
-        cp->kc_reclaim(cp->kc_private);
-        delta = cp->kc_cache_full.ml_total - delta;
+        delta = cp->cache_full.ml_total;
+        cp->cache_reclaim(cp->cache_private);
+        delta = cp->cache_full.ml_total - delta;
         if (delta > 0) {
-            mutex_enter(&cp->kc_cache_depot_lock);
-            cp->kc_cache_full.ml_reaplimit += delta;
-            cp->kc_cache_full.ml_min += delta;
-            mutex_exit(&cp->kc_cache_depot_lock);
+            mutex_enter(&cp->cache_depot_lock);
+            cp->cache_full.ml_reaplimit += delta;
+            cp->cache_full.ml_min += delta;
+            mutex_exit(&cp->cache_depot_lock);
         }
     }
     
@@ -1032,7 +1444,7 @@ kmem_cache_reap(kmem_cache_t *cp)
 static void print_cache_stats(kmem_cache_t *cache)
 {
 	printf("Cache->%s, alloc count->%llu, bytes=%llu\n",
-           cache->kc_name, cache->kc_alloc_count, cache->kc_alloc_count * cache->kc_size);
+           cache->cache_name, cache->cache_alloc_count, cache->cache_alloc_count * cache->cache_bufsize);
 }
 
 #endif
@@ -1094,7 +1506,7 @@ kmem_alloc_caches_create(const int *array, size_t count,
 			break;
         
 		/* cache size must be a multiple of the table unit */
-		ASSERT(P2PHASE(cache_size, table_unit) == 0);
+		ASSERT(P2PHASE(cache_bufsize, table_unit) == 0);
         
 		/*
 		 * If they allocate a multiple of the coherency granularity,
@@ -1378,16 +1790,16 @@ kmem_cache_magazine_resize(kmem_cache_t *cp)
     // FIXME removing this return causes a core.
     //return;
     
-	kmem_magtype_t *mtp = cp->kc_magtype;
+	kmem_magtype_t *mtp = cp->cache_magtype;
     
-	if (cp->kc_cache_chunksize < mtp->mt_maxbuf) {
+	if (cp->cache_chunksize < mtp->mt_maxbuf) {
 		kmem_cache_magazine_purge(cp);
         
-		mutex_enter(&cp->kc_cache_depot_lock);
-		cp->kc_magtype = ++mtp;
-        cp->kc_cache_depot_contention_prev =
-        cp->kc_cache_depot_contention + INT_MAX;
-		mutex_exit(&cp->kc_cache_depot_lock);
+		mutex_enter(&cp->cache_depot_lock);
+		cp->cache_magtype = ++mtp;
+        cp->cache_depot_contention_prev =
+        cp->cache_depot_contention + INT_MAX;
+		mutex_exit(&cp->cache_depot_lock);
 		
         kmem_cache_magazine_enable(cp);
 	}
@@ -1428,16 +1840,16 @@ kmem_cache_update(kmem_cache_t *cp)
 	 * If there's a lot of contention in the depot,
 	 * increase the magazine size.
 	 */
-	mutex_enter(&cp->kc_cache_depot_lock);
+	mutex_enter(&cp->cache_depot_lock);
     
-	if (cp->kc_cache_chunksize < cp->kc_magtype->mt_maxbuf &&
-	    (int)(cp->kc_cache_depot_contention -
-              cp->kc_cache_depot_contention_prev) > kmem_depot_contention)
+	if (cp->cache_chunksize < cp->cache_magtype->mt_maxbuf &&
+	    (int)(cp->cache_depot_contention -
+              cp->cache_depot_contention_prev) > kmem_depot_contention)
 		need_magazine_resize = 1;
     
-	cp->kc_cache_depot_contention_prev = cp->kc_cache_depot_contention;
+	cp->cache_depot_contention_prev = cp->cache_depot_contention;
     
-	mutex_exit(&cp->kc_cache_depot_lock);
+	mutex_exit(&cp->cache_depot_lock);
     
     //	if (need_hash_rescale)
     //		(void) taskq_dispatch(kmem_taskq,
@@ -1527,7 +1939,7 @@ spl_kmem_init(uint64_t total_memory)
     
     // Initialise the cache list
     mutex_init(&kmem_cache_lock, "kmem", MUTEX_DEFAULT, NULL);
-    list_create(&kmem_caches, sizeof(kmem_cache_t), offsetof(kmem_cache_t, kc_cache_link_node));
+    list_create(&kmem_caches, sizeof(kmem_cache_t), offsetof(kmem_cache_t, cache_link));
     
     // Initialise the magazines
     kmem_magtype_t *mtp;
