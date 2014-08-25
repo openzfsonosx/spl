@@ -26,8 +26,6 @@
  *
  */
 
-
-
 #ifndef _SPL_KMEM_H
 #define	_SPL_KMEM_H
 
@@ -37,6 +35,7 @@
 #include <sys/kstat.h>
 #include <sys/malloc.h>
 #include <sys/list.h>
+#include <sys/vmem.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -55,17 +54,10 @@ extern uint64_t physmem;
 	
 #define	KM_FLAGS	0xffff	/* all settable kmem flags */
     
-#define vmem_t  void
-    
 	/*
 	 * Kernel memory allocator: DDI interfaces.
 	 * See kmem_alloc(9F) for details.
 	 */
-	
-// To be removed
-#define	vmem_alloc(size, vmflag)	kmem_alloc((size), (vmflag))
-#define vmem_zalloc(sz, fl)         kmem_zalloc((sz), (fl))
-#define	vmem_free(vaddr, size)		kmem_free((vaddr), (size))
 	
 // Work around symbol collisions in XNU
 #define kmem_alloc(size, kmflags)   zfs_kmem_alloc((size), (kmflags))
@@ -82,7 +74,7 @@ extern uint64_t physmem;
     uint64_t kmem_used(void);
     uint64_t kmem_avail(void);
     uint64_t kmem_num_pages_wanted();
-	int spl_vm_pool_low(void);
+	int	spl_vm_pool_low(void);
     void spl_kmem_tasks_fini();
     void spl_kmem_fini(void);
     

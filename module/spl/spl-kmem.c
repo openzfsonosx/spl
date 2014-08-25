@@ -35,6 +35,7 @@
 #include <sys/thread.h>
 #include <sys/taskq.h>
 #include <sys/kmem_impl.h>
+#include <sys/vmem_impl.h>
 #include <kern/sched_prim.h>
 #include "spl-bmalloc.h"
 
@@ -75,43 +76,53 @@ extern int cpu_number();
 // Variables
 //===============================================================
 
-unsigned int my_test_event = 0;
-
 // Measure the wakeup count of the memory monitor thread
-unsigned long wake_count = 0; // DEBUG
+unsigned long		wake_count = 0; // DEBUG
 
 // Indicates that the machine is believed to be swapping
 // due to thread waking. This is reset when spl_vm_pool_low()
 // is called and reports the activity to ZFS.
-int machine_is_swapping = 0;
+int					machine_is_swapping = 0;
 
 // Flag to cause tasks and threads to terminate as
 // the kmem module is preparing to unload.
-int shutting_down = 0;
+int					shutting_down = 0;
 
-uint64_t physmem = 0;
+uint64_t			physmem = 0;
 
 // Size in bytes of the memory allocated by ZFS in calls to the SPL,
-static uint64_t total_in_use = 0;
+static uint64_t		total_in_use = 0;
 
 // Size in bytes of the memory allocated by bmalloc resuling from
 // allocation calls to the SPL. The ratio of
 // total_in_use :bmalloc_allocated_total is an indication of
 // the space efficiency of bmalloc.
-extern uint64_t bmalloc_allocated_total;
+extern uint64_t		bmalloc_allocated_total;
 
 // Number of pages the OS last reported that it needed freed
-unsigned int num_pages_wanted = 0;
+unsigned int		num_pages_wanted = 0;
 
-// Protects the list of kmem_caches
-static kmutex_t kmem_cache_lock;
-
-// List of kmem_caches
-static list_t  kmem_caches;
+static kmutex_t		kmem_cache_lock;    /* inter-cache linkage only */
+static list_t		kmem_caches;
 
 // Task queue for processing kmem internal tasks.
-static taskq_t* kmem_taskq;
+static taskq_t		*kmem_taskq;
 
+static vmem_t		*kmem_metadata_arena;
+static vmem_t		*kmem_msb_arena;	/* arena for metadata caches */
+static vmem_t		*kmem_cache_arena;
+static vmem_t		*kmem_hash_arena;
+static vmem_t		*kmem_log_arena;
+static vmem_t		*kmem_oversize_arena;
+static vmem_t		*kmem_va_arena;
+static vmem_t		*kmem_default_arena;
+static vmem_t		*kmem_firewall_va_arena;
+static vmem_t		*kmem_firewall_arena;
+
+kmem_log_header_t	*kmem_transaction_log;
+kmem_log_header_t	*kmem_content_log;
+kmem_log_header_t	*kmem_failure_log;
+kmem_log_header_t	*kmem_slab_log;
 
 /*
  * The default set of caches to back kmem_alloc().
@@ -177,23 +188,27 @@ static kmem_magtype_t kmem_magtype[] = {
 	{ 143,	64,	0,	0	},
 };
 
+static kmem_cache_t		*kmem_slab_cache;
+static kmem_cache_t		*kmem_bufctl_cache;
+static kmem_cache_t		*kmem_bufctl_audit_cache;
 
-static kmutex_t   kmem_cache_lock;/* inter-cache linkage only */
-static list_t  kmem_caches;
+static kmutex_t			kmem_cache_lock;/* inter-cache linkage only */
+static list_t			kmem_caches;
 
 // Lock manager stuff
 static lck_grp_t        *kmem_lock_group = NULL;
 static lck_attr_t       *kmem_lock_attr = NULL;
-static lck_grp_attr_t   *kmem_group_attr = NULL;
+static lck_grp_attr_t	*kmem_group_attr = NULL;
 
 size_t	kmem_max_cached = KMEM_BIG_MAXBUF;	/* maximum kmem_alloc cache */
 
 static int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 
-static struct timespec kmem_reap_all_task_timeout = {15, 0}; // 15 seconds
-static struct timespec bmalloc_task_timeout = {5, 0}; // 5 Seconds
-static struct timespec reap_finish_task_timeout = {0, 500000000}; // 0.5 seconds
-static struct timespec kmem_update_interval = {15, 0}; // 15 seconds
+static struct timespec	kmem_reap_all_task_timeout	= {15, 0};			// 15 seconds
+static struct timespec	bmalloc_task_timeout		= {5, 0};			// 5 Seconds
+static struct timespec	reap_finish_task_timeout	= {0, 500000000};	// 0.5 seconds
+static struct timespec	kmem_update_interval		= {15, 0};			// 15 seconds
+static struct timespec memory_pressure_timeout		= {0, 12500000};	// 0.125 Seconds
 
 #ifdef PRINT_CACHE_STATS
 static struct timespec print_all_cache_stats_task_timeout = {60, 0};
@@ -423,7 +438,69 @@ int spl_vm_pool_low(void)
 // Slab
 // ===========================================================
 
-#if 0
+static void
+copy_pattern(uint64_t pattern, void *buf_arg, size_t size)
+{
+	uint64_t *bufend = (uint64_t *)((char *)buf_arg + size);
+	uint64_t *buf = buf_arg;
+	
+	while (buf < bufend)
+		*buf++ = pattern;
+}
+
+static void *
+verify_pattern(uint64_t pattern, void *buf_arg, size_t size)
+{
+	uint64_t *bufend = (uint64_t *)((char *)buf_arg + size);
+	uint64_t *buf;
+	
+	for (buf = buf_arg; buf < bufend; buf++)
+		if (*buf != pattern)
+			return (buf);
+	return (NULL);
+}
+
+static void *
+verify_and_copy_pattern(uint64_t old, uint64_t new, void *buf_arg, size_t size)
+{
+	uint64_t *bufend = (uint64_t *)((char *)buf_arg + size);
+	uint64_t *buf;
+	
+	for (buf = buf_arg; buf < bufend; buf++) {
+		if (*buf != old) {
+			copy_pattern(old, buf_arg,
+						 (char *)buf - (char *)buf_arg);
+			return (buf);
+		}
+		*buf = new;
+	}
+	
+	return (NULL);
+}
+
+#define	KMEM_AUDIT(lp, cp, bcp)						\
+{									\
+kmem_bufctl_audit_t *_bcp = (kmem_bufctl_audit_t *)(bcp);	\
+_bcp->bc_timestamp = gethrtime();				\
+_bcp->bc_thread = curthread;					\
+_bcp->bc_depth = getpcstack(_bcp->bc_stack, KMEM_STACK_DEPTH);	\
+_bcp->bc_lastlog = kmem_log_enter((lp), _bcp, sizeof (*_bcp));	\
+}
+
+static void
+kmem_log_event(kmem_log_header_t *lp, kmem_cache_t *cp,
+			   kmem_slab_t *sp, void *addr)
+{
+/*
+	kmem_bufctl_audit_t bca;
+	
+	bzero(&bca, sizeof (kmem_bufctl_audit_t));
+	bca.bc_addr = addr;
+	bca.bc_slab = sp;
+	bca.bc_cache = cp;
+	KMEM_AUDIT(lp, cp, &bca);
+*/
+}
 
 /*
  * Create a new slab for cache cp.
@@ -560,6 +637,8 @@ kmem_slab_destroy(kmem_cache_t *cp, kmem_slab_t *sp)
 	}
 	vmem_free(vmp, slab, cp->cache_slabsize);
 }
+
+#if 0
 
 static void *
 kmem_slab_alloc_impl(kmem_cache_t *cp, kmem_slab_t *sp, boolean_t prefill)
@@ -1534,14 +1613,47 @@ kmem_alloc_caches_create(const int *array, size_t count,
 static void
 kmem_cache_init(int pass, int use_large_pages)
 {
+	int i = 0;
 	size_t maxbuf = KMEM_BIG_MAXBUF;
+	kmem_magtype_t *mtp;
     
-    kmem_max_cached = KMEM_BIG_MAXBUF;
-    
+	/*
+	 * Create the magazine caches
+	 */
+	
+	for (i = 0; i < sizeof (kmem_magtype) / sizeof (*mtp); i++) {
+		char name[KMEM_CACHE_NAMELEN + 1];
+		
+		mtp = &kmem_magtype[i];
+		(void) snprintf(name, sizeof(name), "kmem_magazine_%d", mtp->mt_magsize);
+		mtp->mt_cache = kmem_cache_create(name,
+										  (mtp->mt_magsize + 1) * sizeof (void *),
+										  mtp->mt_align, NULL, NULL, NULL, NULL,
+										  kmem_msb_arena, KMC_NOHASH);
+	}
+	
+	/*
+	 * Create slab caches
+	 */
+	
+	kmem_slab_cache = kmem_cache_create("kmem_slab_cache",
+										sizeof (kmem_slab_t), 0, NULL, NULL, NULL, NULL,
+										kmem_msb_arena, KMC_NOHASH);
+	
+	kmem_bufctl_cache = kmem_cache_create("kmem_bufctl_cache",
+										  sizeof (kmem_bufctl_t), 0, NULL, NULL, NULL, NULL,
+										  kmem_msb_arena, KMC_NOHASH);
+	
+	kmem_bufctl_audit_cache = kmem_cache_create("kmem_bufctl_audit_cache",
+												sizeof (kmem_bufctl_audit_t), 0, NULL, NULL, NULL, NULL,
+												kmem_msb_arena, KMC_NOHASH);
+	
     /*
 	 * Set up the default caches to back kmem_alloc()
 	 */
-    
+
+	kmem_max_cached = KMEM_BIG_MAXBUF;
+
 	kmem_alloc_caches_create(kmem_alloc_sizes, sizeof (kmem_alloc_sizes) / sizeof (int),
                              kmem_alloc_table, KMEM_MAXBUF, KMEM_ALIGN_SHIFT);
 
@@ -1614,14 +1726,6 @@ kmem_asprintf(const char *fmt, ...)
 // Memory pressure monitor thread
 //===============================================================
 
-static struct timespec memory_pressure_timeout = {0, 12500000}; // 0.125 Seconds
-
-static void my_test_event_proc(void *p)
-{
-	//printf("my test event\n");
-	thread_wakeup((event_t) &my_test_event);
-}
-
 void memory_monitor_thread_continue()
 {
 	static int first_time = 1;
@@ -1653,11 +1757,15 @@ void memory_monitor_thread_continue()
 			// Note though that this thread can be waken a LOT of times per
 			// second in the absence of the throttle. But this is load
 			// is representing the real VM behavior when the machine is under load.
-			if (!shutting_down) {
-				assert_wait((event_t) &vm_page_free_wanted, THREAD_INTERRUPTIBLE);
-				bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
-				thread_block(THREAD_CONTINUE_NULL);
-			}
+			//if (!shutting_down) {
+				// Well thats all bollocks
+				// need to use a cv
+				// vm_page_free_wanted is the vm event, so we
+				// will be woken on all vm events i.e. this is not throttleing
+				//assert_wait((event_t) &vm_page_free_wanted, THREAD_INTERRUPTIBLE);
+				//bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
+				//thread_block(THREAD_CONTINUE_NULL);
+			//}
 			
 		}
 	}
@@ -1668,20 +1776,14 @@ void memory_monitor_thread_continue()
 
 static void start_memory_monitor()
 {
-	kthread_t* thread = thread_create(NULL, 0, memory_monitor_thread_continue, 0, 0, 0, 0, 0);
-	//bsd_timeout(my_test_event_proc, 0, &memory_pressure_timeout);
+	(void)thread_create(NULL, 0, memory_monitor_thread_continue, 0, 0, 0, 0, 0);
 }
 
 static void stop_memory_monitor()
 {
     shutting_down = 1;
-	bsd_untimeout(my_test_event_proc, 0);
-	
-	thread_wakeup((event_t) &my_test_event);
-	thread_wakeup((event_t) &vm_page_free_wanted);
+    thread_wakeup((event_t) &vm_page_free_wanted);
 	return;
-	
-    delay(1000);
 }
 
 //===============================================================

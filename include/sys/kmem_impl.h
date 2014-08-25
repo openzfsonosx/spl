@@ -27,7 +27,7 @@
 #define	_SYS_KMEM_IMPL_H
 
 #include <sys/kmem.h>
-//#include <sys/vmem.h>
+#include <sys/vmem.h>
 #include <sys/thread.h>
 #include <sys/t_lock.h>
 #include <sys/time.h>
@@ -143,9 +143,9 @@ extern "C" {
      * KMF_BUFTAG flags (KMF_DEADBEEF, KMF_REDZONE, KMF_VERIFY) are set.
      */
     typedef struct kmem_buftag {
-        uint64_t		bt_redzone;	/* 64-bit redzone pattern */
-        kmem_bufctl_t	*bt_bufctl;	/* bufctl */
-        intptr_t		bt_bxstat;	/* bufctl ^ (alloc/free) */
+        uint64_t			bt_redzone;	/* 64-bit redzone pattern */
+        kmem_bufctl_t		*bt_bufctl;	/* bufctl */
+        intptr_t			bt_bxstat;	/* bufctl ^ (alloc/free) */
     } kmem_buftag_t;
     
     /*
@@ -154,8 +154,8 @@ extern "C" {
      * recent first)
      */
     typedef struct kmem_buftag_lite {
-        kmem_buftag_t	bt_buftag;	/* a normal buftag */
-        pc_t			bt_history[1];	/* zero or more callers */
+        kmem_buftag_t		bt_buftag;	/* a normal buftag */
+        pc_t				bt_history[1];	/* zero or more callers */
     } kmem_buftag_lite_t;
     
 #define	KMEM_BUFTAG_LITE_SIZE(f)	\
@@ -265,12 +265,13 @@ extern "C" {
 	// (which also uses magazines)
 	
 	typedef struct kmem_magtype {
-		short		mt_magsize;	/* magazine size (number of rounds) */
-		int	        mt_align;	/* magazine alignment */
-		uint32_t	mt_minbuf;	/* all smaller buffers qualify */
-		uint32_t	mt_maxbuf;	/* no larger buffers qualify */
-		lck_spin_t *mt_lock;    /* protect the list of magazines */
-		list_t      mt_list;    /* cache of magazines of this size */
+		short			mt_magsize;	/* magazine size (number of rounds) */
+		int				mt_align;	/* magazine alignment */
+		uint32_t		mt_minbuf;	/* all smaller buffers qualify */
+		uint32_t		mt_maxbuf;	/* no larger buffers qualify */
+		lck_spin_t		*mt_lock;   /* protect the list of magazines */
+		kmem_cache_t	*mt_cache;	/* magazine cache */ /* NOT COMPLETE */
+		list_t			mt_list;    /* cache of magazines of this size */
 	} kmem_magtype_t;
 	
 	
@@ -305,48 +306,48 @@ extern "C" {
      * The magazine lists used in the depot.
      */
     typedef struct kmem_maglist {
-        list_t      ml_list;       /* magazine list */
-        long        ml_total;      /* number of magazines */
-        long        ml_min;        /* min since last update */
-        long        ml_reaplimit;  /* max reapable magazines */
-        uint64_t    ml_alloc;      /* allocations from this list */
+        list_t			ml_list;       /* magazine list */
+        long			ml_total;      /* number of magazines */
+        long			ml_min;        /* min since last update */
+        long			ml_reaplimit;  /* max reapable magazines */
+        uint64_t		ml_alloc;      /* allocations from this list */
     } kmem_maglist_t;
     
 	typedef struct kmem_defrag {
 		/*
 		 * Statistics
 		 */
-		uint64_t	kmd_callbacks;		/* move callbacks */
-		uint64_t	kmd_yes;			/* KMEM_CBRC_YES responses */
-		uint64_t	kmd_no;				/* NO responses */
-		uint64_t	kmd_later;			/* LATER responses */
-		uint64_t	kmd_dont_need;		/* DONT_NEED responses */
-		uint64_t	kmd_dont_know;		/* DONT_KNOW responses */
-		uint64_t	kmd_hunt_found;		/* DONT_KNOW: # found in mag */
-		uint64_t	kmd_slabs_freed;	/* slabs freed by moves */
-		uint64_t	kmd_defrags;		/* kmem_cache_defrag() */
-		uint64_t	kmd_scans;			/* kmem_cache_scan() */
+		uint64_t		kmd_callbacks;		/* move callbacks */
+		uint64_t		kmd_yes;			/* KMEM_CBRC_YES responses */
+		uint64_t		kmd_no;				/* NO responses */
+		uint64_t		kmd_later;			/* LATER responses */
+		uint64_t		kmd_dont_need;		/* DONT_NEED responses */
+		uint64_t		kmd_dont_know;		/* DONT_KNOW responses */
+		uint64_t		kmd_hunt_found;		/* DONT_KNOW: # found in mag */
+		uint64_t		kmd_slabs_freed;	/* slabs freed by moves */
+		uint64_t		kmd_defrags;		/* kmem_cache_defrag() */
+		uint64_t		kmd_scans;			/* kmem_cache_scan() */
 		
 		/*
 		 * Consolidator fields
 		 */
-		avl_tree_t	kmd_moves_pending;	/* buffer moves pending */
-		list_t		kmd_deadlist;		/* deferred slab frees */
-		size_t		kmd_deadcount;		/* # of slabs in kmd_deadlist */
-		uint8_t		kmd_reclaim_numer;	/* slab usage threshold */
-		uint8_t		kmd_pad1;			/* compiler padding */
-		uint16_t	kmd_consolidate;	/* triggers consolidator */
-		uint32_t	kmd_pad2;			/* compiler padding */
-		size_t		kmd_slabs_sought;	/* reclaimable slabs sought */
-		size_t		kmd_slabs_found;	/* reclaimable slabs found */
-		size_t		kmd_tries;			/* nth scan interval counter */
+		avl_tree_t		kmd_moves_pending;	/* buffer moves pending */
+		list_t			kmd_deadlist;		/* deferred slab frees */
+		size_t			kmd_deadcount;		/* # of slabs in kmd_deadlist */
+		uint8_t			kmd_reclaim_numer;	/* slab usage threshold */
+		uint8_t			kmd_pad1;			/* compiler padding */
+		uint16_t		kmd_consolidate;	/* triggers consolidator */
+		uint32_t		kmd_pad2;			/* compiler padding */
+		size_t			kmd_slabs_sought;	/* reclaimable slabs sought */
+		size_t			kmd_slabs_found;	/* reclaimable slabs found */
+		size_t			kmd_tries;			/* nth scan interval counter */
 		/*
 		 * Fields used to ASSERT that the client does not kmem_cache_free()
 		 * objects passed to the move callback.
 		 */
-		void		*kmd_from_buf;		/* object to move */
-		void		*kmd_to_buf;		/* move destination */
-		kthread_t	*kmd_thread;		/* thread calling move */
+		void			*kmd_from_buf;		/* object to move */
+		void			*kmd_to_buf;		/* move destination */
+		kthread_t		*kmd_thread;		/* thread calling move */
 	} kmem_defrag_t;
 	
     /*
@@ -390,7 +391,7 @@ extern "C" {
 		void				(*cache_reclaim)(void *);
 		kmem_cbrc_t			(*cache_move)(void *, void *, size_t, void *);
 		void				*cache_private;				/* opaque arg to callbacks */
-//		vmem_t				*cache_arena;				/* vmem source for slabs */
+		vmem_t				*cache_arena;				/* vmem source for slabs */
 		int					cache_cflags;				/* cache creation flags */
 		int					cache_flags;				/* various cache state info */
 		uint32_t			cache_mtbf;					/* induced alloc failure rate */
@@ -439,5 +440,46 @@ extern "C" {
 		
     } kmem_cache_t;
 	
+	typedef struct kmem_cpu_log_header {
+		kmutex_t			clh_lock;
+		char				*clh_current;
+		size_t				clh_avail;
+		int					clh_chunk;
+		int					clh_hits;
+		char				clh_pad[64 - sizeof (kmutex_t) - sizeof (char *) -
+							sizeof (size_t) - 2 * sizeof (int)];
+	} kmem_cpu_log_header_t;
+	
+	typedef struct kmem_log_header {
+		kmutex_t			lh_lock;
+		char				*lh_base;
+		int					*lh_free;
+		size_t				lh_chunksize;
+		int					lh_nchunks;
+		int					lh_head;
+		int					lh_tail;
+		int					lh_hits;
+		kmem_cpu_log_header_t lh_cpu[1];	/* ncpus actually allocated */
+	} kmem_log_header_t;
+	
+	/* kmem_move kmm_flags */
+#define	KMM_DESPERATE	0x1
+#define	KMM_NOTIFY		0x2
+#define	KMM_DEBUG		0x4
+	
+	typedef struct kmem_move {
+		kmem_slab_t	*kmm_from_slab;
+		void		*kmm_from_buf;
+		void		*kmm_to_buf;
+		avl_node_t	kmm_entry;
+		int			kmm_flags;
+	} kmem_move_t;
+	
+	/*
+	 * In order to consolidate partial slabs, it must be possible for the cache to
+	 * have partial slabs.
+	 */
+#define	KMEM_IS_MOVABLE(cp)						\
+	(((cp)->cache_chunksize * 2) <= (cp)->cache_slabsize)
 
 #endif

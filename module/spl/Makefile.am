@@ -55,6 +55,7 @@ spl_SOURCES = 	\
 	spl-thread.c \
 	spl-time.c \
 	spl-tsd.c \
+        spl-vmem.c \
 	spl-vnode.c \
 	spl-xdr.c \
 	spl-bmalloc.c
