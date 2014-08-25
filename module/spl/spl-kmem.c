@@ -34,6 +34,73 @@
 #include <sys/sysctl.h>
 #include "spl-bmalloc.h"
 
+//===============================================================
+// Options
+//===============================================================
+//#define PRINT_CACHE_STATS 1
+
+//===============================================================
+// OS Interface
+//===============================================================
+
+// This variable is a count of the number of threads
+// blocked waiting for memory pages to become free.
+// We are using wake indications on this event as a
+// indication of paging activity, and therefore as a
+// proxy to the machine experiencing memory pressure.
+extern unsigned int vm_page_free_wanted;
+
+extern unsigned int vm_page_free_count;
+extern unsigned int vm_page_speculative_count;
+
+// Can be polled to determine if the VM is experiecing
+// a shortage of free pages.
+extern int vm_pool_low(void);
+
+// Kernel API for monitoring memory pressure.
+extern kern_return_t
+mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
+						 unsigned int	nsecs_monitored,
+						 unsigned int	*pages_reclaimed_p,
+						 unsigned int	*pages_wanted_p);
+
+// Which CPU are we executing on?
+extern int cpu_number();
+
+//===============================================================
+// Types
+//===============================================================
+
+/*
+ * The magazine types for fast per-cpu allocation
+ */
+typedef struct kmem_magtype {
+	short		mt_magsize;	/* magazine size (number of rounds) */
+	int	        mt_align;	/* magazine alignment */
+	uint32_t	mt_minbuf;	/* all smaller buffers qualify */
+	uint32_t	mt_maxbuf;	/* no larger buffers qualify */
+    lck_spin_t *mt_lock;    /* protect the list of magazines */
+    list_t      mt_list;    /* cache of magazines of this size */
+} kmem_magtype_t;
+
+//===============================================================
+// Variables
+//===============================================================
+
+unsigned int my_test_event = 0;
+
+// Measure the wakeup count of the memory monitor thread
+unsigned long wake_count = 0; // DEBUG
+
+// Indicates that the machine is believed to be swapping
+// due to thread waking. This is reset when spl_vm_pool_low()
+// is called and reports the activity to ZFS.
+int machine_is_swapping = 0;
+
+// Flag to cause tasks and threads to terminate as
+// the kmem module is preparing to unload.
+int shutting_down = 0;
+
 uint64_t physmem = 0;
 static uint64_t total_in_use = 0;
 

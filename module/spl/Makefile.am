@@ -36,6 +36,7 @@ spl_kext_SOURCE =
 
 spl_SOURCES = 	\
 	spl-atomic.c \
+	spl-avl.c \
 	spl-condvar.c \
 	spl-cred.c \
 	spl-ddi.c \
