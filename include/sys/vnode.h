@@ -326,4 +326,8 @@ int spl_vn_rdwr(
             cred_t *cr,
             ssize_t *residp);
 
+vfs_context_t vfs_context_kernel(void);
+vfs_context_t spl_vfs_context_kernel(void);
+
+
 #endif /* SPL_VNODE_H */
