@@ -593,3 +593,11 @@ int spl_vn_rdwr(enum uio_rw rw,
 
     return (error);
 }
+
+
+
+
+vfs_context_t spl_vfs_context_kernel(void)
+{
+	return vfs_context_kernel();
+}
