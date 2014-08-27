@@ -34,9 +34,12 @@
 // These calls are slowly being moved into spl-vnode.c
 #define	secpolicy_fs_unmount(c,vfs)			(0)
 #define	secpolicy_nfs(c)				(0)
-//#define	secpolicy_sys_config(c,co)			(0)
 
+#ifdef __OPPLE__
 int secpolicy_sys_config(const cred_t *, boolean_t);
+#else
+#define	secpolicy_sys_config(c,co)			(0)
+#endif
 
 #define	secpolicy_zfs(c)				(0)
 #define	secpolicy_zinject(c)				(0)
