@@ -112,6 +112,7 @@ do {									\
 	spl_debug_bug(__FILE__, __FUNCTION__, __LINE__, 0);		\
 } while (0)
 
+
 /* ASSERTION that is safe to use within the debug system */
 #define __ASSERT(cond)							\
 do {									\
@@ -122,11 +123,12 @@ do {									\
 } while (0)
 
 /* ASSERTION that will debug log used outside the debug sysytem */
-#define ASSERT(cond)							\
-do {									\
-	if (unlikely(!(cond)))						\
-		PANIC("ASSERTION(" #cond ") failed\n");			\
-} while (0)
+#define ASSERT(cond)                                                    \
+	(void)(unlikely(!(cond)) &&											\
+		   printf("%s %s %d : %s\n", __FILE__, __FUNCTION__, __LINE__,	\
+					 "ASSERTION(" #cond ") failed\n"))
+
+
 
 #define ASSERTF(cond, fmt, a...)					\
 do {									\
