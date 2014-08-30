@@ -69,18 +69,6 @@
  */
 
 /*
- * The allocator is by its nature quite space inefficient. Defining
- * SPACE_EFFICIENT will swap some 64-bit pointers inside the Slices for 32-bit
- * offsets, and some additional pointer arithmetic: better space efficiency for
- * lower performance.
- *
- * It seems that the performance penalty is about 4% on a user space
- * instrumentation tool, apparently within the margin for error when running
- * iozone.
- */
-// #define	SPACE_EFFICIENT 1
-
-/*
  * Defining this causes the allocator to use smaller chunks of memory from the
  * underlying allocator in the hope that this will be easier for smaller
  * machines to fulfill these requests.
@@ -249,6 +237,14 @@ typedef void (*memory_pool_return_memory_fn_t)(void *memory);
 typedef sa_size_t (*memory_pool_claim_size_fn_t)();
 
 /*
+ *
+ */
+union row_navigation {
+	struct slice	*slice;
+	struct allocatable_row *next;
+};
+ 
+/*
  * Make sure this structure remains a multiple of 8 bytes to prevent problems
  * with alignment of memory allocated to the caller.
  */
@@ -256,13 +252,7 @@ typedef struct allocatable_row {
 #ifdef SLICE_CHECK_ROW_HEADERS
 	sa_size_t	prefix;
 #endif /* SLICE_CHECK_ROW_HEADERS */
-#ifdef SPACE_EFFICIENT
-	large_offset_t	slice_offset;
-	large_offset_t	next_offset;
-#else
-	struct slice	*slice;
-	struct allocatable_row *next;
-#endif /* SPACE_EFFICIENT */
+	union row_navigation navigation;
 #ifdef SLICE_CHECK_FREE_SIZE
 	sa_size_t	allocated_bytes;
 #endif /* SLICE_CHECK_FREE_SIZE */
@@ -366,6 +356,7 @@ const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 15 * SA_NSEC_PER_SEC;
  * allocator will allocate non-8-byte-alligned memory.
  */
 const sa_size_t ALLOCATOR_SLICE_SIZES[] = {
+	8,
 	16,
 	32,
 	40,
@@ -767,54 +758,25 @@ slice_row_is_within_bounds(slice_t *slice, allocatable_row_t *row)
 static void
 set_slice(allocatable_row_t *row, slice_t *slice)
 {
-#ifdef SPACE_EFFICIENT
-	row->slice_offset =
-	    (large_offset_t)((sa_byte_t *)(&(row->slice_offset)) -
-	    (sa_byte_t *)(slice));
-#else
-	row->slice = slice;
-#endif /* SPACE_EFFICIENT */
+	row->navigation.slice = slice;
 }
 
 static inline slice_t *
 get_slice(allocatable_row_t *row)
 {
-#ifdef SPACE_EFFICIENT
-	return ((slice_t *)((sa_byte_t *)(&row->slice_offset) -
-	    row->slice_offset));
-#else
-	return (row->slice);
-#endif /* SPACE_EFFICIENT */
+	return (row->navigation.slice);
 }
 
 static inline void
 set_next(allocatable_row_t *row, slice_t *base_addr, allocatable_row_t *next)
 {
-#ifdef SPACE_EFFICIENT
-	if (next) {
-		row->next_offset = (large_offset_t)((sa_byte_t *)(next) -
-		    (sa_byte_t *)(base_addr));
-	} else {
-		row->next_offset = 0;
-	}
-#else
-	row->next = next;
-#endif /* SPACE_EFFICIENT */
+	row->navigation.next = next;
 }
 
 static inline allocatable_row_t *
 get_next(allocatable_row_t *row, slice_t *base_addr)
 {
-#ifdef SPACE_EFFICIENT
-	if (row->next_offset) {
-		return ((allocatable_row_t *)((sa_byte_t *)(base_addr) +
-		    row->next_offset));
-	} else {
-		return (0);
-	}
-#else
-	return (row->next);
-#endif /* SPACE_EFFICIENT */
+	return (row->navigation.next);
 }
 
 static inline allocatable_row_t *
@@ -856,6 +818,7 @@ slice_get_row(slice_t *slice)
 
 		row = slice->free_list;
 		slice->free_list = get_next(row, slice);
+		set_slice(row, slice);
 
 #ifdef SLICE_SPINLOCK
 		lck_spin_unlock(slice->spinlock);
