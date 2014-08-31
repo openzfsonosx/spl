@@ -51,7 +51,7 @@ void bmalloc_release_memory();
 // Attempt to release <num_pages> pages of
 // memory from the free memory block collection.
 // Returns true if request was met, false otherwise.
-int bmalloc_release_memory_num(uint64_t num_pages);
+int bmalloc_release_pages(uint64_t num_pages);
 
 //
 // Manages from free memory within the allocator.

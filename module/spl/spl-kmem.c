@@ -1809,7 +1809,7 @@ void memory_pressure_task(void *p)
 	//
 	// If bmalloc cant satisfy the request completely
 	// then we have to resort to having ZFS start releasing memory.
-	if (!bmalloc_release_memory_num(num_pages)) {
+	if (!bmalloc_release_pages(num_pages)) {
 		// Set flag for spl_vm_pool_low callers
 		machine_is_swapping = 1;
 		

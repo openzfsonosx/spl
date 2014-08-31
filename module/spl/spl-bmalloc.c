@@ -1005,6 +1005,32 @@ slice_allocator_release_memory(slice_allocator_t *sa)
 	slice_allocator_empty_list(sa, &sa->free);
 }
 
+static uint64_t
+slice_allocator_release_pages(slice_allocator_t *sa, uint64_t num_pages)
+{
+	uint64_t num_pages_released = 0;
+	list_t *list = &sa->free;
+	
+	lck_spin_lock(sa->spinlock);
+	
+	while (!list_is_empty(list) && (num_pages_released < num_pages)) {
+		slice_t *slice = list_head(list);
+		list_remove(list, slice);
+		
+		lck_spin_unlock(sa->spinlock);
+		slice_fini(slice);
+		
+		osif_free(slice, sa->slice_size);
+		num_pages_released += sa->slice_size / PAGE_SIZE;
+		
+		lck_spin_lock(sa->spinlock);
+	}
+	
+	lck_spin_unlock(sa->spinlock);
+	
+	return num_pages_released;
+}
+
 static void
 slice_allocator_garbage_collect(slice_allocator_t *sa)
 {
@@ -1200,7 +1226,7 @@ bmalloc_fini()
 }
 
 void *
-bmalloc(sa_size_t size)
+bmalloc(sa_size_t size, int flags)
 {
 	void *p = 0;
 
@@ -1217,6 +1243,16 @@ bmalloc(sa_size_t size)
 		p = osif_malloc(size);
 	}
 
+	return (p);
+}
+
+void* bzmalloc(uint64_t size, int flags)
+{
+	void *p = bmalloc(size, flags);
+	if (p) {
+		bzero(p, size);
+	}
+	
 	return (p);
 }
 
@@ -1240,6 +1276,19 @@ bmalloc_release_memory()
 	for (int i = 0; i < NUM_ALLOCATORS; i++) {
 		slice_allocator_release_memory(&allocators[i]);
 	}
+}
+
+int
+bmalloc_release_pages(uint64_t num_pages)
+{
+	uint64_t num_pages_released = 0;
+	
+	for(int i=0; (i < NUM_ALLOCATORS) && (num_pages_released < num_pages); i++) {
+		num_pages_released += slice_allocator_release_pages(
+									&allocators[i], num_pages - num_pages_released);
+	}
+	
+	return (num_pages_released >= num_pages);
 }
 
 void
