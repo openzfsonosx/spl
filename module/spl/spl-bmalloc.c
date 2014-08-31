@@ -69,15 +69,6 @@
  */
 
 /*
- * Defining this causes the allocator to use smaller chunks of memory from the
- * underlying allocator in the hope that this will be easier for smaller
- * machines to fulfill these requests.
- *
- * Do NOT enable this, as it may cause memory thrashing under high IO load.
- */
-// #define	FINER_POOL_SIZE 1
-
-/*
  * Place the allocator in thread-safe mode. If you have an application where the
  * allocator does not have to be thread safe, then removing the mutexes will
  * improve the allocator performance by about 30%.
@@ -188,6 +179,7 @@
 #include <kern/locks.h>
 #include <sys/atomic.h>
 #include <sys/list.h>
+#include <sys/sysmacros.h>
 #include <libkern/OSDebug.h>
 #else
 #include <stdlib.h>
@@ -213,35 +205,12 @@ typedef uint32_t large_offset_t;
 #define	SA_NSEC_PER_SEC  1000000000ULL
 #define	SA_NSEC_PER_USEC 1000;
 
-typedef struct {
-    sa_hrtime_t time_freed;
-    list_node_t memory_block_link_node;
-} memory_block_t;
-
-typedef struct {
-	sa_size_t	count;
-	list_t		blocks;
-	lck_spin_t	*spinlock;
-} memory_block_list_t;
-
-typedef struct {
-	memory_block_list_t	large_blocks;
-#ifdef FINER_POOL_SIZE
-	memory_block_list_t	medium_blocks;
-	memory_block_list_t	small_blocks;
-#endif /* FINER_POOL_SIZE */
-} memory_pool_t;
-
-typedef void* (*memory_pool_claim_memory_fn_t)();
-typedef void (*memory_pool_return_memory_fn_t)(void *memory);
-typedef sa_size_t (*memory_pool_claim_size_fn_t)();
-
 /*
- *
+ * Dual purpose pointer
  */
 union row_navigation {
-	struct slice	*slice;
-	struct allocatable_row *next;
+	struct slice			*slice;
+	struct allocatable_row	*next;
 };
  
 /*
@@ -252,7 +221,7 @@ typedef struct allocatable_row {
 #ifdef SLICE_CHECK_ROW_HEADERS
 	sa_size_t	prefix;
 #endif /* SLICE_CHECK_ROW_HEADERS */
-	union row_navigation navigation;
+	union		row_navigation navigation;
 #ifdef SLICE_CHECK_FREE_SIZE
 	sa_size_t	allocated_bytes;
 #endif /* SLICE_CHECK_FREE_SIZE */
@@ -261,35 +230,54 @@ typedef struct allocatable_row {
 #endif /* SLICE_CHECK_ROW_HEADERS */
 } allocatable_row_t;
 
+/*
+ * For slices operating in small mode, the row header overlays
+ * the user allocatable memory in part, and so the header content
+ * can only be valid when the row is not allocated.
+ *
+ * Since the smallest size of allocation in bmalloc, this structure
+ * must not grow beyond that size.
+ */
+typedef struct small_allocatable_row {
+	struct small_allocatable_row *next;
+} small_allocatable_row_t;
+
+struct slice_allocator;
+
+typedef union row_free_lists {
+	struct allocatable_row			*large;
+	struct small_allocatable_row	*small;
+} row_free_lists_t;
+
 typedef struct slice {
-	allocatable_row_t *free_list;
-	sa_size_t	allocation_size;
-	sa_size_t	num_allocations;
-	sa_size_t	alloc_count;
+	struct slice_allocator			*sa;				// parent slice allocator
+	row_free_lists_t				free_list;
+	sa_size_t						alloc_count;
 #ifdef SLICE_CHECK_THREADS
-	UInt64		semaphore;
+	UInt64							semaphore;
 #endif /* SLICE_CHECK_THREADS */
-	sa_hrtime_t	time_freed;
-	list_node_t	slice_link_node;
+	sa_hrtime_t						time_freed;
+	list_node_t						slice_link_node;
 #ifdef SLICE_SPINLOCK
-	lck_spin_t	*spinlock;
+	lck_spin_t						*spinlock;
 #endif /* SLICE_SPINLOCK */
 } slice_t;
 
-typedef struct {
-	list_t	free;
-	list_t	partial;
+#define SMALL_ALLOC 0x01
+
+typedef struct slice_allocator {
+	uint64_t						flags;
+	sa_size_t						slice_size;
+	list_t							free;
+	list_t							partial;
 #ifdef SLICE_ALLOCATOR_TRACK_FULL_SLABS
-	list_t	full;
+	list_t							full;
 #endif /* SLICE_ALLOCATOR_TRACK_FULL_SLABS */
 	/* Max alloc size for slice */
-	sa_size_t	max_alloc_size;
+	sa_size_t						max_alloc_size;
 	/* Number of rows to be allocated in the Slices */
-	sa_size_t	num_allocs_per_slice;
-	lck_spin_t	*spinlock;
-	memory_pool_claim_memory_fn_t	claim_memory_fn;
-	memory_pool_return_memory_fn_t	return_memory_fn;
-	memory_pool_claim_size_fn_t	claim_size_fn;
+	sa_size_t						num_allocs_per_slice;
+	lck_spin_t						*spinlock;
 } slice_allocator_t;
 
 // =============================================================================
@@ -303,33 +291,6 @@ static const sa_size_t ROW_HEADER_GUARD = 0xFEEDFACEC0DEBABE;
 #ifdef SLICE_POISON_USER_SPACE
 static const unsigned char POISON_VALUE = 0xFF;
 #endif /* SLICE_POISON_USER_SPACE */
-
-/*
- * Low water mark for amount of memory to be retained in the block lists
- * when garbage collecting.
- */
-const sa_size_t RETAIN_MEMORY_SIZE = 10 * 1024 * 1024;   // bytes
-
-/*
- * Block size and free block count for the large_blocks list.
- * NOTE: This value must be larger than the largest
- * configured Slice Allocator max_allocation_size.
- */
-const sa_size_t LARGE_BLOCK_SIZE = (512 * 1024) + 4096;  // bytes
-const sa_size_t LARGE_FREE_MEMORY_BLOCK_COUNT =
-RETAIN_MEMORY_SIZE / LARGE_BLOCK_SIZE;
-
-#ifdef FINER_POOL_SIZE
-/* Block size and free block count for the medium_blocks list. */
-const sa_size_t MEDIUM_BLOCK_SIZE = 128 * 1024;		// bytes
-const sa_size_t MEDIUM_FREE_MEMORY_BLOCK_COUNT =
-    RETAIN_MEMORY_SIZE / MEDIUM_BLOCK_SIZE;
-
-/* Block size and free block count for the small_blocks list. */
-const sa_size_t SMALL_BLOCK_SIZE = 36 * 1024;		// bytes
-const sa_size_t SMALL_FREE_MEMORY_BLOCK_COUNT =
-    RETAIN_MEMORY_SIZE / SMALL_BLOCK_SIZE;
-#endif /* FINER_POOL_SIZE */
 
 /*
  * Slices of memory that have no allocations in them will be returned to the
@@ -397,12 +358,6 @@ const long NUM_ALLOCATORS = sizeof (ALLOCATOR_SLICE_SIZES) / sizeof (sa_size_t);
 static lck_grp_t *bmalloc_lock_group = NULL;
 static lck_attr_t *bmalloc_lock_attr = NULL;
 static lck_grp_attr_t *bmalloc_group_attr = NULL;
-
-/*
- * Blocks of memory allocated from the underlying allocator, but not yet used as
- * a slice by one of the slice allocators.
- */
-static memory_pool_t pool;
 
 /* Collection of slice allocators */
 static slice_allocator_t *allocators = 0;
@@ -491,214 +446,6 @@ osif_gethrtime()
 }
 
 // =============================================================================
-// Memory Pool
-// =============================================================================
-
-static void
-memory_pool_block_list_init(memory_block_list_t *list)
-{
-	list->count = 0;
-	list->spinlock = lck_spin_alloc_init(bmalloc_lock_group,
-	    bmalloc_lock_attr);
-	list_create(&list->blocks, sizeof (memory_block_t),
-	    offsetof(memory_block_t, memory_block_link_node));
-}
-
-static void
-memory_pool_block_list_fini(memory_block_list_t *list)
-{
-	list_destroy(&list->blocks);
-	lck_spin_destroy(list->spinlock, bmalloc_lock_group);
-}
-
-static void
-memory_pool_init()
-{
-#ifdef FINER_POOL_SIZE
-	memory_pool_block_list_init(&pool.small_blocks);
-	memory_pool_block_list_init(&pool.medium_blocks);
-#endif /* FINER_POOL_SIZE */
-	memory_pool_block_list_init(&pool.large_blocks);
-}
-
-#ifdef FINER_POOL_SIZE
-static sa_size_t
-memory_pool_claim_size_small()
-{
-	return (SMALL_BLOCK_SIZE);
-}
-
-static sa_size_t
-memory_pool_claim_size_medium()
-{
-	return (MEDIUM_BLOCK_SIZE);
-}
-#endif /* FINER_POOL_SIZE */
-
-static inline sa_size_t
-memory_pool_claim_size_large()
-{
-	return (LARGE_BLOCK_SIZE);
-}
-
-static void
-memory_pool_release_memory_list(memory_block_list_t *list, sa_size_t block_size)
-{
-	lck_spin_lock(list->spinlock);
-
-	while (!list_is_empty(&list->blocks)) {
-		memory_block_t *block = list_head(&list->blocks);
-		list_remove_head(&list->blocks);
-		list->count--;
-
-		lck_spin_unlock(list->spinlock);
-		osif_free(block, block_size);
-		lck_spin_lock(list->spinlock);
-	}
-
-	lck_spin_unlock(list->spinlock);
-}
-
-static inline void
-memory_pool_release_memory()
-{
-#ifdef FINER_POOL_SIZE
-	memory_pool_release_memory_list(&pool.small_blocks, SMALL_BLOCK_SIZE);
-	memory_pool_release_memory_list(&pool.medium_blocks, MEDIUM_BLOCK_SIZE);
-#endif /* FINER_POOL_SIZE */
-	memory_pool_release_memory_list(&pool.large_blocks, LARGE_BLOCK_SIZE);
-}
-
-static void
-memory_pool_garbage_collect_list(memory_block_list_t *list,
-    sa_size_t block_size)
-{
-
-	sa_hrtime_t now = osif_gethrtime();
-	int done = 0;
-
-	lck_spin_lock(list->spinlock);
-
-	do {
-		if (list->count <= LARGE_FREE_MEMORY_BLOCK_COUNT) {
-			done = 1;
-		} else {
-			memory_block_t *block = list_tail(&list->blocks);
-			if (now - block->time_freed >
-			    SA_MAX_POOL_FREE_MEM_AGE) {
-				list_remove_tail(&list->blocks);
-				list->count--;
-
-				lck_spin_unlock(list->spinlock);
-				osif_free(block, block_size);
-				lck_spin_lock(list->spinlock);
-			} else {
-				done = 1;
-			}
-		}
-	} while (!done);
-
-	lck_spin_unlock(list->spinlock);
-}
-
-static inline void
-memory_pool_garbage_collect()
-{
-#ifdef FINER_POOL_SIZE
-	memory_pool_garbage_collect_list(&pool.small_blocks, SMALL_BLOCK_SIZE);
-	memory_pool_garbage_collect_list(&pool.medium_blocks,
-	    MEDIUM_BLOCK_SIZE);
-#endif /* FINER_POOL_SIZE */
-	memory_pool_garbage_collect_list(&pool.large_blocks, LARGE_BLOCK_SIZE);
-}
-
-static void *
-memory_pool_claim(memory_block_list_t *list, sa_size_t block_size)
-{
-	memory_block_t *block = 0;
-
-	lck_spin_lock(list->spinlock);
-
-	if (!list_is_empty(&list->blocks)) {
-		block = list_tail(&list->blocks);
-		list_remove_tail(&list->blocks);
-		list->count--;
-	}
-
-	lck_spin_unlock(list->spinlock);
-
-	if (!block)
-		block = (memory_block_t *)osif_malloc(block_size);
-
-	return ((void *)block);
-}
-
-#ifdef FINER_POOL_SIZE
-static void *
-memory_pool_claim_small()
-{
-	return (memory_pool_claim(&pool.small_blocks, SMALL_BLOCK_SIZE));
-}
-
-static void *
-memory_pool_claim_medium()
-{
-	return (memory_pool_claim(&pool.medium_blocks, MEDIUM_BLOCK_SIZE));
-}
-#endif /* FINER_POOL_SIZE */
-
-static void *
-memory_pool_claim_large()
-{
-	return (memory_pool_claim(&pool.large_blocks, LARGE_BLOCK_SIZE));
-}
-
-static void
-memory_pool_return(void *memory, memory_block_list_t *list)
-{
-	memory_block_t *block = (memory_block_t *)memory;
-
-	list_link_init(&block->memory_block_link_node);
-	block->time_freed = osif_gethrtime();
-
-	lck_spin_lock(list->spinlock);
-	list_insert_head(&list->blocks, block);
-	list->count++;
-	lck_spin_unlock(list->spinlock);
-}
-
-#ifdef FINER_POOL_SIZE
-static void
-memory_pool_return_small(void *memory)
-{
-	memory_pool_return(memory, &pool.small_blocks);
-}
-
-static void
-memory_pool_return_medium(void *memory)
-{
-	memory_pool_return(memory, &pool.medium_blocks);
-}
-#endif /* FINER_POOL_SIZE */
-
-static void
-memory_pool_return_large(void *memory)
-{
-	memory_pool_return(memory, &pool.large_blocks);
-}
-
-static void
-memory_pool_fini()
-{
-	memory_pool_release_memory();
-#ifdef FINER_POOL_SIZE
-	memory_pool_block_list_fini(&pool.small_blocks);
-	memory_pool_block_list_fini(&pool.medium_blocks);
-#endif /* FINER_POOL_SIZE */
-	memory_pool_block_list_fini(&pool.large_blocks);
-}
-
-// =============================================================================
 // Large Slice
 // =============================================================================
 
@@ -709,7 +456,7 @@ slice_poison_row(slice_t *slice, allocatable_row_t *row)
 	allocatable_row_t *tmp = row;
 	tmp++;
 	unsigned char *user_memory = (unsigned char *)tmp;
-	memset(user_memory, POISON_VALUE, slice->allocation_size);
+	memset(user_memory, POISON_VALUE, slice->sa->max_alloc_size);
 }
 
 static Boolean
@@ -720,7 +467,7 @@ slice_row_is_poisoned(slice_t *slice, allocatable_row_t *row)
 	tmp++;
 	unsigned char *user_memory = (unsigned char *)tmp;
 
-	for (int i = 0; i < slice->allocation_size; i++, user_memory++) {
+	for (int i = 0; i < slice->sa->max_alloc_size; i++, user_memory++) {
 		if (*user_memory != POISON_VALUE) {
 			poisoned = FALSE;
 			break;
@@ -737,10 +484,10 @@ slice_row_is_within_bounds(slice_t *slice, allocatable_row_t *row)
 	allocatable_row_t *tmp = row;
 	tmp++;
 	unsigned char *user_memory_end = (unsigned char *)tmp +
-	    slice->allocation_size;
+	    slice->sa->max_alloc_size;
 	unsigned char *user_memory = (unsigned char *)tmp;
 
-	if (slice->allocation_size != row->allocated_bytes) {
+	if (slice->sa->max_alloc_size != row->allocated_bytes) {
 		user_memory += row->allocated_bytes;
 
 		for (; user_memory < user_memory_end; user_memory++) {
@@ -755,38 +502,22 @@ slice_row_is_within_bounds(slice_t *slice, allocatable_row_t *row)
 }
 #endif /* SLICE_POISON_USER_SPACE */
 
-static void
-set_slice(allocatable_row_t *row, slice_t *slice)
-{
-	row->navigation.slice = slice;
-}
-
-static inline slice_t *
-get_slice(allocatable_row_t *row)
-{
-	return (row->navigation.slice);
-}
-
-static inline void
-set_next(allocatable_row_t *row, slice_t *base_addr, allocatable_row_t *next)
-{
-	row->navigation.next = next;
-}
-
-static inline allocatable_row_t *
-get_next(allocatable_row_t *row, slice_t *base_addr)
-{
-	return (row->navigation.next);
-}
-
 static inline allocatable_row_t *
 slice_get_row_address(slice_t *slice, int index)
 {
 	sa_byte_t *p = (sa_byte_t *)slice;
-	p = p + sizeof (slice_t) + (index * (slice->allocation_size +
+	p = p + sizeof (slice_t) + (index * (slice->sa->max_alloc_size +
 	    sizeof (allocatable_row_t)));
 
 	return ((allocatable_row_t *)p);
+}
+
+static inline small_allocatable_row_t *
+slice_small_get_row_address(slice_t *slice, int index)
+{
+	sa_byte_t *p = (sa_byte_t *)slice;
+	p = p + sizeof (slice_t) + (index * slice->sa->max_alloc_size);
+	return ((small_allocatable_row_t *)p);
 }
 
 static inline void
@@ -796,18 +527,25 @@ slice_insert_free_row(slice_t *slice, allocatable_row_t *row)
 	lck_spin_lock(slice->spinlock);
 #endif /* SLICE_SPINLOCK */
 
-	set_next(row, slice, slice->free_list);
-	slice->free_list = row;
+	row->navigation.next = slice->free_list.large;
+	slice->free_list.large = row;
 
 #ifdef SLICE_SPINLOCK
 	lck_spin_unlock(slice->spinlock);
 #endif /* SLICE_SPINLOCK */
 }
 
+static inline void
+slice_small_insert_free_row(slice_t *slice, small_allocatable_row_t *row)
+{
+	row->next = slice->free_list.small;
+	slice->free_list.small = row;
+}
+
 static inline allocatable_row_t *
 slice_get_row(slice_t *slice)
 {
-	if (slice->free_list == 0) {
+	if (slice->free_list.large == 0) {
 		return (0);
 	} else {
 		allocatable_row_t *row;
@@ -816,9 +554,9 @@ slice_get_row(slice_t *slice)
 		lck_spin_lock(slice->spinlock);
 #endif /* SLICE_SPINLOCK */
 
-		row = slice->free_list;
-		slice->free_list = get_next(row, slice);
-		set_slice(row, slice);
+		row = slice->free_list.large;
+		slice->free_list.large = row->navigation.next;
+		row->navigation.slice = slice;
 
 #ifdef SLICE_SPINLOCK
 		lck_spin_unlock(slice->spinlock);
@@ -827,43 +565,64 @@ slice_get_row(slice_t *slice)
 	}
 }
 
+static inline small_allocatable_row_t *
+slice_small_get_row(slice_t *slice)
+{
+	if (slice->free_list.small == 0) {
+		return (0);
+	} else {
+		small_allocatable_row_t *row = slice->free_list.small;
+		slice->free_list.small = row->next;
+		return (row);
+	}
+}
+
 static void
-slice_init(slice_t *slice, sa_size_t allocation_size, sa_size_t num_allocations)
+slice_init(slice_t *slice, slice_allocator_t *sa)
 {
 	list_link_init(&slice->slice_link_node);
-	slice->free_list = 0;
+	slice->sa = sa;
 	slice->alloc_count = 0;
+	
+	if (sa->flags & SMALL_ALLOC) {
+		slice->free_list.small = 0;
+		
+		for (int i = 0; i < slice->sa->num_allocs_per_slice; i++) {
+			small_allocatable_row_t *row = slice_small_get_row_address(slice, i);
+			slice_small_insert_free_row(slice, row);
+		}
+		
+	} else {
+		slice->free_list.large = 0;
 
 #ifdef SLICE_CHECK_THREADS
-	slice->semaphore = 0;
+		slice->semaphore = 0;
 #endif /* SLICE_CHECK_THREADS */
-
-	slice->num_allocations = num_allocations;
-	slice->allocation_size = allocation_size;
-
+		
 #ifdef SLICE_SPINLOCK
-	slice->spinlock = lck_spin_alloc_init(bmalloc_lock_group,
-	    bmalloc_lock_attr);
+		slice->spinlock = lck_spin_alloc_init(bmalloc_lock_group,
+											  bmalloc_lock_attr);
 #endif /* SLICE_SPINLOCK */
-
-	for (int i = 0; i < slice->num_allocations; i++) {
-		allocatable_row_t *row = slice_get_row_address(slice, i);
-		set_slice(row, slice);
-
+		
+		for (int i = 0; i < slice->sa->num_allocs_per_slice; i++) {
+			allocatable_row_t *row = slice_get_row_address(slice, i);
+			row->navigation.slice = slice;
+			
 #ifdef SLICE_CHECK_FREE_SIZE
-		row->allocated_bytes = 0;
+			row->allocated_bytes = 0;
 #endif /* SLICE_CHECK_FREE_SIZE */
-
+			
 #ifdef SLICE_CHECK_ROW_HEADERS
-		row->prefix = ROW_HEADER_GUARD;
-		row->suffix = ROW_HEADER_GUARD;
+			row->prefix = ROW_HEADER_GUARD;
+			row->suffix = ROW_HEADER_GUARD;
 #endif /* SLICE_CHECK_ROW_HEADERS */
-
+			
 #ifdef SLICE_POISON_USER_SPACE
-		slice_poison_row(slice, row);
+			slice_poison_row(slice, row);
 #endif /* SLICE_POISON_USER_SPACE */
-
-		slice_insert_free_row(slice, row);
+			
+			slice_insert_free_row(slice, row);
+		}
 	}
 }
 
@@ -878,7 +637,11 @@ slice_fini(slice_t *slice)
 static inline int
 slice_is_full(slice_t *slice)
 {
-	return (slice->free_list == 0);
+	if (slice->sa->flags & SMALL_ALLOC) {
+		return (slice->free_list.small == 0);
+	} else {
+		return (slice->free_list.large == 0);
+	}
 }
 
 static inline int slice_is_empty(slice_t *slice)
@@ -893,6 +656,16 @@ slice_alloc(slice_t *slice)
 slice_alloc(slice_t *slice, sa_size_t alloc_size)
 #endif /* !DEBUG */
 {
+	if (slice->sa->flags & SMALL_ALLOC) {
+		small_allocatable_row_t *row = slice_small_get_row(slice);
+		
+		if (row) {
+			slice->alloc_count++;
+		}
+
+		return (void*)(row);
+	} else {
+	
 #ifdef SLICE_CHECK_THREADS
 	Boolean res = OSCompareAndSwap64(0, 1, &slice->semaphore);
 	if (!res) {
@@ -900,6 +673,9 @@ slice_alloc(slice_t *slice, sa_size_t alloc_size)
 	}
 #endif /* SLICE_CHECK_THREADS */
 
+	// thoughts - branch here introduce small structure
+	// or otherwise execute large strategy
+	
 	allocatable_row_t *row = slice_get_row(slice);
 	if (row) {
 #ifdef SLICE_CHECK_ROW_HEADERS
@@ -917,7 +693,7 @@ slice_alloc(slice_t *slice, sa_size_t alloc_size)
 #ifdef SLICE_CHECK_WRITE_AFTER_FREE
 		if (!slice_row_is_poisoned(slice, row)) {
 			REPORT("slice_alloc - write after free detected - sa "
-			    "size %llu\n", slice->allocation_size);
+			    "size %llu\n", slice->sa->max_alloc_size);
 		}
 #endif /* SLICE_CHECK_WRITE_AFTER_FREE */
 
@@ -935,7 +711,8 @@ slice_alloc(slice_t *slice, sa_size_t alloc_size)
 	}
 #endif /* SLICE_CHECK_THREADS */
 
-    return ((void *)row);
+		return ((void *)row);
+	}
 }
 
 static void
@@ -954,6 +731,8 @@ slice_free_row(slice_t *slice, allocatable_row_t *row, sa_size_t alloc_size)
 
 	slice->alloc_count--;
 
+	// thoughts - insert small strategy here
+	// otherwise large strategy
 #ifdef SLICE_CHECK_ROW_HEADERS
 	if (row->prefix != ROW_HEADER_GUARD ||
 	    row->suffix != ROW_HEADER_GUARD) {
@@ -989,12 +768,26 @@ slice_free_row(slice_t *slice, allocatable_row_t *row, sa_size_t alloc_size)
 #endif /* SLICE_CHECK_THREADS */
 }
 
+static void
+slice_small_free_row(slice_t *slice, small_allocatable_row_t *row)
+{
+	slice->alloc_count--;
+	slice_small_insert_free_row(slice, row);
+}
+
 static inline slice_t *
 slice_get_slice_from_row(void *buf, allocatable_row_t **row)
 {
 	(*row) = (allocatable_row_t *)buf;
 	(*row)--;
-	return (get_slice(*row));
+	return ((*row)->navigation.slice);
+}
+
+static inline slice_t *
+slice_small_get_slice_from_row(void *buf, small_allocatable_row_t **row)
+{
+	(*row) = (small_allocatable_row_t *)buf;
+	return (slice_t*)P2ALIGN((uint64_t)buf, (uint64_t)PAGE_SIZE);
 }
 
 // =============================================================================
@@ -1012,7 +805,7 @@ slice_allocator_empty_list(slice_allocator_t *sa, list_t *list)
 
 		lck_spin_unlock(sa->spinlock);
 		slice_fini(slice);
-		sa->return_memory_fn(slice);
+		osif_free(slice, sa->slice_size);
 		lck_spin_lock(sa->spinlock);
 	}
 
@@ -1024,26 +817,19 @@ slice_allocator_init(slice_allocator_t *sa, sa_size_t max_alloc_size)
 {
 	osif_zero_memory(sa, sizeof (slice_allocator_t));
 
-#ifndef FINER_POOL_SIZE
-	sa->claim_memory_fn = &memory_pool_claim_large;
-	sa->return_memory_fn = &memory_pool_return_large;
-	sa->claim_size_fn = &memory_pool_claim_size_large;
-#else
 	/* Select a memory pool allocation size of the allocator. */
-	if (max_alloc_size <= 16 * 1024) {
-		sa->claim_memory_fn = &memory_pool_claim_small;
-		sa->return_memory_fn = &memory_pool_return_small;
-		sa->claim_size_fn = &memory_pool_claim_size_small;
-	} else if (max_alloc_size <= 65 * 1024) {
-		sa->claim_memory_fn = &memory_pool_claim_medium;
-		sa->return_memory_fn = &memory_pool_return_medium;
-		sa->claim_size_fn = &memory_pool_claim_size_medium;
+#ifndef DEBUG
+	if (max_alloc_size <=  512) {
+		sa->flags = SMALL_ALLOC;
+		sa->slice_size = PAGE_SIZE;
 	} else {
-		sa->claim_memory_fn = &memory_pool_claim_large;
-		sa->return_memory_fn = &memory_pool_return_large;
-		sa->claim_size_fn = &memory_pool_claim_size_large;
+		sa->flags = 0;
+		sa->slice_size = 4096 + 128*1024;
 	}
-#endif /* !FINER_POOL_SIZE */
+#else
+	sa->flags = 0;
+	sa->slice_size = 4096 + 128*1024;
+#endif
 
 	sa->spinlock = lck_spin_alloc_init(bmalloc_lock_group,
 	    bmalloc_lock_attr);
@@ -1062,7 +848,7 @@ slice_allocator_init(slice_allocator_t *sa, sa_size_t max_alloc_size)
 #endif /* SLICE_ALLOCATOR_TRACK_FULL_SLABS */
 
 	sa->max_alloc_size = max_alloc_size;
-	sa->num_allocs_per_slice = (sa->claim_size_fn() - sizeof (slice_t)) /
+	sa->num_allocs_per_slice = (sa->slice_size - sizeof (slice_t)) /
 	    (sizeof (allocatable_row_t) + max_alloc_size);
 }
 
@@ -1117,18 +903,18 @@ slice_allocator_alloc(slice_allocator_t *sa, sa_size_t size)
 		list_insert_head(&sa->partial, slice);
 	} else {
 		lck_spin_unlock(sa->spinlock);
-		slice = (slice_t *)sa->claim_memory_fn();
-		slice_init(slice, sa->max_alloc_size, sa->num_allocs_per_slice);
+		slice = (slice_t *)osif_malloc(sa->slice_size);;
+		slice_init(slice, sa);
 		lck_spin_lock(sa->spinlock);
 
 		list_insert_head(&sa->partial, slice);
 	}
 
 #ifdef SA_CHECK_SLICE_SIZE
-	if (sa->max_alloc_size != slice->allocation_size) {
+	if (sa->max_alloc_size != slice->sa->max_alloc_size) {
 		REPORT("slice_allocator_alloc - alloc size (%llu) sa %llu slice"
 		    " %llu\n", size, sa->max_alloc_size,
-		    slice->allocation_size);
+		    slice->sa->max_alloc_size);
 	}
 #endif /* SA_CHECK_SLICE_SIZE */
 
@@ -1167,13 +953,18 @@ slice_allocator_free(slice_allocator_t *sa, void *buf, sa_size_t size)
 
 	/* Locate the slice buffer that the allocation lives within. */
 	slice_t *slice;
-	allocatable_row_t *row;
-	slice = slice_get_slice_from_row(buf, &row);
+	allocatable_row_t *row = 0;
+	small_allocatable_row_t *small_row = 0;
+	
+	if (sa->flags & SMALL_ALLOC) {
+		slice = slice_small_get_slice_from_row(buf, &small_row);
+	} else {
+		slice = slice_get_slice_from_row(buf, &row);
+	}
 
 #ifdef SA_CHECK_SLICE_SIZE
-	if (sa->max_alloc_size != slice->allocation_size) {
-		REPORT("slice_allocator_free - free size (%llu) sa %llu slice "
-		    "%llu\n", size, sa->max_alloc_size, slice->allocation_size);
+	if (sa != slice->sa) {
+		REPORT0("slice_allocator_free - slice not owned by sa detected.\n")
 	}
 #endif /* SA_CHECK_SLICE_SIZE */
 
@@ -1189,7 +980,11 @@ slice_allocator_free(slice_allocator_t *sa, void *buf, sa_size_t size)
 	}
 
 #ifndef DEBUG
-	slice_free_row(slice, row);
+	if (sa->flags & SMALL_ALLOC) {
+		slice_small_free_row(slice, small_row);
+	} else {
+		slice_free_row(slice, row);
+	}
 #else
 	slice_free_row(slice, row, size);
 #endif /* !DEBUG */
@@ -1223,10 +1018,8 @@ slice_allocator_garbage_collect(slice_allocator_t *sa)
 			slice_t *slice = list_tail(&sa->free);
 
 #ifdef SA_CHECK_SLICE_SIZE
-			if (sa->max_alloc_size != slice->allocation_size) {
-				REPORT("slice_allocator_garbage_collect - sa "
-				    "%llu slice %llu\n", sa->max_alloc_size,
-				    slice->allocation_size);
+			if (sa != slice->sa) {
+				REPORT0("slice_allocator_free - slice not owned by sa detected.\n")
 			}
 #endif /* SA_CHECK_SLICE_SIZE */
 
@@ -1236,7 +1029,7 @@ slice_allocator_garbage_collect(slice_allocator_t *sa)
 
 				lck_spin_unlock(sa->spinlock);
 				slice_fini(slice);
-				sa->return_memory_fn(slice);
+				osif_free(slice, sa->slice_size);
 				lck_spin_lock(sa->spinlock);
 			} else {
 				done = 1;
@@ -1283,6 +1076,8 @@ bmalloc_init()
 {
 	printf("[SPL] bmalloc slice allocator initialised\n");
 
+	printf("[SPL] small object allocator mode active.\n");
+	
 #ifdef DEBUG
 	printf("[SPL] Memory debugging enabled.\n");
 
@@ -1329,9 +1124,6 @@ bmalloc_init()
 
 	sa_size_t max_allocation_size =
 	    ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1];
-
-	/* Initialize the memory pool */
-	memory_pool_init();
 
 	/* Create the slice allocators */
 	sa_size_t array_size = NUM_ALLOCATORS * sizeof (slice_allocator_t);
@@ -1396,9 +1188,6 @@ bmalloc_fini()
 	osif_free(allocator_lookup_table, bmalloc_allocator_lookup_table_size(
 	    ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]));
 
-	/* Clean up the memory pool */
-	memory_pool_fini();
-
 	/* Cleanup our locks */
 	lck_attr_free(bmalloc_lock_attr);
 	bmalloc_lock_attr = NULL;
@@ -1451,8 +1240,6 @@ bmalloc_release_memory()
 	for (int i = 0; i < NUM_ALLOCATORS; i++) {
 		slice_allocator_release_memory(&allocators[i]);
 	}
-
-	memory_pool_release_memory();
 }
 
 void
@@ -1461,6 +1248,4 @@ bmalloc_garbage_collect()
 	for (int i = 0; i < NUM_ALLOCATORS; i++) {
 		slice_allocator_garbage_collect(&allocators[i]);
 	}
-
-	memory_pool_garbage_collect();
 }
