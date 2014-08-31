@@ -370,8 +370,12 @@ static slice_allocator_t **allocator_lookup_table = 0;
 static sa_size_t *allocation_counters = 0;
 #endif /* COUNT_ALLOCATIONS */
 
+/* Total memory allocated by applications */
+uint64_t bmalloc_app_allocated_total = 0;
+
 /* Total memory held allocated */
 uint64_t bmalloc_allocated_total = 0;
+
 
 
 // =============================================================================
@@ -1241,6 +1245,8 @@ bmalloc(sa_size_t size, int flags)
 		p = osif_malloc(size);
 	}
 	
+	atomic_add_64(&bmalloc_app_allocated_total, size);
+	
 	return (p);
 }
 
@@ -1266,6 +1272,8 @@ bfree(void *buf, sa_size_t size)
 	} else {
 		osif_free(buf, size);
 	}
+	
+	atomic_sub_64(&bmalloc_app_allocated_total, size);
 }
 
 void
