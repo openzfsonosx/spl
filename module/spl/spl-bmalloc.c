@@ -293,12 +293,15 @@ static const unsigned char POISON_VALUE = 0xFF;
 #endif /* SLICE_POISON_USER_SPACE */
 
 /*
- * Slices of memory that have no allocations in them will be returned to the
- * memory pool for use by other slice allocators. SA_MAX_POOL_FREE_MEM_AGE:
- * After being placed in the pool, if not claimed by a slice, the memory is
- * released to the underlying alloctor.
+ * Maximum size of allocation size for which "small allocation mode"
+ * will be enabled in the slices.
  */
-const sa_hrtime_t SA_MAX_POOL_FREE_MEM_AGE = 120 * SA_NSEC_PER_SEC;
+const sa_size_t MAX_SMALL_ALLOC_SIZE = 512; // bytes
+
+/*
+ * Standardised size for large slices.
+ */
+const sa_size_t LARGE_SLICE_SIZE = 4096 + (128 * 1024); // bytes
 
 /*
  * Once there are no remaining allocations from a slice of memory, the Slice
@@ -672,9 +675,6 @@ slice_alloc(slice_t *slice, sa_size_t alloc_size)
 		REPORT0("slice_alloc - thread already present\n");
 	}
 #endif /* SLICE_CHECK_THREADS */
-
-	// thoughts - branch here introduce small structure
-	// or otherwise execute large strategy
 	
 	allocatable_row_t *row = slice_get_row(slice);
 	if (row) {
@@ -731,8 +731,6 @@ slice_free_row(slice_t *slice, allocatable_row_t *row, sa_size_t alloc_size)
 
 	slice->alloc_count--;
 
-	// thoughts - insert small strategy here
-	// otherwise large strategy
 #ifdef SLICE_CHECK_ROW_HEADERS
 	if (row->prefix != ROW_HEADER_GUARD ||
 	    row->suffix != ROW_HEADER_GUARD) {
@@ -819,16 +817,16 @@ slice_allocator_init(slice_allocator_t *sa, sa_size_t max_alloc_size)
 
 	/* Select a memory pool allocation size of the allocator. */
 #ifndef DEBUG
-	if (max_alloc_size <=  512) {
+	if (max_alloc_size <=  MAX_SMALL_ALLOC_SIZE) {
 		sa->flags = SMALL_ALLOC;
 		sa->slice_size = PAGE_SIZE;
 	} else {
 		sa->flags = 0;
-		sa->slice_size = 4096 + 128*1024;
+		sa->slice_size = LARGE_SLICE_SIZE;
 	}
 #else
 	sa->flags = 0;
-	sa->slice_size = 4096 + 128*1024;
+	sa->slice_size = LARGE_SLICE_SIZE;
 #endif
 
 	sa->spinlock = lck_spin_alloc_init(bmalloc_lock_group,
