@@ -1446,7 +1446,7 @@ taskq_create(const char *name, int nthreads, pri_t pri, int minalloc,
 		mutex_enter(&tq->tq_lock);
 		while (nthreads-- > 0) {
 			*tpp = thread_create(NULL, 0, taskq_thread, tq,
-			    0, &p0, TS_RUN, pri);
+			    0, pp0, TS_RUN, pri);
 			tpp++;
 		}
 		mutex_exit(&tq->tq_lock);
@@ -1680,7 +1680,7 @@ taskq_bucket_extend(void *arg)
 	 * for it to be initialized (below).
 	 */
 	tqe->tqent_thread = (kthread_t *)0xCEDEC0DE;
-	thread = thread_create(NULL, 0, taskq_d_thread, tqe, 0, &p0, TS_RUN,
+	thread = thread_create(NULL, 0, taskq_d_thread, tqe, 0, pp0, TS_RUN,
 	                       tq->tq_pri);
 #else
 	/*
@@ -1688,7 +1688,7 @@ taskq_bucket_extend(void *arg)
 	 * created, place the entry on the free list and start the thread.
 	 */
 	tqe->tqent_thread = thread_create(NULL, 0, taskq_d_thread, tqe,
-	    0, &p0, TS_STOPPED, tq->tq_pri);
+	    0, pp0, TS_STOPPED, tq->tq_pri);
 #endif /*__APPLE__*/
 
 	/*

@@ -42,7 +42,7 @@ spl_thread_create(
         void            (*proc)(),
         void            *arg,
         size_t          len,
-        proc_t          *pp,
+        /*struct proc     *pp,*/
         int             state,
         pri_t           pri)
 {
