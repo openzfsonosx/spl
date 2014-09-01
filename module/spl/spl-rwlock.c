@@ -44,17 +44,28 @@ rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
                 zfs_rwlock_group, zfs_rwlock_attr);
     rwlp->rw_owner = NULL;
     rwlp->rw_readers = 0;
+#ifdef SPL_DEBUG
+	rwlp->rw_pad = 0x012345678;
+#endif
 }
 
 void
 rw_destroy(krwlock_t *rwlp)
 {
     lck_rw_destroy((lck_rw_t *)&rwlp->rw_lock[0], zfs_rwlock_group);
+#ifdef SPL_DEBUG
+	rwlp->rw_pad = 0x99;
+#endif
 }
 
 void
 rw_enter(krwlock_t *rwlp, krw_t rw)
 {
+#ifdef SPL_DEBUG
+	if (rwlp->rw_pad != 0x012345678)
+		panic("rwlock %p not initialised\n", rwlp);
+#endif
+
     if (rw == RW_READER) {
         lck_rw_lock_shared((lck_rw_t *)&rwlp->rw_lock[0]);
         atomic_inc_32((volatile uint32_t *)&rwlp->rw_readers);
@@ -79,6 +90,11 @@ rw_tryenter(krwlock_t *rwlp, krw_t rw)
 {
     int held = 0;
 
+#ifdef SPL_DEBUG
+	if (rwlp->rw_pad != 0x012345678)
+		panic("rwlock %p not initialised\n", rwlp);
+#endif
+
     if (rw == RW_READER) {
         held = lck_rw_try_lock((lck_rw_t *)&rwlp->rw_lock[0],
                                LCK_RW_TYPE_SHARED);
@@ -97,13 +113,19 @@ rw_tryenter(krwlock_t *rwlp, krw_t rw)
 }
 
 
-/*
- * Not supported in Mac OS X kernel.
- */
 int
 rw_tryupgrade(krwlock_t *rwlp)
 {
-    return (0);
+
+    atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
+
+	if (lck_rw_lock_shared_to_exclusive(
+			(lck_rw_t *)&rwlp->rw_lock[0]) == FALSE) {
+		return 0;
+	}
+
+	rwlp->rw_owner = current_thread();
+    return (1);
 }
 
 void
@@ -163,4 +185,3 @@ void spl_rwlock_fini(void)
     lck_attr_free(zfs_rwlock_attr);
     zfs_rwlock_attr = NULL;
 }
-
