@@ -1320,10 +1320,6 @@ void memory_pressure_task(void *p)
 		
 		// And request memory holders release memory.
 		kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-		
-		// Cache reaping is likely to be async, give the memory owners some
-		// time to implement before cleaning out unwanted memory.
-		bsd_timeout(reap_finish_task_proc, 0, &reap_finish_task_timeout);
 	}
 }
 
