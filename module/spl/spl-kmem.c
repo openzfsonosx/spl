@@ -213,8 +213,6 @@ static struct timespec	bmalloc_task_timeout		= {2, 500000000};	// 2.5 Seconds
 static kcondvar_t memory_monitor_cv;
 static kmutex_t memory_monitor_cv_lock;
 
-static int pressure_task_queued = 0;
-
 #ifdef PRINT_CACHE_STATS
 static struct timespec print_all_cache_stats_task_timeout = {60, 0};
 #endif
@@ -1240,33 +1238,12 @@ void memory_monitor_thread_continue()
 			kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
 										  &pages_reclaimed, &num_pages_wanted);
 			
-			if (kr == KERN_SUCCESS && num_pages_wanted && (!pressure_task_queued)) {
-				// really? Asynchronously react to the memory pressure notification
-				//taskq_dispatch(kmem_taskq, memory_pressure_task,
-				//			   (void *)num_pages_wanted, TQ_PUSHPAGE);
+			if (kr == KERN_SUCCESS && num_pages_wanted) {
 				memory_pressure_task(num_pages_wanted);
 			}
-			
-			
-			// Rate limiting mechanism - not sure the we should enable this.
-			// Note though that this thread can be waken a LOT of times per
-			// second in the absence of the throttle.
-			//
-			// I dont really know what the most correct approach on this is
-			// right now, but keep coming back to the throttle.
-#if 0
-			if (!shutting_down) {
-				mutex_enter(&memory_monitor_cv_lock);
-				(void) cv_timedwait_interruptible(&memory_monitor_cv,
-												  &memory_monitor_cv_lock,
-												  (ddi_get_lbolt() + (hz>>3)));
-				mutex_exit(&memory_monitor_cv_lock);
-			}
-#endif
 		}
 	}
 	
-	//printf("memory monitor thread exiting\n");
 	thread_exit();
 }
 
@@ -1280,9 +1257,6 @@ static void start_memory_monitor()
 static void stop_memory_monitor()
 {
     shutting_down = 1;
-	cv_signal(&memory_monitor_cv);
-    thread_wakeup((event_t) &vm_page_free_wanted);
-	cv_signal(&memory_monitor_cv);
     thread_wakeup((event_t) &vm_page_free_wanted);
 }
 
@@ -1325,7 +1299,6 @@ void memory_pressure_task(void *p)
 
 void bmalloc_release_memory_task()
 {
-	//printf("bmalloc_release_memory_task\n");
 	bmalloc_release_memory();
 }
 
@@ -1367,9 +1340,6 @@ static void reap_finish_task_proc()
 static void
 kmem_cache_magazine_resize(kmem_cache_t *cp)
 {
-    // FIXME removing this return causes a core.
-    //return;
-    
 	kmem_magtype_t *mtp = cp->cache_magtype;
     
 	if (cp->cache_chunksize < mtp->mt_maxbuf) {
@@ -1498,15 +1468,6 @@ void spl_unregister_oids(void)
 void
 spl_kmem_init(uint64_t total_memory)
 {
-    printf("SPL: WARNING:\n");
-    printf("SPL: This is an experimental branch of OpenZFS.\n");
-	printf("SPL: memory allocation and release under load.\n");
-	printf("SPL: It might be faster/better/shinier than master.\n");
-    printf("SPL: but it may also eat your datasets and take your.\n");
-    printf("SPL: firstborn child.\n");
-    printf("SPL: Then again it might just work! Over to you.\n");
-
-    printf("SPL: partial_kmem branch\n");
     printf("SPL: Total memory %llu\n", total_memory);
 	
     // Sysctls
@@ -1537,7 +1498,6 @@ spl_kmem_init(uint64_t total_memory)
 
 void spl_kmem_tasks_init()
 {
-	printf("tasks init\n");
     kmem_taskq = taskq_create("kmem-taskq",
                               1,
                               minclsyspri,
@@ -1555,8 +1515,6 @@ void spl_kmem_tasks_init()
 
 void spl_kmem_tasks_fini()
 {
-	printf("Tasks fini");
-    
     shutting_down = 1;
 	
     // FIXME - might have to put a flush-through task into the task q
