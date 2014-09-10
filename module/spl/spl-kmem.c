@@ -31,6 +31,7 @@
 #include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/kstat.h>
 #include <sys/systm.h>
 #include <sys/sysctl.h>
 #include <sys/thread.h>
@@ -218,11 +219,26 @@ static struct timespec print_all_cache_stats_task_timeout = {60, 0};
 #endif
 
 //===============================================================
-// Forward Declarations
+// Kstats published for bmalloc
 //===============================================================
 
-void spl_register_oids(void);
-void spl_unregister_oids(void);
+typedef struct bmalloc_stats {
+	kstat_named_t bmalloc_app_allocated;
+	kstat_named_t bmalloc_system_allocated;
+	kstat_named_t bmalloc_space_efficiency_percent;
+} bmalloc_stats_t;
+
+static bmalloc_stats_t bmalloc_stats = {
+	{"apps_allocated", KSTAT_DATA_UINT64},
+	{"bmalloc_allocated", KSTAT_DATA_UINT64},
+	{"space_efficiency_percent", KSTAT_DATA_UINT64},
+};
+
+static kstat_t *bmalloc_ksp = 0;
+
+//===============================================================
+// Forward Declarations
+//===============================================================
 
 static void bmalloc_maintenance_task_proc(void *p);
 static void kmem_reap_task(void *p);
@@ -242,26 +258,6 @@ static void print_all_cache_stats_task_proc();
 #endif
 
 static void kmem_update(void *);
-
-//===============================================================
-// Sysctls
-//===============================================================
-
-SYSCTL_DECL(_spl);
-SYSCTL_NODE( , OID_AUTO, spl, CTLFLAG_RW, 0, "Solaris Porting Layer");
-struct sysctl_oid_list sysctl__spl_children;
-
-SYSCTL_QUAD(_spl, OID_AUTO, bmalloc_app_allocated_total, CTLFLAG_RD,
-            &bmalloc_app_allocated_total, "kmem.total bytes allocated to ZFS");
-
-SYSCTL_QUAD(_spl, OID_AUTO, bmalloc_allocated_total, CTLFLAG_RD,
-            &bmalloc_allocated_total, "kmem.total bytes allocated by SPL");
-
-extern uint32_t zfs_threads;
-SYSCTL_INT(_spl, OID_AUTO, num_threads,
-           CTLFLAG_RD, &zfs_threads, 0,
-           "Num threads");
-
 
 //===============================================================
 // Allocation and release calls
@@ -1449,20 +1445,20 @@ static void kmem_reap_all_task_proc()
 // Initialisation/Finalisation
 //===============================================================
 
-void spl_register_oids(void)
+static int
+bmalloc_kstat_update(kstat_t *ksp, int rw)
 {
-    sysctl_register_oid(&sysctl__spl);
-    sysctl_register_oid(&sysctl__spl_bmalloc_app_allocated_total);
-    sysctl_register_oid(&sysctl__spl_num_threads);
-    sysctl_register_oid(&sysctl__spl_bmalloc_allocated_total);
-}
-
-void spl_unregister_oids(void)
-{
-    sysctl_unregister_oid(&sysctl__spl);
-    sysctl_unregister_oid(&sysctl__spl_bmalloc_app_allocated_total);
-    sysctl_unregister_oid(&sysctl__spl_num_threads);
-    sysctl_unregister_oid(&sysctl__spl_bmalloc_allocated_total);
+	bmalloc_stats_t *bs = ksp->ks_data;
+	
+	if (rw == KSTAT_WRITE) {
+		return (SET_ERROR(EACCES));
+	} else {
+		bs->bmalloc_app_allocated.value.ui64 = bmalloc_app_allocated_total;
+		bs->bmalloc_system_allocated.value.ui64 = bmalloc_allocated_total;
+		bs->bmalloc_space_efficiency_percent.value.ui64 = (bmalloc_app_allocated_total * 100)/bmalloc_allocated_total;
+	}
+	
+	return (0);
 }
 
 void
@@ -1470,8 +1466,15 @@ spl_kmem_init(uint64_t total_memory)
 {
     printf("SPL: Total memory %llu\n", total_memory);
 	
-    // Sysctls
-    spl_register_oids();
+	// Kstats
+	bmalloc_ksp = kstat_create("spl", 0, "bmalloc", "misc", KSTAT_TYPE_NAMED,
+						   sizeof (bmalloc_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
+	
+	if (bmalloc_ksp != NULL) {
+		bmalloc_ksp->ks_data = &bmalloc_stats;
+		bmalloc_ksp->ks_update = bmalloc_kstat_update;
+		kstat_install(bmalloc_ksp);
+	}
 	
     // Initialise spinlocks
     kmem_lock_attr = lck_attr_alloc_init();
@@ -1538,6 +1541,6 @@ void spl_kmem_tasks_fini()
 void
 spl_kmem_fini(void)
 {
-    spl_unregister_oids();
+	kstat_delete(bmalloc_ksp);
 }
 
