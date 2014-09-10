@@ -23,14 +23,14 @@
  * Use is subject to license terms.
  */
 
-
-
 #ifndef _SPL_KSTAT_H
 #define _SPL_KSTAT_H
 
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/kmem.h>
+#include <sys/sysctl.h>
+#include <sys/mutex.h>
 
 #define KSTAT_STRLEN            31
 
@@ -69,7 +69,7 @@
 #define KSTAT_FLAG_PERSISTENT   0x08
 #define KSTAT_FLAG_DORMANT      0x10
 #define KSTAT_FLAG_UNSUPPORTED  (KSTAT_FLAG_VAR_SIZE | KSTAT_FLAG_WRITABLE | \
-				 KSTAT_FLAG_PERSISTENT | KSTAT_FLAG_DORMANT)
+KSTAT_FLAG_PERSISTENT | KSTAT_FLAG_DORMANT)
 #define KSTAT_FLAG_INVALID      0x20
 
 #define KS_MAGIC                0x9d9d9d9d
@@ -85,90 +85,93 @@ typedef int kstat_update_t(struct kstat_s *, int);  /* dynamic update cb */
 
 typedef struct kstat_s {
 	int              ks_magic;                  /* magic value */
-        kid_t            ks_kid;                    /* unique kstat ID */
-        hrtime_t         ks_crtime;                 /* creation time */
+	kid_t            ks_kid;                    /* unique kstat ID */
+	hrtime_t         ks_crtime;                 /* creation time */
 	hrtime_t         ks_snaptime;               /* last access time */
-        char             ks_module[KSTAT_STRLEN+1]; /* provider module name */
-        int              ks_instance;               /* provider module instance */
-        char             ks_name[KSTAT_STRLEN+1];   /* kstat name */
-        char             ks_class[KSTAT_STRLEN+1];  /* kstat class */
-        uchar_t          ks_type;                   /* kstat data type */
-        uchar_t          ks_flags;                  /* kstat flags */
-        void             *ks_data;                  /* kstat type-specific data */
-        uint_t           ks_ndata;                  /* # of type-specific data records */
-        size_t           ks_data_size;              /* size of kstat data section */
-        struct proc_dir_entry *ks_proc;             /* proc linkage */
-        kstat_update_t   *ks_update;                /* dynamic updates */
-        void             *ks_private;               /* private data */
-        spinlock_t       ks_lock;                   /* kstat data lock */
-    //        struct list_head ks_list;                   /* kstat linkage */
+	char             ks_module[KSTAT_STRLEN+1]; /* provider module name */
+	int              ks_instance;               /* provider module instance */
+	char             ks_name[KSTAT_STRLEN+1];   /* kstat name */
+	char             ks_class[KSTAT_STRLEN+1];  /* kstat class */
+	uchar_t          ks_type;                   /* kstat data type */
+	uchar_t          ks_flags;                  /* kstat flags */
+	void             *ks_data;                  /* kstat type-specific data */
+	uint_t           ks_ndata;                  /* # of type-specific data records */
+	size_t           ks_data_size;              /* size of kstat data section */
+	struct proc_dir_entry *ks_proc;             /* proc linkage */
+	kstat_update_t   *ks_update;                /* dynamic updates */
+	void             *ks_private;               /* private data */
+	kmutex_t         *ks_lock;                  /* kstat data lock */
 } kstat_t;
 
 typedef struct kstat_named_s {
-        char             name[KSTAT_STRLEN];        /* name of counter */
-        uchar_t          data_type;                 /* data type */
-        union {
-                char            c[16];              /* 128-bit int */
-                int32_t         i32;                /* 32-bit signed int */
-                uint32_t        ui32;               /* 32-bit unsigned int */
-                int64_t         i64;                /* 64-bit signed int */
-                uint64_t        ui64;               /* 64-bit unsigned int */
-                long            l;                  /* native signed long */
-                ulong_t         ul;                 /* native unsigned long */
-                struct {
-                        union {
-                                char *ptr;          /* NULL-term string */
-                                char __pad[8];      /* 64-bit padding */
-                        } addr;
-                        uint32_t len;               /* # bytes for strlen + '\0' */
-                } string;
-        } value;
+	char                name[KSTAT_STRLEN];     /* name of counter */
+	uchar_t             data_type;              /* data type */
+	union {
+		char            c[16];                  /* 128-bit int */
+		int32_t         i32;                    /* 32-bit signed int */
+		uint32_t        ui32;                   /* 32-bit unsigned int */
+		int64_t         i64;                    /* 64-bit signed int */
+		uint64_t        ui64;                   /* 64-bit unsigned int */
+		long            l;                      /* native signed long */
+		ulong_t         ul;                     /* native unsigned long */
+		struct {
+			union {
+				char    *ptr;                   /* NULL-term string */
+				char    __pad[8];               /* 64-bit padding */
+			} addr;
+			uint32_t    len;                    /* # bytes for strlen + '\0' */
+		} string;
+	} value;
+	struct sysctl_oid   s_oid;                  /* kstats are backed by a sysctl */
+    char                s_name[64];             /* Name of the related sysctl */
+    int                 s_oid_registered;       /* != 0 if sysctl was registered */
+    kstat_t             *s_parent;              /* Parent kstat for ks_update */
 } kstat_named_t;
 
 #define KSTAT_NAMED_STR_PTR(knptr) ((knptr)->value.string.addr.ptr)
 #define KSTAT_NAMED_STR_BUFLEN(knptr) ((knptr)->value.string.len)
 
 typedef struct kstat_intr {
-        uint_t intrs[KSTAT_NUM_INTRS];
+	uint_t intrs[KSTAT_NUM_INTRS];
 } kstat_intr_t;
 
 typedef struct kstat_io {
-        u_longlong_t     nread;       /* number of bytes read */
-        u_longlong_t     nwritten;    /* number of bytes written */
-        uint_t           reads;       /* number of read operations */
-        uint_t           writes;      /* number of write operations */
-        hrtime_t         wtime;       /* cumulative wait (pre-service) time */
-        hrtime_t         wlentime;    /* cumulative wait length*time product*/
-        hrtime_t         wlastupdate; /* last time wait queue changed */
-        hrtime_t         rtime;       /* cumulative run (service) time */
-        hrtime_t         rlentime;    /* cumulative run length*time product */
-        hrtime_t         rlastupdate; /* last time run queue changed */
-        uint_t           wcnt;        /* count of elements in wait state */
-        uint_t           rcnt;        /* count of elements in run state */
+	u_longlong_t    nread;       /* number of bytes read */
+	u_longlong_t    nwritten;    /* number of bytes written */
+	uint_t          reads;       /* number of read operations */
+	uint_t          writes;      /* number of write operations */
+	hrtime_t        wtime;       /* cumulative wait (pre-service) time */
+	hrtime_t        wlentime;    /* cumulative wait length*time product*/
+	hrtime_t        wlastupdate; /* last time wait queue changed */
+	hrtime_t        rtime;       /* cumulative run (service) time */
+	hrtime_t        rlentime;    /* cumulative run length*time product */
+	hrtime_t        rlastupdate; /* last time run queue changed */
+	uint_t          wcnt;        /* count of elements in wait state */
+	uint_t          rcnt;        /* count of elements in run state */
 } kstat_io_t;
 
 typedef struct kstat_timer {
-        char         name[KSTAT_STRLEN+1]; /* event name */
-        u_longlong_t num_events;           /* number of events */
-        hrtime_t     elapsed_time;         /* cumulative elapsed time */
-        hrtime_t     min_time;             /* shortest event duration */
-        hrtime_t     max_time;             /* longest event duration */
-        hrtime_t     start_time;           /* previous event start time */
-        hrtime_t     stop_time;            /* previous event stop time */
+	char            name[KSTAT_STRLEN+1]; /* event name */
+	u_longlong_t    num_events;           /* number of events */
+	hrtime_t        elapsed_time;         /* cumulative elapsed time */
+	hrtime_t        min_time;             /* shortest event duration */
+	hrtime_t        max_time;             /* longest event duration */
+	hrtime_t        start_time;           /* previous event start time */
+	hrtime_t        stop_time;            /* previous event stop time */
 } kstat_timer_t;
 
-int spl_kstat_init(void);
+void spl_kstat_init(void);
 void spl_kstat_fini(void);
 
 extern void __kstat_set_raw_ops(kstat_t *ksp,
-                    int (*headers)(char *buf, size_t size),
-                    int (*data)(char *buf, size_t size, void *data),
-                    void* (*addr)(kstat_t *ksp, off_t index));
+								int (*headers)(char *buf, size_t size),
+								int (*data)(char *buf, size_t size, void *data),
+								void* (*addr)(kstat_t *ksp, off_t index));
 
 extern kstat_t *__kstat_create(char *ks_module, int ks_instance,
-			     char *ks_name, char *ks_class,
-			     uchar_t ks_type, ulong_t ks_ndata,
-			     uchar_t ks_flags);
+							   char *ks_name, char *ks_class,
+							   uchar_t ks_type, ulong_t ks_ndata,
+							   uchar_t ks_flags);
 extern void __kstat_install(kstat_t *ksp);
 extern void __kstat_delete(kstat_t *ksp);
 
