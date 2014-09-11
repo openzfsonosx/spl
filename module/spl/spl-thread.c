@@ -33,7 +33,7 @@
 #include <spl-debug.h>
 #include <sys/vnode.h>
 
-uint32_t zfs_threads = 0;
+uint64_t zfs_threads = 0;
 
 kthread_t *
 spl_thread_create(
@@ -55,7 +55,7 @@ spl_thread_create(
 
         thread_deallocate(thread);
 
-        OSIncrementAtomic((SInt32 *)&zfs_threads);
+        atomic_inc_64(&zfs_threads);
 
         return ((kthread_t *)thread);
 }
@@ -63,7 +63,7 @@ spl_thread_create(
 
 void spl_thread_exit(void)
 {
-        OSDecrementAtomic((SInt32 *)&zfs_threads);
+        atomic_dec_64(&zfs_threads);
 
         (void) thread_terminate(current_thread());
 }
