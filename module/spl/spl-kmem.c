@@ -1502,15 +1502,6 @@ void spl_unregister_oids(void)
 void
 spl_kmem_init(uint64_t total_memory)
 {
-    printf("SPL: WARNING:\n");
-    printf("SPL: This is an experimental branch of OpenZFS.\n");
-	printf("SPL: memory allocation and release under load.\n");
-	printf("SPL: It might be faster/better/shinier than master.\n");
-    printf("SPL: but it may also eat your datasets and take your.\n");
-    printf("SPL: firstborn child.\n");
-    printf("SPL: Then again it might just work! Over to you.\n");
-
-    printf("SPL: partial_kmem branch\n");
     printf("SPL: Total memory %llu\n", total_memory);
 
     // Sysctls
@@ -1541,7 +1532,6 @@ spl_kmem_init(uint64_t total_memory)
 
 void spl_kmem_tasks_init()
 {
-	printf("tasks init\n");
     kmem_taskq = taskq_create("kmem-taskq",
                               1,
                               minclsyspri,
@@ -1559,7 +1549,6 @@ void spl_kmem_tasks_init()
 
 void spl_kmem_tasks_fini()
 {
-	printf("Tasks fini");
 
     shutting_down = 1;
 
