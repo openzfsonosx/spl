@@ -1,7 +1,9 @@
+_cpu_number
 _fp_lookup
 _fd_rdwr
 _hostname
 _kernel_memory_allocate
+_vm_page_free_wanted
 _vm_page_free_count
 _vm_page_speculative_count
 _VFS_ROOT

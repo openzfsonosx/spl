@@ -61,7 +61,7 @@ vn_openat(char *pnamep, enum uio_seg seg, int filemode, int createmode,
     int pathlen = MAXPATHLEN;
     int error;
 
-    path = (char *)zfs_kmem_zalloc(MAXPATHLEN, KM_SLEEP);
+    path = (char *)kmem_zalloc(MAXPATHLEN, KM_SLEEP);
 
     error = vn_getpath(startvp, path, &pathlen);
     if (error == 0) {
@@ -70,7 +70,7 @@ vn_openat(char *pnamep, enum uio_seg seg, int filemode, int createmode,
                         umask);
     }
 
-    zfs_kmem_free(path, MAXPATHLEN);
+    kmem_free(path, MAXPATHLEN);
     return (error);
 }
 

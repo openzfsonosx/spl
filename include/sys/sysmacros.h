@@ -212,11 +212,11 @@ extern void spl_cleanup(void);
 #define P2SAMEHIGHBIT_TYPED(x, y, type) \
         (((type)(x) ^ (type)(y)) < ((type)(x) & (type)(y)))
 
-#if defined(_KERNEL) && !defined(_KMEMUSER) && !defined(offsetof)
-
 /* avoid any possibility of clashing with <stddef.h> version */
-
-#define offsetof(s, m)  ((size_t)(&(((s *)0)->m)))
+#if defined(_KERNEL) && !defined(_KMEMUSER) && !defined(offsetof)
+  /* Use the correct builtin mechanism. The Traditional macro is 
+     not safe on this platform. */
+  #define offsetof(s, m)  __builtin_offsetof(s, m)
 #endif
 
 #define SET_ERROR(X) (X)

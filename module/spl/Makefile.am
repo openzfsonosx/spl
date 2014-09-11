@@ -36,6 +36,7 @@ spl_kext_SOURCE =
 
 spl_SOURCES = 	\
 	spl-atomic.c \
+	spl-avl.c \
 	spl-condvar.c \
 	spl-cred.c \
 	spl-ddi.c \
@@ -54,6 +55,7 @@ spl_SOURCES = 	\
 	spl-thread.c \
 	spl-time.c \
 	spl-tsd.c \
+        spl-vmem.c \
 	spl-vnode.c \
 	spl-xdr.c \
 	spl-bmalloc.c

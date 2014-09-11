@@ -32,7 +32,8 @@ void bmalloc_init();
 //
 // Allocate <size> bytes of memory for the application
 //
-void* bmalloc(uint64_t size);
+void* bmalloc(uint64_t size, int flags);
+void* bzmalloc(uint64_t size, int flags);
 
 //
 // Release memory from the application
@@ -45,6 +46,12 @@ void bfree(void* buf, uint64_t size);
 // memory pressure.
 //
 void bmalloc_release_memory();
+
+//
+// Attempt to release <num_pages> pages of
+// memory from the free memory block collection.
+// Returns true if request was met, false otherwise.
+int bmalloc_release_pages(uint64_t num_pages);
 
 //
 // Manages from free memory within the allocator.

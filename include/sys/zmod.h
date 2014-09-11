@@ -42,7 +42,7 @@ zfs_zalloc(void* opaque, uInt items, uInt size)
 {
     struct _zmemheader *hdr;
     size_t alloc_size = (items * size) + sizeof (uint64_t);
-    hdr = zfs_kmem_zalloc(alloc_size, KM_SLEEP);
+    hdr = kmem_zalloc(alloc_size, KM_SLEEP);
     hdr->length = alloc_size;
     return (&hdr->data);
 }
@@ -53,7 +53,7 @@ zfs_zfree(void *opaque, void *addr)
     struct _zmemheader *hdr;
     hdr = addr;
     hdr--;
-    zfs_kmem_free(hdr, hdr->length);
+    kmem_free(hdr, hdr->length);
 }
 
 /*
