@@ -34,6 +34,7 @@
 static lck_attr_t       *zfs_rwlock_attr = NULL;
 static lck_grp_attr_t   *zfs_rwlock_group_attr = NULL;
 static lck_grp_t  *zfs_rwlock_group = NULL;
+#define SPL_DEBUG
 
 void
 rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
@@ -113,19 +114,38 @@ rw_tryenter(krwlock_t *rwlp, krw_t rw)
 }
 
 
+
+/*
+ * It appears a difference between Darwin's
+ * lck_rw_lock_shared_to_exclusive() and Solaris's rw_tryupgrade() and
+ * FreeBSD's sx_try_upgrade() is that on failure to upgrade, the prior
+ * held shared/reader lock is lost on Darwin, but retained on
+ * Solaris/FreeBSD. We could re-acquire the lock in this situation,
+ * but it enters a possibility of blocking, when tryupgrade is meant
+ * to be non-blocking.
+ * It is simpler to let ZFS think tryupgrade always fails, and it will
+ * grab exclusive lock with the blocking call.
+ * We end up blocking forever in lck_rw_lock_shared_to_exclusive_success
+ * waiting for READERS to drain.
+ */
 int
 rw_tryupgrade(krwlock_t *rwlp)
 {
-
+	/* Not supported */
+	return 0;
+#if 0
     atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
 
 	if (lck_rw_lock_shared_to_exclusive(
 			(lck_rw_t *)&rwlp->rw_lock[0]) == FALSE) {
+		printf("upgrade failed, waiting for SHARED lock again\n");
+		rw_enter(rwlp, RW_READER);
 		return 0;
 	}
 
 	rwlp->rw_owner = current_thread();
     return (1);
+#endif
 }
 
 void
