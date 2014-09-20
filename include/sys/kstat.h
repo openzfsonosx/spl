@@ -122,10 +122,6 @@ typedef struct kstat_named_s {
 			uint32_t    len;                    /* # bytes for strlen + '\0' */
 		} string;
 	} value;
-	struct sysctl_oid   s_oid;                  /* kstats are backed by a sysctl */
-    char                s_name[64];             /* Name of the related sysctl */
-    int                 s_oid_registered;       /* != 0 if sysctl was registered */
-    kstat_t             *s_parent;              /* Parent kstat for ks_update */
 } kstat_named_t;
 
 #define KSTAT_NAMED_STR_PTR(knptr) ((knptr)->value.string.addr.ptr)

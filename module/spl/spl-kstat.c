@@ -61,6 +61,31 @@ typedef struct sysctl_tree_node {
 } sysctl_tree_node_t;
 
 /*
+ * Each named kstats consists of one or more named
+ * fields which are implemented as OIDs parented
+ * off the kstat OID.
+ *
+ * To implement the kstat interface, we need to be able
+ * to call the update() function on the kstat to
+ * allow the owner to populate the kstat values from
+ * internal data.
+ *
+ * To do this we need the address of the kstat_named_t
+ * which contains the data value, and the owning kstat_t.
+ *
+ * OIDs allow a single void* user argument, so we will
+ * use a structure that contains both values and 
+ * point to that.
+ */
+typedef struct sysctl_leaf {
+	kstat_t				*l_ksp;
+	kstat_named_t		*l_named;
+	struct sysctl_oid   l_oid;                  /* kstats are backed by a sysctl */
+	char                l_name[64];             /* Name of the related sysctl */
+	int                 l_oid_registered;       /* != 0 if sysctl was registered */
+} sysctl_leaf_t;
+
+/*
  * Extended kstat structure -- for internal use only.
  */
 typedef struct ekstat {
@@ -68,8 +93,10 @@ typedef struct ekstat {
 	size_t          		e_size;		/* total allocation size */
 	kthread_t       		*e_owner;	/* thread holding this kstat */
 	kcondvar_t				e_cv;		/* wait for owner == NULL */
-	struct sysctl_oid_list	e_children;
-	struct sysctl_oid		e_oid;
+	struct sysctl_oid_list	e_children; /* contains the named values from the kstat */
+	struct sysctl_oid		e_oid;		/* the kstat is itself an OID */
+	sysctl_leaf_t			*e_vals;	/* array of OIDs that implement the children */
+	uint64_t				e_num_vals;	/* size of e_vals array */
 } ekstat_t;
 
 struct sysctl_tree_node		*tree_nodes = 0;
@@ -157,9 +184,9 @@ get_kstat_parent(struct sysctl_oid_list* root, char *module_name, char* class_na
 static int kstat_handle_i64 SYSCTL_HANDLER_ARGS
 {
     int error = 0;
-    
-    kstat_named_t *named = (kstat_named_t*)(arg1);
-    kstat_t *ksp  = named->s_parent;
+	sysctl_leaf_t *params = (sysctl_leaf_t*)(arg1);
+	kstat_named_t *named = params->l_named;
+	kstat_t *ksp  = params->l_ksp;
 	kmutex_t *lock = ksp->ks_lock;
 	int lock_needs_release = 0;
     
@@ -204,10 +231,10 @@ static int kstat_handle_i64 SYSCTL_HANDLER_ARGS
 
 static int kstat_handle_ui64 SYSCTL_HANDLER_ARGS
 {
-    int error = 0;
-    
-    kstat_named_t *named = (kstat_named_t*)(arg1);
-    kstat_t *ksp  = named->s_parent;
+	int error = 0;
+	sysctl_leaf_t *params = (sysctl_leaf_t*)(arg1);
+	kstat_named_t *named = params->l_named;
+	kstat_t *ksp  = params->l_ksp;
 	kmutex_t *lock = ksp->ks_lock;
 	int lock_needs_release = 0;
 	
@@ -269,7 +296,6 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
                 ks_module, ks_instance, ks_name);
         return (NULL);
     }
-    bzero(e, size);
     e->e_size = size;
     
     cv_init(&e->e_cv, NULL, CV_DEFAULT, NULL);
@@ -301,7 +327,7 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
 	e->e_children.slh_first = 0;
 	
 	e->e_oid.oid_parent = get_kstat_parent(&sysctl__kstat_children,
-											  ksp->ks_module, ksp->ks_class);
+											ksp->ks_module, ksp->ks_class);
 	e->e_oid.oid_link.sle_next = 0;
 	e->e_oid.oid_number = OID_AUTO;
 	e->e_oid.oid_arg2 = 0;
@@ -324,6 +350,8 @@ kstat_install(kstat_t *ksp)
 {
 	ekstat_t *e = (ekstat_t*)ksp;
 	kstat_named_t *named_base = 0;
+	sysctl_leaf_t *vals_base = 0;
+	sysctl_leaf_t *params = 0;
 	int oid_permissions = CTLFLAG_RD;
 	
     if (ksp->ks_type == KSTAT_TYPE_NAMED) {
@@ -332,77 +360,88 @@ kstat_install(kstat_t *ksp)
 			oid_permissions |= CTLFLAG_RW;
 		}
 		
+		// Create the leaf node OID objects
+		e->e_vals = (sysctl_leaf_t*)bmalloc(ksp->ks_ndata * sizeof(sysctl_leaf_t), KM_SLEEP);
+		e->e_num_vals = ksp->ks_ndata;
+		
         named_base = (kstat_named_t*)(ksp->ks_data);
-        
+		vals_base = e->e_vals;
+		
         for (int i=0; i < ksp->ks_ndata; i++) {
             
             int oid_valid = 1;
             
             kstat_named_t *named = &named_base[i];
-            
-            // Need to be able to navigate back to the
-            // owning kstats for update callback
-            named->s_parent = ksp;
-            
+			sysctl_leaf_t *val = &vals_base[i];
+			
             // Perform basic initialisation of the sysctl.
             //
             // The sysctl will be kstat.<module>.<class>.<name>.<data name>
-            snprintf(named->s_name, KSTAT_STRLEN, "%s", named->name);
+            snprintf(val->l_name, KSTAT_STRLEN, "%s", named->name);
             
-            named->s_oid.oid_parent = &e->e_children;
-            named->s_oid.oid_link.sle_next = 0;
-            named->s_oid.oid_number = OID_AUTO;
-            named->s_oid.oid_arg2 = 0;
-            named->s_oid.oid_name = named->s_name;
-            named->s_oid.oid_descr = "";
-            named->s_oid.oid_version = SYSCTL_OID_VERSION;
-            named->s_oid.oid_refcnt = 0;
+            val->l_oid.oid_parent = &e->e_children;
+            val->l_oid.oid_link.sle_next = 0;
+            val->l_oid.oid_number = OID_AUTO;
+            val->l_oid.oid_arg2 = 0;
+            val->l_oid.oid_name = val->l_name;
+            val->l_oid.oid_descr = "";
+            val->l_oid.oid_version = SYSCTL_OID_VERSION;
+            val->l_oid.oid_refcnt = 0;
             
             // Based on the kstat type flags, provide location
             // of data item and associated type and handler
             // flags to the sysctl.
             switch (named->data_type) {
                 case KSTAT_DATA_INT64:
-                    named->s_oid.oid_handler = kstat_handle_i64;
-                    named->s_oid.oid_kind = CTLTYPE_QUAD|oid_permissions|CTLFLAG_OID2;
-                    named->s_oid.oid_fmt = "Q";
-                    named->s_oid.oid_arg1 = named;
+					params = (sysctl_leaf_t*)bmalloc(sizeof(sysctl_leaf_t), KM_SLEEP);
+					params->l_named = named;
+					params->l_ksp = ksp;
+					
+                    val->l_oid.oid_handler = kstat_handle_i64;
+                    val->l_oid.oid_kind = CTLTYPE_QUAD|oid_permissions|CTLFLAG_OID2;
+                    val->l_oid.oid_fmt = "Q";
+                    val->l_oid.oid_arg1 = (void*)params;
+					params = 0;
                     break;
                 case KSTAT_DATA_UINT64:
-                    named->s_oid.oid_handler = kstat_handle_ui64;
-                    named->s_oid.oid_kind = CTLTYPE_QUAD|oid_permissions|CTLFLAG_OID2;
-                    named->s_oid.oid_fmt = "Q";
-                    named->s_oid.oid_arg1 = named;
+					params = (sysctl_leaf_t*)bmalloc(sizeof(sysctl_leaf_t), KM_SLEEP);
+					params->l_named = named;
+					params->l_ksp = ksp;
+
+					val->l_oid.oid_handler = kstat_handle_ui64;
+                    val->l_oid.oid_kind = CTLTYPE_QUAD|oid_permissions|CTLFLAG_OID2;
+                    val->l_oid.oid_fmt = "Q";
+					val->l_oid.oid_arg1 = (void*)params;
                     break;
                 case KSTAT_DATA_INT32:
-                    named->s_oid.oid_handler = sysctl_handle_int;
-                    named->s_oid.oid_kind = CTLTYPE_INT|oid_permissions|CTLFLAG_OID2;
-                    named->s_oid.oid_fmt = "I";
-                    named->s_oid.oid_arg1 = &named->value.i32;
+                    val->l_oid.oid_handler = sysctl_handle_int;
+                    val->l_oid.oid_kind = CTLTYPE_INT|oid_permissions|CTLFLAG_OID2;
+                    val->l_oid.oid_fmt = "I";
+                    val->l_oid.oid_arg1 = &named->value.i32;
                     break;
                 case KSTAT_DATA_UINT32:
-                    named->s_oid.oid_handler = sysctl_handle_int;
-                    named->s_oid.oid_kind = CTLTYPE_INT|oid_permissions|CTLFLAG_OID2;
-                    named->s_oid.oid_fmt = "IU";
-                    named->s_oid.oid_arg1 = &named->value.ui32;
+                    val->l_oid.oid_handler = sysctl_handle_int;
+                    val->l_oid.oid_kind = CTLTYPE_INT|oid_permissions|CTLFLAG_OID2;
+                    val->l_oid.oid_fmt = "IU";
+                    val->l_oid.oid_arg1 = &named->value.ui32;
                     break;
                 case KSTAT_DATA_LONG:
-                    named->s_oid.oid_handler = sysctl_handle_long;
-                    named->s_oid.oid_kind = CTLTYPE_INT|oid_permissions|CTLFLAG_OID2;
-                    named->s_oid.oid_fmt = "L";
-                    named->s_oid.oid_arg1 = &named->value.l;
+                    val->l_oid.oid_handler = sysctl_handle_long;
+                    val->l_oid.oid_kind = CTLTYPE_INT|oid_permissions|CTLFLAG_OID2;
+                    val->l_oid.oid_fmt = "L";
+                    val->l_oid.oid_arg1 = &named->value.l;
                     break;
                 case KSTAT_DATA_ULONG:
-                    named->s_oid.oid_handler = sysctl_handle_long;
-                    named->s_oid.oid_kind = CTLTYPE_INT|oid_permissions|CTLFLAG_OID2;
-                    named->s_oid.oid_fmt = "L";
-                    named->s_oid.oid_arg1 = &named->value.ul;
+                    val->l_oid.oid_handler = sysctl_handle_long;
+                    val->l_oid.oid_kind = CTLTYPE_INT|oid_permissions|CTLFLAG_OID2;
+                    val->l_oid.oid_fmt = "L";
+                    val->l_oid.oid_arg1 = &named->value.ul;
                     break;
                 case KSTAT_DATA_STRING:
-                    named->s_oid.oid_handler = sysctl_handle_string;
-                    named->s_oid.oid_kind = CTLTYPE_STRING|oid_permissions|CTLFLAG_OID2;
-                    named->s_oid.oid_fmt = "S";
-                    named->s_oid.oid_arg1 = &named->value.string;
+                    val->l_oid.oid_handler = sysctl_handle_string;
+                    val->l_oid.oid_kind = CTLTYPE_STRING|oid_permissions|CTLFLAG_OID2;
+                    val->l_oid.oid_fmt = "S";
+                    val->l_oid.oid_arg1 = &named->value.string;
                     break;
                     
                 case KSTAT_DATA_CHAR:
@@ -413,10 +452,10 @@ kstat_install(kstat_t *ksp)
             
             // Finally publish the OID, provided that there were no issues initialising it.
             if (oid_valid) {
-                sysctl_register_oid(&named->s_oid);
-                named->s_oid_registered = 1;
+                sysctl_register_oid(&val->l_oid);
+                val->l_oid_registered = 1;
             } else {
-                named->s_oid_registered = 0;
+                val->l_oid_registered = 0;
             }
         }
     }
@@ -429,11 +468,19 @@ remove_child_sysctls(ekstat_t *e)
 {
 	kstat_t *ksp = &e->e_ks;
 	kstat_named_t *named_base = (kstat_named_t*)(ksp->ks_data);
+	sysctl_leaf_t *vals_base = e->e_vals;
 	
 	for (int i=0; i < ksp->ks_ndata; i++) {
-		if (named_base[i].s_oid_registered) {
-			sysctl_unregister_oid(&named_base[i].s_oid);
-			named_base[i].s_oid_registered = 0;
+		if (vals_base[i].l_oid_registered) {
+			sysctl_unregister_oid(&vals_base[i].l_oid);
+			vals_base[i].l_oid_registered = 0;
+		}
+		
+		if (named_base[i].data_type == KSTAT_DATA_INT64 ||
+			named_base[i].data_type == KSTAT_DATA_UINT64) {
+			
+			sysctl_leaf_t *leaf = (sysctl_leaf_t*)vals_base[i].l_oid.oid_arg1;
+			bfree(leaf, sizeof(sysctl_leaf_t));
 		}
 	}
 }
@@ -443,22 +490,31 @@ kstat_delete(kstat_t *ksp)
 {
     ekstat_t *e = (ekstat_t *)ksp;
 	kmutex_t *lock = ksp->ks_lock;
+	int lock_needs_release = 0;
 	
     // destroy the sysctl
     if (ksp->ks_type == KSTAT_TYPE_NAMED) {
 		
 		if (lock && MUTEX_NOT_HELD(lock)) {
 			mutex_enter(lock);
-	        remove_child_sysctls(e);
+			lock_needs_release = 1;
+		}
+		
+		remove_child_sysctls(e);
+		
+		if (lock_needs_release) {
 			mutex_exit(lock);
-		} else {
-			remove_child_sysctls(e);
 		}
     }
     
-    cv_destroy(&e->e_cv);
+
 	sysctl_unregister_oid(&e->e_oid);
-    bfree(e, e->e_size);
+	
+	if (e->e_vals) {
+		bfree(e->e_vals, sizeof(sysctl_leaf_t) * e->e_num_vals);
+	}
+    cv_destroy(&e->e_cv);
+	bfree(e, e->e_size);
 }
 
 
