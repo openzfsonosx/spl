@@ -78,9 +78,6 @@ extern int cpu_number();
 // Variables
 //===============================================================
 
-// Measure the wakeup count of the memory monitor thread
-unsigned long		wake_count = 0; // DEBUG
-
 // Indicates that the machine is believed to be swapping
 // due to thread waking. This is reset when spl_vm_pool_low()
 // is called and reports the activity to ZFS.
@@ -193,9 +190,11 @@ static kmem_magtype_t kmem_magtype[] = {
 	{ 143,	64,	0,	0	},
 };
 
+#if 0
 static kmem_cache_t		*kmem_slab_cache;
 static kmem_cache_t		*kmem_bufctl_cache;
 static kmem_cache_t		*kmem_bufctl_audit_cache;
+#endif
 
 static kmutex_t			kmem_cache_lock;/* inter-cache linkage only */
 static list_t			kmem_caches;
@@ -225,11 +224,95 @@ static struct timespec print_all_cache_stats_task_timeout = {60, 0};
 // Kstats published for bmalloc
 //===============================================================
 
+struct kmem_cache_kstat {
+	kstat_named_t	kmc_buf_size;
+	kstat_named_t	kmc_align;
+	kstat_named_t	kmc_chunk_size;
+	kstat_named_t	kmc_slab_size;
+	kstat_named_t	kmc_alloc;
+	kstat_named_t	kmc_alloc_fail;
+	kstat_named_t	kmc_free;
+	kstat_named_t	kmc_depot_alloc;
+	kstat_named_t	kmc_depot_free;
+	kstat_named_t	kmc_depot_contention;
+	kstat_named_t	kmc_slab_alloc;
+	kstat_named_t	kmc_slab_free;
+	kstat_named_t	kmc_buf_constructed;
+	kstat_named_t	kmc_buf_avail;
+	kstat_named_t	kmc_buf_inuse;
+	kstat_named_t	kmc_buf_total;
+	kstat_named_t	kmc_buf_max;
+	kstat_named_t	kmc_slab_create;
+	kstat_named_t	kmc_slab_destroy;
+	kstat_named_t	kmc_vmem_source;
+	kstat_named_t	kmc_hash_size;
+	kstat_named_t	kmc_hash_lookup_depth;
+	kstat_named_t	kmc_hash_rescale;
+	kstat_named_t	kmc_full_magazines;
+	kstat_named_t	kmc_empty_magazines;
+	kstat_named_t	kmc_magazine_size;
+	kstat_named_t	kmc_reap; /* number of kmem_cache_reap() calls */
+	kstat_named_t	kmc_defrag; /* attempts to defrag all partial slabs */
+	kstat_named_t	kmc_scan; /* attempts to defrag one partial slab */
+	kstat_named_t	kmc_move_callbacks; /* sum of yes, no, later, dn, dk */
+	kstat_named_t	kmc_move_yes;
+	kstat_named_t	kmc_move_no;
+	kstat_named_t	kmc_move_later;
+	kstat_named_t	kmc_move_dont_need;
+	kstat_named_t	kmc_move_dont_know; /* obj unrecognized by client ... */
+	kstat_named_t	kmc_move_hunt_found; /* ... but found in mag layer */
+	kstat_named_t	kmc_move_slabs_freed; /* slabs freed by consolidator */
+	kstat_named_t	kmc_move_reclaimable; /* buffers, if consolidator ran */
+} kmem_cache_kstat = {
+	{ "buf_size",		KSTAT_DATA_UINT64 },
+	{ "align",		KSTAT_DATA_UINT64 },
+	{ "chunk_size",		KSTAT_DATA_UINT64 },
+	{ "slab_size",		KSTAT_DATA_UINT64 },
+	{ "alloc",		KSTAT_DATA_UINT64 },
+	{ "alloc_fail",		KSTAT_DATA_UINT64 },
+	{ "free",		KSTAT_DATA_UINT64 },
+	{ "depot_alloc",	KSTAT_DATA_UINT64 },
+	{ "depot_free",		KSTAT_DATA_UINT64 },
+	{ "depot_contention",	KSTAT_DATA_UINT64 },
+	{ "slab_alloc",		KSTAT_DATA_UINT64 },
+	{ "slab_free",		KSTAT_DATA_UINT64 },
+	{ "buf_constructed",	KSTAT_DATA_UINT64 },
+	{ "buf_avail",		KSTAT_DATA_UINT64 },
+	{ "buf_inuse",		KSTAT_DATA_UINT64 },
+	{ "buf_total",		KSTAT_DATA_UINT64 },
+	{ "buf_max",		KSTAT_DATA_UINT64 },
+	{ "slab_create",	KSTAT_DATA_UINT64 },
+	{ "slab_destroy",	KSTAT_DATA_UINT64 },
+	{ "vmem_source",	KSTAT_DATA_UINT64 },
+	{ "hash_size",		KSTAT_DATA_UINT64 },
+	{ "hash_lookup_depth",	KSTAT_DATA_UINT64 },
+	{ "hash_rescale",	KSTAT_DATA_UINT64 },
+	{ "full_magazines",	KSTAT_DATA_UINT64 },
+	{ "empty_magazines",	KSTAT_DATA_UINT64 },
+	{ "magazine_size",	KSTAT_DATA_UINT64 },
+	{ "reap",		KSTAT_DATA_UINT64 },
+	{ "defrag",		KSTAT_DATA_UINT64 },
+	{ "scan",		KSTAT_DATA_UINT64 },
+	{ "move_callbacks",	KSTAT_DATA_UINT64 },
+	{ "move_yes",		KSTAT_DATA_UINT64 },
+	{ "move_no",		KSTAT_DATA_UINT64 },
+	{ "move_later",		KSTAT_DATA_UINT64 },
+	{ "move_dont_need",	KSTAT_DATA_UINT64 },
+	{ "move_dont_know",	KSTAT_DATA_UINT64 },
+	{ "move_hunt_found",	KSTAT_DATA_UINT64 },
+	{ "move_slabs_freed",	KSTAT_DATA_UINT64 },
+	{ "move_reclaimable",	KSTAT_DATA_UINT64 },
+};
+
+static kmutex_t kmem_cache_kstat_lock;
+
 typedef struct bmalloc_stats {
 	kstat_named_t bmalloc_app_allocated;
 	kstat_named_t bmalloc_system_allocated;
 	kstat_named_t bmalloc_space_efficiency_percent;
 	kstat_named_t bmalloc_active_threads;
+	kstat_named_t monitor_thread_wake_count;
+	kstat_named_t monitor_thread_last_num_pages_requested;
 } bmalloc_stats_t;
 
 static bmalloc_stats_t bmalloc_stats = {
@@ -237,6 +320,8 @@ static bmalloc_stats_t bmalloc_stats = {
 	{"bmalloc_allocated", KSTAT_DATA_UINT64},
 	{"space_efficiency_percent", KSTAT_DATA_UINT64},
 	{"active_threads", KSTAT_DATA_UINT64},
+	{"monitor_thread_wake_count", KSTAT_DATA_UINT64},
+	{"monitor_thread_page_req", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *bmalloc_ksp = 0;
@@ -256,6 +341,8 @@ static void reap_finish_task_proc();
 
 static void kmem_reap_all_task();
 static void kmem_reap_all_task_proc();
+
+static int kmem_cache_kstat_update(kstat_t *ksp, int rw);
 
 #ifdef PRINT_CACHE_STATS
 static void print_all_cache_stats_task();
@@ -397,9 +484,6 @@ kmem_num_pages_wanted()
 {
 	uint64_t tmp = num_pages_wanted;
 	num_pages_wanted = 0;
-
-	//printf("num pages wanted -> %llu\n", tmp);
-
 	return tmp;
 }
 
@@ -502,8 +586,6 @@ kmem_magazine_release(kmem_cache_t *cp, kmem_magazine_t *mp)
 static void
 kmem_magazine_destroy(kmem_cache_t *cp, kmem_magazine_t *mp, uint64_t nrounds)
 {
-	//printf("kmem_magazine_destroy\n");
-
     int round;
 
     for (round = 0; round < nrounds; round++) {
@@ -512,8 +594,8 @@ kmem_magazine_destroy(kmem_cache_t *cp, kmem_magazine_t *mp, uint64_t nrounds)
         if (cp->cache_destructor) {
             cp->cache_destructor(buf, cp->cache_private);
         }
-
-        bfree(buf, cp->cache_bufsize);
+		
+        slice_allocator_free(&cp->cache_slices, buf, cp->cache_bufsize);
     }
 
     // Place the magazine in the freelist for reuse
@@ -799,9 +881,13 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 
     /*
      * Massive differences to illumos here.
-     * all the slab stuff is missing.
+     * Initialise the slicer
      */
-
+	
+	// NOTE: This mutex does not do a lot, the slices are internally locked
+	mutex_init(&cache->cache_lock, "cache_lock", MUTEX_DEFAULT, NULL);
+	slice_allocator_init(&cache->cache_slices, bufsize);
+	
     /*
      * Select magazine to use etc
      */
@@ -813,6 +899,20 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 
     cache->cache_magtype = mtp;
 
+	/*
+	 * Create the cache's kstats.
+	 */
+	if ((cache->cache_kstat = kstat_create("spl", 0, cache->cache_name,
+										"kmem_cache", KSTAT_TYPE_NAMED,
+										sizeof (kmem_cache_kstat) / sizeof (kstat_named_t),
+										KSTAT_FLAG_VIRTUAL)) != NULL) {
+		cache->cache_kstat->ks_data = &kmem_cache_kstat;
+		cache->cache_kstat->ks_update = kmem_cache_kstat_update;
+		cache->cache_kstat->ks_private = cache;
+		cache->cache_kstat->ks_lock = &kmem_cache_kstat_lock;
+		kstat_install(cache->cache_kstat);
+	}
+	
     /*
      * Add the cache to the global list.  This makes it visible
      * to kmem_update(), so the cache must be ready for business.
@@ -850,12 +950,17 @@ kmem_cache_destroy(kmem_cache_t *cp)
     cp->cache_destructor = (void (*)(void *, void *))2;
     cp->cache_reclaim = (void (*)(void *))3;
 
+    kstat_delete(cp->cache_kstat);
+	
     // Terminate cache internals
     for (int i=0; i<max_ncpus; i++) {
         kmem_cpu_cache_fini(&cp->cache_cpu[i]);
     }
     kmem_depot_fini(cp);
-
+	
+	slice_allocator_fini(&cp->cache_slices);
+    // FIXME destroy cp->cache_mutex
+	
     // Free the cache structures
     bfree(cp, sizeof(*cp));
 }
@@ -917,7 +1022,7 @@ kmem_cache_alloc(kmem_cache_t *cp, int flags)
      * We couldn't allocate a constructed object from the magazine layer,
      * so get a raw buffer from the slab layer and apply its constructor.
      */
-    buf = bmalloc(cp->cache_bufsize, flags);
+	buf = slice_allocator_alloc(&cp->cache_slices, cp->cache_bufsize);
     if (buf && cp->cache_constructor)
         cp->cache_constructor(buf, cp->cache_private, flags);
 
@@ -978,7 +1083,7 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
         cp->cache_destructor(buf, cp->cache_private);
     }
 
-    bfree(buf, cp->cache_bufsize);
+    slice_allocator_free(&cp->cache_slices, buf, cp->cache_bufsize);
 }
 
 
@@ -993,6 +1098,8 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
 void
 kmem_cache_reap(kmem_cache_t *cp)
 {
+	cp->cache_reap++;
+	
     /*
      * Ask the cache's owner to free some memory if possible.
      * The idea is to handle things like the inode cache, which
@@ -1106,10 +1213,12 @@ kmem_alloc_caches_create(const int *array, size_t count,
 static void
 kmem_cache_init(int pass, int use_large_pages)
 {
-	int i = 0;
+	//int i = 0;
 	size_t maxbuf = KMEM_BIG_MAXBUF;
-	kmem_magtype_t *mtp;
+	//kmem_magtype_t *mtp;
 
+#if 0
+	
 	/*
 	 * Create the magazine caches
 	 */
@@ -1140,7 +1249,8 @@ kmem_cache_init(int pass, int use_large_pages)
 	kmem_bufctl_audit_cache = kmem_cache_create("kmem_bufctl_audit_cache",
 												sizeof (kmem_bufctl_audit_t), 0, NULL, NULL, NULL, NULL,
 												NULL /*kmem_msb_arena*/, KMC_NOHASH);
-
+#endif
+	
     /*
 	 * Set up the default caches to back kmem_alloc()
 	 */
@@ -1222,6 +1332,10 @@ kmem_asprintf(const char *fmt, ...)
 void memory_monitor_thread_continue()
 {
 	static int first_time = 1;
+	kern_return_t kr;
+	unsigned int nsecs_monitored = 1000000000 / 4;
+	unsigned int pages_reclaimed = 0;
+	unsigned int os_num_pages_wanted = 0;
 
 	if (first_time) {
 		//printf("memory pressure monitor thread started\n");
@@ -1229,18 +1343,15 @@ void memory_monitor_thread_continue()
 		assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
 		thread_block((thread_continue_t)memory_monitor_thread_continue);
 	} else {
-		kern_return_t kr;
-		unsigned int nsecs_monitored = 1000000000 / 4;
-		unsigned int pages_reclaimed = 0;
-
 		while (!shutting_down) {
-			wake_count++;
+			bmalloc_stats.monitor_thread_wake_count.value.ui64++;
 
 			kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
-										  &pages_reclaimed, &num_pages_wanted);
+						  &pages_reclaimed, &os_num_pages_wanted);
 
-			if (kr == KERN_SUCCESS && num_pages_wanted) {
-				memory_pressure_task(num_pages_wanted);
+			if (kr == KERN_SUCCESS && os_num_pages_wanted) {
+				bmalloc_stats.monitor_thread_last_num_pages_requested.value.ui64 = os_num_pages_wanted;
+				memory_pressure_task(os_num_pages_wanted);
 			}
 		}
 	}
@@ -1283,14 +1394,23 @@ static void bmalloc_maintenance_task_proc(void *p)
 void memory_pressure_task(void *p)
 {
 	uint64_t num_pages = (uint64_t)(p);
+	uint64_t num_pages_released = 0;
+
+
+//printf("[SPL] request release of %llu\n pages\n", num_pages);
 
 	// Attempt to give the OS as many pages as it is
 	// seeking from the memory cached by bmalloc.
 	//
 	// If bmalloc cant satisfy the request completely
 	// then we have to resort to having ZFS start releasing memory.
-	if (!bmalloc_release_pages(num_pages)) {
+	num_pages_released = bmalloc_release_pages(num_pages);
+
+	//printf("[SPL] released %llu\n pages\n", num_pages_released);
+	
+	if (num_pages_released < num_pages) {
 		// Set flag for spl_vm_pool_low callers
+		num_pages_wanted = num_pages - num_pages_released;
 		machine_is_swapping = 1;
 
 		// And request memory holders release memory.
@@ -1317,7 +1437,7 @@ static void kmem_reap_task_finish(void *p)
 {
 	// Drop all unwanted cached memory out of bmalloc
 	bmalloc_garbage_collect();
-	bmalloc_release_memory();
+	//bmalloc_release_memory();
 }
 
 static void reap_finish_task_proc()
@@ -1435,6 +1555,127 @@ kmem_update(void *dummy)
         kmem_update_timeout(NULL);
 }
 
+static int
+kmem_cache_kstat_update(kstat_t *ksp, int rw)
+{
+	struct kmem_cache_kstat *kmcp = &kmem_cache_kstat;
+	kmem_cache_t *cp = ksp->ks_private;
+	uint64_t cpu_buf_avail;
+	uint64_t buf_avail = 0;
+	int cpu_seqid;
+	long reap;
+	
+	printf("kmem_cache_kstat_update %s\n", cp->cache_name);
+	
+	ASSERT(MUTEX_HELD(&kmem_cache_kstat_lock));
+	
+	//if (rw == KSTAT_WRITE)
+	//	return (EACCES);
+	
+	mutex_enter(&cp->cache_lock);
+	
+	kmcp->kmc_alloc_fail.value.ui64	= cp->cache_slices.slice_alloc_fail;
+	kmcp->kmc_alloc.value.ui64		= cp->cache_slices.slice_alloc;
+	kmcp->kmc_free.value.ui64		= cp->cache_slices.slice_free;
+	kmcp->kmc_slab_alloc.value.ui64	= cp->cache_slices.slices_created;
+	kmcp->kmc_slab_free.value.ui64	= cp->cache_slices.slices_destroyed;
+	
+	for (cpu_seqid = 0; cpu_seqid < max_ncpus; cpu_seqid++) {
+		kmem_cpu_cache_t *ccp = &cp->cache_cpu[cpu_seqid];
+		
+		mutex_enter(&ccp->cc_lock);
+		
+		cpu_buf_avail = 0;
+		if (ccp->cc_rounds > 0)
+			cpu_buf_avail += ccp->cc_rounds;
+		if (ccp->cc_prounds > 0)
+			cpu_buf_avail += ccp->cc_prounds;
+		
+		kmcp->kmc_alloc.value.ui64 += ccp->cc_alloc;
+		kmcp->kmc_free.value.ui64  += ccp->cc_free;
+		buf_avail			+= cpu_buf_avail;
+		
+		mutex_exit(&ccp->cc_lock);
+	}
+	
+	mutex_enter(&cp->cache_depot_lock);
+	
+	kmcp->kmc_depot_alloc.value.ui64	= cp->cache_full.ml_alloc;
+	kmcp->kmc_depot_free.value.ui64		= cp->cache_empty.ml_alloc;
+	kmcp->kmc_depot_contention.value.ui64	= cp->cache_depot_contention;
+	kmcp->kmc_full_magazines.value.ui64	= cp->cache_full.ml_total;
+	kmcp->kmc_empty_magazines.value.ui64	= cp->cache_empty.ml_total;
+	kmcp->kmc_magazine_size.value.ui64	=
+	(cp->cache_flags & KMF_NOMAGAZINE) ?
+	0 : cp->cache_magtype->mt_magsize;
+	
+	kmcp->kmc_alloc.value.ui64		+= cp->cache_full.ml_alloc;
+	kmcp->kmc_free.value.ui64		+= cp->cache_empty.ml_alloc;
+	buf_avail += cp->cache_full.ml_total * cp->cache_magtype->mt_magsize;
+	
+	reap = MIN(cp->cache_full.ml_reaplimit, cp->cache_full.ml_min);
+	reap = MIN(reap, cp->cache_full.ml_total);
+	
+	mutex_exit(&cp->cache_depot_lock);
+	
+	kmcp->kmc_buf_size.value.ui64	= cp->cache_bufsize;
+	kmcp->kmc_align.value.ui64	= cp->cache_align;
+	kmcp->kmc_chunk_size.value.ui64	= cp->cache_chunksize;
+	kmcp->kmc_slab_size.value.ui64	= cp->cache_slabsize;
+	kmcp->kmc_buf_constructed.value.ui64 = buf_avail;
+	buf_avail += cp->cache_bufslab;
+	kmcp->kmc_buf_avail.value.ui64	= buf_avail;
+	kmcp->kmc_buf_inuse.value.ui64	= cp->cache_buftotal - buf_avail;
+	kmcp->kmc_buf_total.value.ui64	= cp->cache_buftotal;
+	kmcp->kmc_buf_max.value.ui64	= cp->cache_bufmax;
+	kmcp->kmc_slab_create.value.ui64	= cp->cache_slab_create;
+	kmcp->kmc_slab_destroy.value.ui64	= cp->cache_slab_destroy;
+	//kmcp->kmc_hash_size.value.ui64	= (cp->cache_flags & KMF_HASH) ?
+	//cp->cache_hash_mask + 1 : 0;
+	//kmcp->kmc_hash_lookup_depth.value.ui64	= cp->cache_lookup_depth;
+	//kmcp->kmc_hash_rescale.value.ui64	= cp->cache_rescale;
+	//kmcp->kmc_vmem_source.value.ui64	= cp->cache_arena->vm_id;
+	kmcp->kmc_reap.value.ui64	= cp->cache_reap;
+	
+	//if (cp->cache_defrag == NULL) {
+		kmcp->kmc_move_callbacks.value.ui64	= 0;
+		kmcp->kmc_move_yes.value.ui64		= 0;
+		kmcp->kmc_move_no.value.ui64		= 0;
+		kmcp->kmc_move_later.value.ui64		= 0;
+		kmcp->kmc_move_dont_need.value.ui64	= 0;
+		kmcp->kmc_move_dont_know.value.ui64	= 0;
+		kmcp->kmc_move_hunt_found.value.ui64	= 0;
+		kmcp->kmc_move_slabs_freed.value.ui64	= 0;
+		kmcp->kmc_defrag.value.ui64		= 0;
+		kmcp->kmc_scan.value.ui64		= 0;
+		kmcp->kmc_move_reclaimable.value.ui64	= 0;
+#if 0
+} else {
+		int64_t reclaimable;
+		
+		kmem_defrag_t *kd = cp->cache_defrag;
+		kmcp->kmc_move_callbacks.value.ui64	= kd->kmd_callbacks;
+		kmcp->kmc_move_yes.value.ui64		= kd->kmd_yes;
+		kmcp->kmc_move_no.value.ui64		= kd->kmd_no;
+		kmcp->kmc_move_later.value.ui64		= kd->kmd_later;
+		kmcp->kmc_move_dont_need.value.ui64	= kd->kmd_dont_need;
+		kmcp->kmc_move_dont_know.value.ui64	= kd->kmd_dont_know;
+		kmcp->kmc_move_hunt_found.value.ui64	= kd->kmd_hunt_found;
+		kmcp->kmc_move_slabs_freed.value.ui64	= kd->kmd_slabs_freed;
+		kmcp->kmc_defrag.value.ui64		= kd->kmd_defrags;
+		kmcp->kmc_scan.value.ui64		= kd->kmd_scans;
+		
+		reclaimable = cp->cache_bufslab - (cp->cache_maxchunks - 1);
+		reclaimable = MAX(reclaimable, 0);
+		reclaimable += ((uint64_t)reap * cp->cache_magtype->mt_magsize);
+		kmcp->kmc_move_reclaimable.value.ui64	= reclaimable;
+	}
+#endif
+	
+	mutex_exit(&cp->cache_lock);
+	return (0);
+}
+
 static void kmem_reap_all_task()
 {
 	kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
@@ -1487,6 +1728,9 @@ spl_kmem_init(uint64_t total_memory)
     kmem_group_attr = lck_grp_attr_alloc_init();
     kmem_lock_group  = lck_grp_alloc_init("kmem-spinlocks", kmem_group_attr);
 
+	// Initialise the kstat lock
+	mutex_init(&kmem_cache_kstat_lock, "kmem_cache_kstat_lock", MUTEX_DEFAULT, NULL);
+	
     // Initialise the cache list
     mutex_init(&kmem_cache_lock, "kmem", MUTEX_DEFAULT, NULL);
     list_create(&kmem_caches, sizeof(kmem_cache_t), offsetof(kmem_cache_t, cache_link));

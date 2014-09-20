@@ -37,6 +37,7 @@
 //#include <vm/page.h>
 #include <sys/avl.h>
 #include <sys/list.h>
+#include <spl-bmalloc.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -270,7 +271,7 @@ extern "C" {
 		uint32_t		mt_minbuf;	/* all smaller buffers qualify */
 		uint32_t		mt_maxbuf;	/* no larger buffers qualify */
 		lck_spin_t		*mt_lock;   /* protect the list of magazines */
-		kmem_cache_t	*mt_cache;	/* magazine cache */ /* NOT COMPLETE */
+//		kmem_cache_t	*mt_cache;	/* magazine cache */ /* NOT COMPLETE */
 		list_t			mt_list;    /* cache of magazines of this size */
 	} kmem_magtype_t;
 
@@ -396,13 +397,16 @@ extern "C" {
 		int					cache_flags;				/* various cache state info */
 		uint32_t			cache_mtbf;					/* induced alloc failure rate */
 		uint32_t			cache_pad1;					/* compiler padding */
-//		kstat_t				*cache_kstat;				/* exported statistics */
+		kstat_t				*cache_kstat;				/* exported statistics */
 		list_node_t			cache_link;					/* cache linkage */
 
 		/*
 		 * Slab layer
 		 */
 		kmutex_t			cache_lock;					/* protects slab layer */
+		slice_allocator_t   cache_slices;               /* bmallocs slice allocator */
+		
+		// basically not used yet below
 		size_t				cache_chunksize;			/* buf + alignment [+ debug] */
 		size_t				cache_slabsize;				/* size of a slab */
 		size_t				cache_maxchunks;			/* max buffers per slab */
@@ -423,6 +427,8 @@ extern "C" {
 		kmem_bufctl_t		**cache_hash_table;			/* hash table base */
 		kmem_defrag_t		*cache_defrag;				/* slab consolidator fields */
 
+		// end not used
+		
 		/*
 		 * Depot layer
 		 */
