@@ -307,18 +307,16 @@ struct kmem_cache_kstat {
 static kmutex_t kmem_cache_kstat_lock;
 
 typedef struct bmalloc_stats {
-	kstat_named_t bmalloc_app_allocated;
-	kstat_named_t bmalloc_system_allocated;
-	kstat_named_t bmalloc_space_efficiency_percent;
+	kstat_named_t bmalloc_spl_internal_alloc;
+	kstat_named_t bmalloc_os_alloc;
 	kstat_named_t bmalloc_active_threads;
 	kstat_named_t monitor_thread_wake_count;
 	kstat_named_t monitor_thread_last_num_pages_requested;
 } bmalloc_stats_t;
 
 static bmalloc_stats_t bmalloc_stats = {
-	{"apps_allocated", KSTAT_DATA_UINT64},
-	{"bmalloc_allocated", KSTAT_DATA_UINT64},
-	{"space_efficiency_percent", KSTAT_DATA_UINT64},
+	{"spl_internal_alloc", KSTAT_DATA_UINT64},
+	{"bmalloc_os_alloc", KSTAT_DATA_UINT64},
 	{"active_threads", KSTAT_DATA_UINT64},
 	{"monitor_thread_wake_count", KSTAT_DATA_UINT64},
 	{"monitor_thread_page_req", KSTAT_DATA_UINT64},
@@ -1621,7 +1619,7 @@ kmem_cache_kstat_update(kstat_t *ksp, int rw)
 	kmcp->kmc_buf_size.value.ui64	= cp->cache_bufsize;
 	kmcp->kmc_align.value.ui64	= cp->cache_align;
 	kmcp->kmc_chunk_size.value.ui64	= cp->cache_chunksize;
-	kmcp->kmc_slab_size.value.ui64	= cp->cache_slabsize;
+	kmcp->kmc_slab_size.value.ui64	= cp->cache_slices.slice_size;
 	kmcp->kmc_buf_constructed.value.ui64 = buf_avail;
 	buf_avail += cp->cache_bufslab;
 	kmcp->kmc_buf_avail.value.ui64	= buf_avail;
@@ -1699,9 +1697,8 @@ bmalloc_kstat_update(kstat_t *ksp, int rw)
 	if (rw == KSTAT_WRITE) {
 		return (SET_ERROR(EACCES));
 	} else {
-		bs->bmalloc_app_allocated.value.ui64 = bmalloc_app_allocated_total;
-		bs->bmalloc_system_allocated.value.ui64 = bmalloc_allocated_total;
-		bs->bmalloc_space_efficiency_percent.value.ui64 = (bmalloc_app_allocated_total * 100)/bmalloc_allocated_total;
+		bs->bmalloc_spl_internal_alloc.value.ui64 = bmalloc_app_allocated_total;
+		bs->bmalloc_os_alloc.value.ui64 = bmalloc_allocated_total;
 		bs->bmalloc_active_threads.value.ui64 = zfs_threads;
 	}
 
