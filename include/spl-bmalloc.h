@@ -133,6 +133,7 @@ typedef struct slice_allocator {
 	uint64_t                        slice_alloc;       /* allocation count */
 	uint64_t                        slice_free;        /* free count */
 	uint64_t                        slice_alloc_fail;  /* num failed allocs */
+	uint64_t			free_slices;	   /* number of empty slices cached */
 	
 	/*
 	 * State
@@ -170,16 +171,9 @@ void* bzmalloc(uint64_t size, int flags);
 void bfree(void* buf, uint64_t size);
 
 //
-// Release all free memory within the allocator
-// Should be invoked if the machine is under
-// memory pressure.
-//
-void bmalloc_release_memory();
-
-//
 // Attempt to release <num_pages> pages of
 // memory from the free memory block collection.
-// Returns true if request was met, false otherwise.
+// Returns number of pages released.
 int bmalloc_release_pages(uint64_t num_pages);
 
 //
@@ -206,9 +200,6 @@ slice_allocator_alloc(slice_allocator_t *sa, sa_size_t size);
 
 void
 slice_allocator_free(slice_allocator_t *sa, void *buf, sa_size_t size);
-
-void
-slice_allocator_release_memory(slice_allocator_t *sa);
 
 void
 slice_allocator_fini(slice_allocator_t *sa);

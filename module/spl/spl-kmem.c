@@ -99,7 +99,10 @@ extern uint64_t		bmalloc_allocated_total;
 extern uint64_t		bmalloc_app_allocated_total;
 
 // Number of active threads
-extern uint64_t     zfs_threads;
+extern uint64_t		zfs_threads;
+
+// Number of garbage collects against bmalloc
+uint64_t		bmalloc_gc_count = 0;
 
 // Number of pages the OS last reported that it needed freed
 unsigned int		num_pages_wanted = 0;
@@ -237,6 +240,7 @@ struct kmem_cache_kstat {
 	kstat_named_t	kmc_depot_contention;
 	kstat_named_t	kmc_slab_alloc;
 	kstat_named_t	kmc_slab_free;
+	kstat_named_t	kmc_free_slabs;
 	kstat_named_t	kmc_buf_constructed;
 	kstat_named_t	kmc_buf_avail;
 	kstat_named_t	kmc_buf_inuse;
@@ -276,6 +280,7 @@ struct kmem_cache_kstat {
 	{ "depot_contention",	KSTAT_DATA_UINT64 },
 	{ "slab_alloc",		KSTAT_DATA_UINT64 },
 	{ "slab_free",		KSTAT_DATA_UINT64 },
+	{ "free_slabs",		KSTAT_DATA_UINT64 },
 	{ "buf_constructed",	KSTAT_DATA_UINT64 },
 	{ "buf_avail",		KSTAT_DATA_UINT64 },
 	{ "buf_inuse",		KSTAT_DATA_UINT64 },
@@ -309,6 +314,7 @@ static kmutex_t kmem_cache_kstat_lock;
 typedef struct bmalloc_stats {
 	kstat_named_t bmalloc_spl_internal_alloc;
 	kstat_named_t bmalloc_os_alloc;
+	kstat_named_t bmalloc_gc_count;
 	kstat_named_t bmalloc_active_threads;
 	kstat_named_t monitor_thread_wake_count;
 	kstat_named_t monitor_thread_last_num_pages_requested;
@@ -317,6 +323,7 @@ typedef struct bmalloc_stats {
 static bmalloc_stats_t bmalloc_stats = {
 	{"spl_internal_alloc", KSTAT_DATA_UINT64},
 	{"bmalloc_os_alloc", KSTAT_DATA_UINT64},
+	{"bmalloc_gc_count", KSTAT_DATA_UINT64},
 	{"active_threads", KSTAT_DATA_UINT64},
 	{"monitor_thread_wake_count", KSTAT_DATA_UINT64},
 	{"monitor_thread_page_req", KSTAT_DATA_UINT64},
@@ -1350,6 +1357,7 @@ void memory_monitor_thread_continue()
 			if (kr == KERN_SUCCESS && os_num_pages_wanted) {
 				bmalloc_stats.monitor_thread_last_num_pages_requested.value.ui64 = os_num_pages_wanted;
 				memory_pressure_task(os_num_pages_wanted);
+				osx_delay(hz/10);
 			}
 		}
 	}
@@ -1376,8 +1384,8 @@ static void stop_memory_monitor()
 
 void bmalloc_maintenance_task()
 {
-	//printf("bmalloc gc\n");
-
+	//printf("bmalloc gc\n");	
+    bmalloc_gc_count++; 
     bmalloc_garbage_collect();
     if(!shutting_down) {
         bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
@@ -1416,11 +1424,6 @@ void memory_pressure_task(void *p)
 	}
 }
 
-void bmalloc_release_memory_task()
-{
-	bmalloc_release_memory();
-}
-
 static void kmem_reap_task(void *p)
 {
 	// Request memory holders release memory.
@@ -1433,8 +1436,9 @@ static void kmem_reap_task(void *p)
 
 static void kmem_reap_task_finish(void *p)
 {
+#warning thing about whether this is needed.
 	// Drop all unwanted cached memory out of bmalloc
-	bmalloc_garbage_collect();
+	//bmalloc_garbage_collect();
 	//bmalloc_release_memory();
 }
 
@@ -1442,7 +1446,7 @@ static void reap_finish_task_proc()
 {
 	if(!shutting_down) {
 		taskq_dispatch(kmem_taskq, kmem_reap_task_finish, 0, TQ_PUSHPAGE);
-    }
+	}
 }
 
 /*
@@ -1577,6 +1581,7 @@ kmem_cache_kstat_update(kstat_t *ksp, int rw)
 	kmcp->kmc_free.value.ui64		= cp->cache_slices.slice_free;
 	kmcp->kmc_slab_alloc.value.ui64	= cp->cache_slices.slices_created;
 	kmcp->kmc_slab_free.value.ui64	= cp->cache_slices.slices_destroyed;
+	kmcp->kmc_free_slabs.value.ui64 = cp->cache_slices.free_slices;
 	
 	for (cpu_seqid = 0; cpu_seqid < max_ncpus; cpu_seqid++) {
 		kmem_cpu_cache_t *ccp = &cp->cache_cpu[cpu_seqid];
@@ -1700,6 +1705,7 @@ bmalloc_kstat_update(kstat_t *ksp, int rw)
 		bs->bmalloc_spl_internal_alloc.value.ui64 = bmalloc_app_allocated_total;
 		bs->bmalloc_os_alloc.value.ui64 = bmalloc_allocated_total;
 		bs->bmalloc_active_threads.value.ui64 = zfs_threads;
+		bs->bmalloc_gc_count.value.ui64 = bmalloc_gc_count;
 	}
 
 	return (0);
@@ -1776,7 +1782,7 @@ void spl_kmem_tasks_fini()
     bsd_untimeout(kmem_reap_all_task_proc, 0);
     bsd_untimeout(reap_finish_task_proc, 0);
 
-	stop_memory_monitor();
+    stop_memory_monitor();
 
 #ifdef PRINT_CACHE_STATS
 	bsd_untimeout(print_all_cache_stats_task_proc, 0);

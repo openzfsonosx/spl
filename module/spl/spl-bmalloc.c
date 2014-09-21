@@ -116,6 +116,8 @@
 // Base Types
 // =============================================================================
 
+#define SA_USE_FREELIST 1
+
 
 #define	SA_TRUE (sa_bool_t)1;
 #define	SA_FALSE (sa_bool_t)0;
@@ -706,7 +708,7 @@ slice_allocator_empty_list(slice_allocator_t *sa, list_t *list)
 	while (!list_is_empty(list)) {
 		slice_t *slice = list_head(list);
 		list_remove(list, slice);
-	    sa->slices_destroyed++;
+	    	sa->slices_destroyed++;
 		lck_spin_unlock(sa->spinlock);
 		slice_fini(slice);
 		osif_free(slice, sa->slice_size);
@@ -798,8 +800,9 @@ slice_allocator_alloc(slice_allocator_t *sa, sa_size_t size)
 	if (!list_is_empty(&sa->partial)) {
 		slice = list_head(&sa->partial);
 	} else if (!list_is_empty(&sa->free)) {
-		slice = list_tail(&sa->free);
-		list_remove_tail(&sa->free);
+		slice = list_head(&sa->free);
+		list_remove_head(&sa->free);
+		sa->free_slices--;
 		list_insert_head(&sa->partial, slice);
 	} else {
 		lck_spin_unlock(sa->spinlock);
@@ -899,26 +902,26 @@ slice_allocator_free(slice_allocator_t *sa, void *buf, sa_size_t size)
 		slice->time_freed = osif_gethrtime();
 		sa->slices_destroyed++;
 		
+#ifdef SA_USE_FREELIST
+		list_insert_head(&sa->free, slice);
+		sa->free_slices++;
+#else
 		lck_spin_unlock(sa->spinlock);
 		slice_fini(slice);
 		osif_free(slice, sa->slice_size);
 		return;
-		
-//		list_insert_head(&sa->free, slice);
+#endif
 	}
 	
 	lck_spin_unlock(sa->spinlock);
 }
 
-void
-slice_allocator_release_memory(slice_allocator_t *sa)
-{
-	slice_allocator_empty_list(sa, &sa->free);
-}
-
 static uint64_t
 slice_allocator_release_pages(slice_allocator_t *sa, uint64_t num_pages)
 {
+#warning debug
+return 0;
+
 	uint64_t num_pages_released = 0;
 	list_t *list = &sa->free;
 	
@@ -963,6 +966,8 @@ slice_allocator_garbage_collect(slice_allocator_t *sa)
 			if (now - slice->time_freed >
 			    SA_MAX_SLICE_FREE_MEM_AGE) {
 				list_remove_tail(&sa->free);
+				sa->free_slices--;
+				sa->slices_destroyed++;
 				
 				lck_spin_unlock(sa->spinlock);
 				slice_fini(slice);
@@ -1178,14 +1183,6 @@ bfree(void *buf, sa_size_t size)
 	}
 	
 	atomic_sub_64(&bmalloc_app_allocated_total, size);
-}
-
-void
-bmalloc_release_memory()
-{
-	for (int i = 0; i < NUM_ALLOCATORS; i++) {
-		slice_allocator_release_memory(&allocators[i]);
-	}
 }
 
 int
