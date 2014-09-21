@@ -202,6 +202,9 @@ void
 slice_allocator_free(slice_allocator_t *sa, void *buf, sa_size_t size);
 
 void
+slice_allocator_garbage_collect(slice_allocator_t *sa);
+
+void
 slice_allocator_fini(slice_allocator_t *sa);
 
 

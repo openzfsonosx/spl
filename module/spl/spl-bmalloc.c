@@ -945,7 +945,7 @@ return 0;
 	return num_pages_released;
 }
 
-static void
+void
 slice_allocator_garbage_collect(slice_allocator_t *sa)
 {
 	sa_hrtime_t now = osif_gethrtime();

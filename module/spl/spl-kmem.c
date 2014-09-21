@@ -1131,6 +1131,7 @@ kmem_cache_reap(kmem_cache_t *cp)
     }
 
     kmem_depot_ws_reap(cp);
+	slice_allocator_garbage_collect(&cp->cache_slices);
 }
 
 /*
