@@ -174,7 +174,7 @@ void bfree(void* buf, uint64_t size);
 // Attempt to release <num_pages> pages of
 // memory from the free memory block collection.
 // Returns number of pages released.
-int bmalloc_release_pages(uint64_t num_pages);
+uint64_t bmalloc_release_pages(uint64_t num_pages);
 
 //
 // Manages from free memory within the allocator.
@@ -203,6 +203,9 @@ slice_allocator_free(slice_allocator_t *sa, void *buf, sa_size_t size);
 
 void
 slice_allocator_garbage_collect(slice_allocator_t *sa);
+
+uint64_t
+slice_allocator_release_pages(slice_allocator_t *sa, uint64_t num_pages);
 
 void
 slice_allocator_fini(slice_allocator_t *sa);

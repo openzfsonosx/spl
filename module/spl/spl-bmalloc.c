@@ -916,12 +916,9 @@ slice_allocator_free(slice_allocator_t *sa, void *buf, sa_size_t size)
 	lck_spin_unlock(sa->spinlock);
 }
 
-static uint64_t
+uint64_t
 slice_allocator_release_pages(slice_allocator_t *sa, uint64_t num_pages)
 {
-#warning debug
-return 0;
-
 	uint64_t num_pages_released = 0;
 	list_t *list = &sa->free;
 	
@@ -930,10 +927,13 @@ return 0;
 	while (!list_is_empty(list) && (num_pages_released < num_pages)) {
 		slice_t *slice = list_head(list);
 		list_remove(list, slice);
+
+		sa->free_slices--;
+		sa->slices_destroyed++;
 		
 		lck_spin_unlock(sa->spinlock);
-		slice_fini(slice);
 		
+		slice_fini(slice);
 		osif_free(slice, sa->slice_size);
 		num_pages_released += sa->slice_size / PAGE_SIZE;
 		
@@ -1185,7 +1185,7 @@ bfree(void *buf, sa_size_t size)
 	atomic_sub_64(&bmalloc_app_allocated_total, size);
 }
 
-int
+uint64_t
 bmalloc_release_pages(uint64_t num_pages)
 {
 	uint64_t num_pages_released = 0;

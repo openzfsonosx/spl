@@ -212,7 +212,6 @@ size_t	kmem_max_cached = KMEM_BIG_MAXBUF;	/* maximum kmem_alloc cache */
 static int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 
 static struct timespec	kmem_reap_all_task_timeout	= {15, 0};			// 15 seconds
-static struct timespec	reap_finish_task_timeout	= {0, 500000000};	// 0.5 seconds
 static struct timespec	kmem_update_interval		= {15, 0};			// 15 seconds
 static struct timespec	bmalloc_task_timeout		= {2, 500000000};	// 2.5 Seconds
 
@@ -340,9 +339,6 @@ static void kmem_reap_task(void *p);
 
 void bmalloc_release_memory_task();
 void memory_pressure_task();
-
-static void kmem_reap_task_finish(void *p);
-static void reap_finish_task_proc();
 
 static void kmem_reap_all_task();
 static void kmem_reap_all_task_proc();
@@ -1164,7 +1160,7 @@ kmem_reap()
 
 void kmem_flush()
 {
-	(void)taskq_dispatch(kmem_taskq, kmem_reap_task_finish, 0, TQ_PUSHPAGE);
+#warning work out how to implement flush
 }
 
 //===============================================================
@@ -1344,7 +1340,6 @@ void memory_monitor_thread_continue()
 	unsigned int os_num_pages_wanted = 0;
 
 	if (first_time) {
-		//printf("memory pressure monitor thread started\n");
 		first_time = 0;
 		assert_wait((event_t) &vm_page_free_wanted, THREAD_UNINT);
 		thread_block((thread_continue_t)memory_monitor_thread_continue);
@@ -1358,7 +1353,6 @@ void memory_monitor_thread_continue()
 			if (kr == KERN_SUCCESS && os_num_pages_wanted) {
 				bmalloc_stats.monitor_thread_last_num_pages_requested.value.ui64 = os_num_pages_wanted;
 				memory_pressure_task(os_num_pages_wanted);
-				osx_delay(hz/10);
 			}
 		}
 	}
@@ -1402,26 +1396,59 @@ void memory_pressure_task(void *p)
 {
 	uint64_t num_pages = (uint64_t)(p);
 	uint64_t num_pages_released = 0;
-
-
-//printf("[SPL] request release of %llu\n pages\n", num_pages);
-
+	uint64_t total_pages_released = 0;
+	kmem_cache_t *cp = 0;
+	
+	// Make sure everything you do in this method is syncronous.
+	// We want it to be somewhat self throttling, but more importantly
+	// this thread can wake very frequently when the machine
+	// is under memory pressure, and it can quickly overwhelm
+	// the bsd_timeout mechanism and other queues.
+	
 	// Attempt to give the OS as many pages as it is
 	// seeking from the memory cached by bmalloc.
-	//
-	// If bmalloc cant satisfy the request completely
-	// then we have to resort to having ZFS start releasing memory.
-	num_pages_released = bmalloc_release_pages(num_pages);
-
-	//printf("[SPL] released %llu\n pages\n", num_pages_released);
 	
-	if (num_pages_released < num_pages) {
+	// Lets see if bmalloc has anything to release
+	num_pages_released = bmalloc_release_pages(num_pages);
+	
+	num_pages -= num_pages_released;
+	total_pages_released += num_pages_released;
+	
+	// Now see what the caches can contribute from thier
+	// free slab lists.
+	if (num_pages) {
+		mutex_enter(&kmem_cache_lock);
+		
+		for (cp = list_head(&kmem_caches); cp != NULL && (num_pages > 0);
+			 cp = list_next(&kmem_caches, cp)) {
+			num_pages_released = slice_allocator_release_pages(&cp->cache_slices, num_pages);
+			num_pages -= num_pages_released;
+			total_pages_released += num_pages_released;
+		}
+		
+		mutex_exit(&kmem_cache_lock);
+	}
+	
+	if (num_pages > 0) {
 		// Set flag for spl_vm_pool_low callers
-		num_pages_wanted = num_pages - num_pages_released;
+		num_pages_wanted = num_pages;
 		machine_is_swapping = 1;
-
+		
 		// And request memory holders release memory.
 		kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+		
+		// Now see what the caches can contribute from thier
+		// free slab lists.
+		mutex_enter(&kmem_cache_lock);
+		
+		for (cp = list_head(&kmem_caches); cp != NULL && (num_pages > 0);
+			 cp = list_next(&kmem_caches, cp)) {
+			num_pages_released = slice_allocator_release_pages(&cp->cache_slices, num_pages);
+			num_pages -= num_pages_released;
+			total_pages_released += num_pages_released;
+		}
+		
+		mutex_exit(&kmem_cache_lock);
 	}
 }
 
@@ -1429,25 +1456,17 @@ static void kmem_reap_task(void *p)
 {
 	// Request memory holders release memory.
 	kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-
-	// Cache reaping is likely to be async, give the memory owners some
-	// time to implement before cleaning out unwanted memory.
-	bsd_timeout(reap_finish_task_proc, 0, &reap_finish_task_timeout);
 }
 
-static void kmem_reap_task_finish(void *p)
+static void kmem_reap_all_task()
 {
-#warning thing about whether this is needed.
-	// Drop all unwanted cached memory out of bmalloc
-	//bmalloc_garbage_collect();
-	//bmalloc_release_memory();
+	kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+	bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
 }
 
-static void reap_finish_task_proc()
+static void kmem_reap_all_task_proc()
 {
-	if(!shutting_down) {
-		taskq_dispatch(kmem_taskq, kmem_reap_task_finish, 0, TQ_PUSHPAGE);
-	}
+	taskq_dispatch(kmem_taskq, kmem_reap_all_task, 0, TQ_NOSLEEP);
 }
 
 /*
@@ -1680,17 +1699,6 @@ kmem_cache_kstat_update(kstat_t *ksp, int rw)
 	return (0);
 }
 
-static void kmem_reap_all_task()
-{
-	kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-    bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
-}
-
-static void kmem_reap_all_task_proc()
-{
-    taskq_dispatch(kmem_taskq, kmem_reap_all_task, 0, TQ_NOSLEEP);
-}
-
 //===============================================================
 // Initialisation/Finalisation
 //===============================================================
@@ -1764,10 +1772,6 @@ void spl_kmem_tasks_init()
     bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
 	start_memory_monitor();
     kmem_update_timeout(NULL);
-
-#ifdef PRINT_CACHE_STATS
-	bsd_timeout(print_all_cache_stats_task_proc, 0, &print_all_cache_stats_task_timeout);
-#endif
 }
 
 void spl_kmem_tasks_fini()
@@ -1781,7 +1785,6 @@ void spl_kmem_tasks_fini()
     bsd_untimeout(kmem_update, 0);
     bsd_untimeout(bmalloc_maintenance_task_proc, 0);
     bsd_untimeout(kmem_reap_all_task_proc, 0);
-    bsd_untimeout(reap_finish_task_proc, 0);
 
     stop_memory_monitor();
 
