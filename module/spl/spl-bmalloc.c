@@ -206,6 +206,30 @@ typedef uint32_t large_offset_t;
 #define	SA_NSEC_PER_USEC 1000;
 
 /*
+ * Pages of memory not required by a slice allocator are held in
+ * the memory pool until they are:
+ *   (a) required by the application
+ *   (b) exceed stale age and are freed
+ *   (c) are freed as a result of the OS demanding memory
+ */
+
+typedef struct {
+    sa_hrtime_t time_freed;
+    list_node_t memory_block_link_node;
+} memory_block_t;
+
+typedef struct {
+    sa_size_t	count;
+    list_t		blocks;
+    lck_spin_t	*spinlock;
+} memory_block_list_t;
+
+typedef struct {
+    memory_block_list_t	large_blocks;
+    memory_block_list_t	small_blocks;
+} memory_pool_t;
+
+/*
  * Dual purpose pointer
  */
 union row_navigation {
@@ -293,12 +317,32 @@ static const unsigned char POISON_VALUE = 0xFF;
 #endif /* SLICE_POISON_USER_SPACE */
 
 /*
+ * Low water mark for amount of memory to be retained in the block lists
+ * when garbage collecting.
+ */
+const sa_size_t RETAIN_MEMORY_SIZE = 10 * 1024 * 1024;   // bytes
+
+/*
+ * Block size and free block count for the large_blocks list.
+ * NOTE: This value must be larger than the largest
+ * configured Slice Allocator max_allocation_size.
+ */
+const sa_size_t LARGE_BLOCK_SIZE = (512 * 1024) + 4096;  // bytes
+const sa_size_t LARGE_FREE_MEMORY_BLOCK_COUNT =
+RETAIN_MEMORY_SIZE / LARGE_BLOCK_SIZE;
+
+/* Block size and free block count for the small_blocks list. */
+const sa_size_t SMALL_BLOCK_SIZE = PAGE_SIZE;		// bytes
+const sa_size_t SMALL_FREE_MEMORY_BLOCK_COUNT =
+RETAIN_MEMORY_SIZE / SMALL_BLOCK_SIZE;
+
+/*
  * Slices of memory that have no allocations in them will be returned to the
  * memory pool for use by other slice allocators. SA_MAX_POOL_FREE_MEM_AGE:
  * After being placed in the pool, if not claimed by a slice, the memory is
  * released to the underlying alloctor.
  */
-const sa_hrtime_t SA_MAX_POOL_FREE_MEM_AGE = 120 * SA_NSEC_PER_SEC;
+const sa_hrtime_t SA_MAX_POOL_FREE_MEM_AGE = 30 * SA_NSEC_PER_SEC;
 
 /*
  * Once there are no remaining allocations from a slice of memory, the Slice
@@ -307,7 +351,7 @@ const sa_hrtime_t SA_MAX_POOL_FREE_MEM_AGE = 120 * SA_NSEC_PER_SEC;
  * the memory pool for allocation by another slice allocator or release to the
  * underlying allocator.
  */
-const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 15 * SA_NSEC_PER_SEC;
+const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 2 * SA_NSEC_PER_SEC;
 
 /*
  * Sizes of various slices that are used by zfs. This table started out as a
@@ -358,6 +402,12 @@ const long NUM_ALLOCATORS = sizeof (ALLOCATOR_SLICE_SIZES) / sizeof (sa_size_t);
 static lck_grp_t *bmalloc_lock_group = NULL;
 static lck_attr_t *bmalloc_lock_attr = NULL;
 static lck_grp_attr_t *bmalloc_group_attr = NULL;
+
+/*
+ * Blocks of memory allocated from the underlying allocator, but not yet used as
+ * a slice by one of the slice allocators.
+ */
+static memory_pool_t pool;
 
 /* Collection of slice allocators */
 static slice_allocator_t *allocators = 0;
@@ -447,6 +497,220 @@ osif_gethrtime()
 	
 	return ((t.tv_sec * 1000000000) + (t.tv_usec * 1000));
 #endif /* IN_KERNEL */
+}
+
+// =============================================================================
+// Memory Pool
+// =============================================================================
+
+static void
+memory_pool_block_list_init(memory_block_list_t *list)
+{
+    list->count = 0;
+    list->spinlock = lck_spin_alloc_init(bmalloc_lock_group,
+                                         bmalloc_lock_attr);
+    list_create(&list->blocks, sizeof (memory_block_t),
+                offsetof(memory_block_t, memory_block_link_node));
+}
+
+static void
+memory_pool_block_list_fini(memory_block_list_t *list)
+{
+    list_destroy(&list->blocks);
+    lck_spin_destroy(list->spinlock, bmalloc_lock_group);
+}
+
+static void
+memory_pool_init()
+{
+    memory_pool_block_list_init(&pool.small_blocks);
+    memory_pool_block_list_init(&pool.large_blocks);
+}
+
+static void
+memory_pool_release_memory_list(memory_block_list_t *list, sa_size_t block_size)
+{
+    lck_spin_lock(list->spinlock);
+    
+    while (!list_is_empty(&list->blocks)) {
+        memory_block_t *block = list_head(&list->blocks);
+        list_remove_head(&list->blocks);
+        list->count--;
+        
+        lck_spin_unlock(list->spinlock);
+        osif_free(block, block_size);
+        lck_spin_lock(list->spinlock);
+    }
+    
+    lck_spin_unlock(list->spinlock);
+}
+
+static inline void
+memory_pool_release_memory()
+{
+    memory_pool_release_memory_list(&pool.small_blocks, SMALL_BLOCK_SIZE);
+    memory_pool_release_memory_list(&pool.large_blocks, LARGE_BLOCK_SIZE);
+}
+
+static uint64_t
+memory_pool_garbage_collect_list(memory_block_list_t *list,
+                                 sa_size_t block_size)
+{
+    uint64_t num_pages_released = 0;
+    sa_hrtime_t now = osif_gethrtime();
+    
+    lck_spin_lock(list->spinlock);
+    
+    while (!list_is_empty(&list->blocks)) {
+        memory_block_t *block = list_tail(&list->blocks);
+        if (now - block->time_freed >
+            SA_MAX_POOL_FREE_MEM_AGE) {
+            list_remove_tail(&list->blocks);
+            list->count--;
+            num_pages_released += block_size / PAGE_SIZE;
+            
+            lck_spin_unlock(list->spinlock);
+            osif_free(block, block_size);
+            lck_spin_lock(list->spinlock);
+        } else {
+            break;
+        }
+    }
+    
+    lck_spin_unlock(list->spinlock);
+    
+    return num_pages_released;
+}
+
+static inline uint64_t
+memory_pool_garbage_collect()
+{
+    uint64_t num_pages_released = 0;
+    
+    num_pages_released += memory_pool_garbage_collect_list(&pool.small_blocks, SMALL_BLOCK_SIZE);
+    num_pages_released += memory_pool_garbage_collect_list(&pool.large_blocks, LARGE_BLOCK_SIZE);
+    
+    return num_pages_released;
+}
+
+static void *
+memory_pool_claim(memory_block_list_t *list, sa_size_t block_size)
+{
+    memory_block_t *block = 0;
+    
+    lck_spin_lock(list->spinlock);
+    
+    if (!list_is_empty(&list->blocks)) {
+        block = list_head(&list->blocks);
+        list_remove_head(&list->blocks);
+        list->count--;
+    }
+    
+    lck_spin_unlock(list->spinlock);
+    
+    if (!block)
+        block = (memory_block_t *)osif_malloc(block_size);
+    
+    return ((void *)block);
+}
+
+static void *
+memory_pool_claim_small()
+{
+    return (memory_pool_claim(&pool.small_blocks, SMALL_BLOCK_SIZE));
+}
+
+static void *
+memory_pool_claim_large()
+{
+    return (memory_pool_claim(&pool.large_blocks, LARGE_BLOCK_SIZE));
+}
+
+static void
+memory_pool_return(void *memory, memory_block_list_t *list)
+{
+    memory_block_t *block = (memory_block_t *)memory;
+    
+    list_link_init(&block->memory_block_link_node);
+    block->time_freed = osif_gethrtime();
+    
+    lck_spin_lock(list->spinlock);
+    list_insert_head(&list->blocks, block);
+    list->count++;
+    lck_spin_unlock(list->spinlock);
+}
+
+static void
+memory_pool_return_small(void *memory)
+{
+    memory_pool_return(memory, &pool.small_blocks);
+}
+
+static void
+memory_pool_return_large(void *memory)
+{
+    memory_pool_return(memory, &pool.large_blocks);
+}
+
+static uint64_t
+memory_pool_release_list(memory_block_list_t* list, sa_size_t block_size, sa_size_t num_pages)
+{
+    uint64_t num_pages_released = 0;
+    
+    lck_spin_lock(list->spinlock);
+    
+    while (!list_is_empty(&list->blocks) && (num_pages_released < num_pages)) {
+        memory_block_t *block = list_head(&list->blocks);
+        list_remove_head(&list->blocks);
+        list->count--;
+        
+        lck_spin_unlock(list->spinlock);
+        osif_free(block, block_size);
+        num_pages_released += block_size / PAGE_SIZE;
+        lck_spin_lock(list->spinlock);
+    }
+    
+    lck_spin_unlock(list->spinlock);
+ 
+    return num_pages_released;
+}
+
+static uint64_t
+memory_pool_release_pages(uint64_t num_pages)
+{
+    static int last_pool_searched = 0;
+    uint64_t num_pages_released  = 0;
+    uint64_t total_pages_released = 0;
+    
+    if (last_pool_searched) {
+        last_pool_searched = 0;
+        num_pages_released = memory_pool_release_list(&pool.small_blocks, SMALL_BLOCK_SIZE, num_pages);
+        num_pages -= num_pages_released;
+        total_pages_released += num_pages_released;
+        
+        if(num_pages_released < num_pages) {
+            total_pages_released += memory_pool_release_list(&pool.large_blocks, LARGE_BLOCK_SIZE, num_pages);
+        }
+    } else {
+        last_pool_searched = 1;
+        num_pages_released = memory_pool_release_list(&pool.large_blocks, LARGE_BLOCK_SIZE, num_pages);
+        num_pages -= num_pages_released;
+        total_pages_released += num_pages_released;
+        
+        if (num_pages_released < num_pages) {
+              total_pages_released += memory_pool_release_list(&pool.small_blocks, SMALL_BLOCK_SIZE, num_pages);
+        }
+    }
+    
+    return total_pages_released;
+}
+
+static void
+memory_pool_fini()
+{
+    memory_pool_release_memory();
+    memory_pool_block_list_fini(&pool.small_blocks);
+    memory_pool_block_list_fini(&pool.large_blocks);
 }
 
 // =============================================================================
@@ -820,14 +1084,14 @@ slice_allocator_init(slice_allocator_t *sa, sa_size_t max_alloc_size)
 #ifndef DEBUG
 	if (max_alloc_size <=  512) {
 		sa->flags = SMALL_ALLOC;
-		sa->slice_size = PAGE_SIZE;
+		sa->slice_size = SMALL_BLOCK_SIZE;
 	} else {
 		sa->flags = 0;
-		sa->slice_size = 4096 + 128*1024;
+		sa->slice_size = LARGE_BLOCK_SIZE;
 	}
 #else
 	sa->flags = 0;
-	sa->slice_size = 4096 + 128*1024;
+	sa->slice_size = LARGE_BLOCK_SIZE;
 #endif
 	
 	sa->spinlock = lck_spin_alloc_init(bmalloc_lock_group,
@@ -887,7 +1151,7 @@ slice_allocator_alloc(slice_allocator_t *sa, sa_size_t size)
 	slice_t *slice = 0;
 	
 	lck_spin_lock(sa->spinlock);
-	
+    
 	/*
 	 * Locate a slice with residual capacity. First, check for a partially
 	 * full slice, and use some more of its capacity. Next, look to see if
@@ -897,12 +1161,18 @@ slice_allocator_alloc(slice_allocator_t *sa, sa_size_t size)
 	if (!list_is_empty(&sa->partial)) {
 		slice = list_head(&sa->partial);
 	} else if (!list_is_empty(&sa->free)) {
-		slice = list_tail(&sa->free);
-		list_remove_tail(&sa->free);
+		slice = list_head(&sa->free);
+		list_remove_head(&sa->free);
 		list_insert_head(&sa->partial, slice);
 	} else {
 		lck_spin_unlock(sa->spinlock);
-		slice = (slice_t *)osif_malloc(sa->slice_size);;
+        
+        if (sa->slice_size == LARGE_BLOCK_SIZE) {
+            slice = (slice_t*)memory_pool_claim_large();
+        } else {
+            slice = (slice_t*)memory_pool_claim_small();
+        }
+        
 		slice_init(slice, sa);
 		lck_spin_lock(sa->spinlock);
 		
@@ -1018,7 +1288,6 @@ slice_allocator_release_pages(slice_allocator_t *sa, uint64_t num_pages)
 		
 		lck_spin_unlock(sa->spinlock);
 		slice_fini(slice);
-		
 		osif_free(slice, sa->slice_size);
 		num_pages_released += sa->slice_size / PAGE_SIZE;
 		
@@ -1053,9 +1322,15 @@ slice_allocator_garbage_collect(slice_allocator_t *sa)
 				list_remove_tail(&sa->free);
 				
 				lck_spin_unlock(sa->spinlock);
-				slice_fini(slice);
-				osif_free(slice, sa->slice_size);
-				lck_spin_lock(sa->spinlock);
+				
+                slice_fini(slice);
+                if (sa->slice_size == LARGE_BLOCK_SIZE) {
+                    memory_pool_return_large(slice);
+                } else {
+                    memory_pool_return_small(slice);
+                }
+
+                lck_spin_lock(sa->spinlock);
 			} else {
 				done = 1;
 			}
@@ -1152,6 +1427,9 @@ bmalloc_init()
 	sa_size_t max_allocation_size =
 	ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1];
 	
+    // Initialise the memory pool
+    memory_pool_init();
+    
 	/* Create the slice allocators */
 	sa_size_t array_size = NUM_ALLOCATORS * sizeof (slice_allocator_t);
 	allocators = (slice_allocator_t *)osif_malloc(array_size);
@@ -1216,6 +1494,9 @@ bmalloc_fini()
 	osif_free(allocator_lookup_table, bmalloc_allocator_lookup_table_size(
 		ALLOCATOR_SLICE_SIZES[NUM_ALLOCATORS - 1]));
 	
+    // Clean up the memory pool
+    memory_pool_fini();
+    
 	/* Cleanup our locks */
 	lck_attr_free(bmalloc_lock_attr);
 	bmalloc_lock_attr = NULL;
@@ -1284,23 +1565,27 @@ bmalloc_release_memory()
 	}
 }
 
-int
+uint64_t
 bmalloc_release_pages(uint64_t num_pages)
 {
 	uint64_t num_pages_released = 0;
 	
+    num_pages_released += memory_pool_release_pages(num_pages);
+    
 	for(int i=0; (i < NUM_ALLOCATORS) && (num_pages_released < num_pages); i++) {
 		num_pages_released += slice_allocator_release_pages(
 			&allocators[i], num_pages - num_pages_released);
 	}
 	
-	return (num_pages_released >= num_pages);
+    return num_pages_released;
 }
 
-void
+uint64_t
 bmalloc_garbage_collect()
 {
 	for (int i = 0; i < NUM_ALLOCATORS; i++) {
 		slice_allocator_garbage_collect(&allocators[i]);
 	}
+    
+    return memory_pool_garbage_collect();
 }

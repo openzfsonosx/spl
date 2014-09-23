@@ -78,13 +78,6 @@ extern int cpu_number();
 // Variables
 //===============================================================
 
-// Measure the wakeup count of the memory monitor thread
-//unsigned long		wake_count = 0; // DEBUG
-
-// Indicates that the machine is believed to be swapping
-// due to thread waking. This is reset when spl_vm_pool_low()
-// is called and reports the activity to ZFS.
-int					machine_is_swapping = 0;
 
 // Flag to cause tasks and threads to terminate as
 // the kmem module is preparing to unload.
@@ -92,6 +85,18 @@ int					shutting_down = 0;
 
 // Activation counter for the monitor thread
 uint64_t            monitor_thread_wake_count = 0;
+
+// Number of pages requested by the OS
+uint64_t            last_pressure_pages_wanted = 0;
+
+// Number of pages released on last call to bmalloc_release_pages()
+uint64_t            last_pressure_pages_released = 0;
+
+// Number of time the garbage collector has woken
+uint64_t            gc_wake_count = 0;
+
+// Number of pages released on last call to bmalloc_garbage_collect()
+uint64_t            last_gc_pages_released = 0;
 
 // Amount of physical memory
 uint64_t			physmem = 0;
@@ -142,6 +147,9 @@ typedef struct bmalloc_stats {
 	kstat_named_t bmalloc_active_threads;
     kstat_named_t monitor_thread_wake_count;
     kstat_named_t num_pages_wanted;
+    kstat_named_t last_pressure_pages_released;
+    kstat_named_t gc_wake_count;
+    kstat_named_t last_gc_pages_released;
 } bmalloc_stats_t;
 
 static bmalloc_stats_t bmalloc_stats = {
@@ -150,7 +158,10 @@ static bmalloc_stats_t bmalloc_stats = {
 	{"space_efficiency_percent", KSTAT_DATA_UINT64},
 	{"active_threads", KSTAT_DATA_UINT64},
     {"pressure_thr_wakes", KSTAT_DATA_UINT64},
-    {"pressure_pages_wanted", KSTAT_DATA_UINT64}
+    {"pressure_pages_wanted", KSTAT_DATA_UINT64},
+    {"pressure_pages_released", KSTAT_DATA_UINT64},
+    {"gc_wake_count", KSTAT_DATA_UINT64},
+    {"gc_pages_released", KSTAT_DATA_UINT64}
 };
 
 static kstat_t *bmalloc_ksp = 0;
@@ -215,10 +226,7 @@ uint64_t
 kmem_num_pages_wanted()
 {
 	uint64_t tmp = num_pages_wanted;
-	num_pages_wanted = 0;
-
-	//printf("num pages wanted -> %llu\n", tmp);
-
+    num_pages_wanted = 0;
 	return tmp;
 }
 
@@ -248,9 +256,7 @@ kmem_debugging(void)
 
 int spl_vm_pool_low(void)
 {
-	int r = machine_is_swapping;
-	machine_is_swapping = 0;
-    return r;
+    return num_pages_wanted;
 }
 
 // ===========================================================
@@ -452,14 +458,18 @@ void memory_monitor_thread()
         kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
                                       &pages_reclaimed, &num_pages_wanted);
         
+        last_pressure_pages_wanted = num_pages_wanted;
+        
         if (!shutting_down) {
             if (kr == KERN_SUCCESS && num_pages_wanted) {
                 
                 monitor_thread_wake_count++;
                 
-                if (!bmalloc_release_pages(num_pages_wanted)) {
-                    // Set flag for spl_vm_pool_low callers
-                    machine_is_swapping = 1;
+                last_pressure_pages_released = bmalloc_release_pages(num_pages_wanted);
+                
+                if (last_pressure_pages_released < num_pages_wanted) {
+                    // Update amount of memory needed to free
+                    num_pages_wanted -= last_pressure_pages_released;
                     
                     // And request memory holders release memory.
                     kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
@@ -488,7 +498,8 @@ static void stop_memory_monitor()
 
 void bmalloc_maintenance_task()
 {
-    bmalloc_garbage_collect();
+    gc_wake_count++;
+    last_gc_pages_released = bmalloc_garbage_collect();
     if(!shutting_down) {
         bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
     }
@@ -517,8 +528,9 @@ static void kmem_reap_task(void *p)
 static void kmem_reap_task_finish(void *p)
 {
 	// Drop all unwanted cached memory out of bmalloc
-	bmalloc_garbage_collect();
-	bmalloc_release_memory();
+	last_gc_pages_released = bmalloc_garbage_collect();
+    
+	//bmalloc_release_memory();
 }
 
 static void reap_finish_task_proc()
@@ -556,7 +568,10 @@ bmalloc_kstat_update(kstat_t *ksp, int rw)
 		bs->bmalloc_space_efficiency_percent.value.ui64 = (bmalloc_app_allocated_total * 100)/bmalloc_allocated_total;
 		bs->bmalloc_active_threads.value.ui64 = zfs_threads;
         bs->monitor_thread_wake_count.value.ui64 = monitor_thread_wake_count;
-        bs->num_pages_wanted.value.ui64 = num_pages_wanted;
+        bs->num_pages_wanted.value.ui64 = last_pressure_pages_wanted;
+        bs->last_pressure_pages_released.value.ui64 = last_pressure_pages_released;
+        bs->last_gc_pages_released.value.ui64 = last_gc_pages_released;
+        bs->gc_wake_count.value.ui64 = gc_wake_count;
 	}
 
 	return (0);

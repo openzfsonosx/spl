@@ -57,8 +57,8 @@ int bmalloc_release_pages(uint64_t num_pages);
 // Manages from free memory within the allocator.
 // Should be called periodically (say at least
 // every 10 seconds).
-//
-void bmalloc_garbage_collect();
+// Returns the number of pages released as a result
+uint64_t bmalloc_garbage_collect();
 
 //
 // Release all remaining memory and allocator resources
