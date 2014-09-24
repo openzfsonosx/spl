@@ -351,7 +351,7 @@ const sa_hrtime_t SA_MAX_POOL_FREE_MEM_AGE = 30 * SA_NSEC_PER_SEC;
  * the memory pool for allocation by another slice allocator or release to the
  * underlying allocator.
  */
-const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 2 * SA_NSEC_PER_SEC;
+const sa_hrtime_t SA_MAX_SLICE_FREE_MEM_AGE = 6 * SA_NSEC_PER_SEC;
 
 /*
  * Sizes of various slices that are used by zfs. This table started out as a

@@ -42,11 +42,6 @@
 #include "spl-bmalloc.h"
 
 //===============================================================
-// Options
-//===============================================================
-//#define PRINT_CACHE_STATS 1
-
-//===============================================================
 // OS Interface
 //===============================================================
 
@@ -67,9 +62,9 @@ extern int vm_pool_low(void);
 // Kernel API for monitoring memory pressure.
 extern kern_return_t
 mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
-						 unsigned int	nsecs_monitored,
-						 unsigned int	*pages_reclaimed_p,
-						 unsigned int	*pages_wanted_p);
+			 unsigned int	nsecs_monitored,
+			 unsigned int	*pages_reclaimed_p,
+			 unsigned int	*pages_wanted_p);
 
 // Which CPU are we executing on?
 extern int cpu_number();
@@ -90,16 +85,16 @@ uint64_t            monitor_thread_wake_count = 0;
 uint64_t            last_pressure_pages_wanted = 0;
 
 // Number of pages released on last call to bmalloc_release_pages()
-uint64_t            last_pressure_pages_released = 0;
+uint64_t       last_pressure_pages_released = 0;
 
 // Number of time the garbage collector has woken
-uint64_t            gc_wake_count = 0;
+uint64_t	gc_wake_count = 0;
 
 // Number of pages released on last call to bmalloc_garbage_collect()
-uint64_t            last_gc_pages_released = 0;
+uint64_t	last_gc_pages_released = 0;
 
 // Amount of physical memory
-uint64_t			physmem = 0;
+uint64_t	physmem = 0;
 
 // Size in bytes of the memory allocated by bmalloc resuling from
 // allocation calls to the SPL. The ratio of
@@ -134,7 +129,7 @@ static lck_grp_attr_t	*kmem_group_attr = NULL;
 // Various timeout periods
 static struct timespec	kmem_reap_all_task_timeout	= {15, 0};			// 15 seconds
 static struct timespec	reap_finish_task_timeout	= {0, 500000000};	// 0.5 seconds
-static struct timespec	bmalloc_task_timeout		= {2, 500000000};	// 2.5 Seconds
+static struct timespec	bmalloc_task_timeout		= {2, 0};           // 2 Seconds
 
 //===============================================================
 // Kstats published for bmalloc
@@ -382,7 +377,10 @@ kmem_reap()
 
 void kmem_flush()
 {
-#warning is this necessary?
+   /*
+    * A mechanism to allow ZFS to request SPL to release memory 
+    * after a cleanup action. Currenly not utilised.
+    */
 }
 
 //===============================================================
