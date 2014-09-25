@@ -62,9 +62,9 @@ extern int vm_pool_low(void);
 // Kernel API for monitoring memory pressure.
 extern kern_return_t
 mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
-			 unsigned int	nsecs_monitored,
-			 unsigned int	*pages_reclaimed_p,
-			 unsigned int	*pages_wanted_p);
+						 unsigned int	nsecs_monitored,
+						 unsigned int	*pages_reclaimed_p,
+						 unsigned int	*pages_wanted_p);
 
 // Which CPU are we executing on?
 extern int cpu_number();
@@ -85,16 +85,16 @@ uint64_t            monitor_thread_wake_count = 0;
 uint64_t            last_pressure_pages_wanted = 0;
 
 // Number of pages released on last call to bmalloc_release_pages()
-uint64_t       last_pressure_pages_released = 0;
+uint64_t			last_pressure_pages_released = 0;
 
 // Number of time the garbage collector has woken
-uint64_t	gc_wake_count = 0;
+uint64_t			gc_wake_count = 0;
 
 // Number of pages released on last call to bmalloc_garbage_collect()
-uint64_t	last_gc_pages_released = 0;
+uint64_t			last_gc_pages_released = 0;
 
 // Amount of physical memory
-uint64_t	physmem = 0;
+uint64_t			physmem = 0;
 
 // Size in bytes of the memory allocated by bmalloc resuling from
 // allocation calls to the SPL. The ratio of
@@ -111,15 +111,12 @@ extern uint64_t     zfs_threads;
 // Number of pages the OS last reported that it needed freed
 unsigned int		num_pages_wanted = 0;
 
-static kmutex_t		kmem_cache_lock;    /* inter-cache linkage only */
-static list_t		kmem_caches;
-
 // Task queue for processing kmem internal tasks.
 static taskq_t		*kmem_taskq;
 
 // Collection of kmem caches
-static kmutex_t			kmem_cache_lock;/* inter-cache linkage only */
-static list_t			kmem_caches;
+static kmutex_t		kmem_cache_lock;/* inter-cache linkage only */
+static list_t		kmem_caches;
 
 // Lock manager stuff
 static lck_grp_t        *kmem_lock_group = NULL;
@@ -140,11 +137,11 @@ typedef struct bmalloc_stats {
 	kstat_named_t bmalloc_system_allocated;
 	kstat_named_t bmalloc_space_efficiency_percent;
 	kstat_named_t bmalloc_active_threads;
-    kstat_named_t monitor_thread_wake_count;
-    kstat_named_t num_pages_wanted;
-    kstat_named_t last_pressure_pages_released;
-    kstat_named_t gc_wake_count;
-    kstat_named_t last_gc_pages_released;
+	kstat_named_t monitor_thread_wake_count;
+	kstat_named_t num_pages_wanted;
+	kstat_named_t last_pressure_pages_released;
+	kstat_named_t gc_wake_count;
+	kstat_named_t last_gc_pages_released;
 } bmalloc_stats_t;
 
 static bmalloc_stats_t bmalloc_stats = {
@@ -152,11 +149,11 @@ static bmalloc_stats_t bmalloc_stats = {
 	{"bmalloc_allocated", KSTAT_DATA_UINT64},
 	{"space_efficiency_percent", KSTAT_DATA_UINT64},
 	{"active_threads", KSTAT_DATA_UINT64},
-    {"pressure_thr_wakes", KSTAT_DATA_UINT64},
-    {"pressure_pages_wanted", KSTAT_DATA_UINT64},
-    {"pressure_pages_released", KSTAT_DATA_UINT64},
-    {"gc_wake_count", KSTAT_DATA_UINT64},
-    {"gc_pages_released", KSTAT_DATA_UINT64}
+	{"pressure_thr_wakes", KSTAT_DATA_UINT64},
+	{"pressure_pages_wanted", KSTAT_DATA_UINT64},
+	{"pressure_pages_released", KSTAT_DATA_UINT64},
+	{"gc_wake_count", KSTAT_DATA_UINT64},
+	{"gc_pages_released", KSTAT_DATA_UINT64}
 };
 
 static kstat_t *bmalloc_ksp = 0;
@@ -184,27 +181,27 @@ static void kmem_reap_all_task_proc();
 void *
 zfs_kmem_alloc(size_t size, int kmflags)
 {
-    ASSERT(size);
-    return bmalloc(size, KM_SLEEP);
+	ASSERT(size);
+	return bmalloc(size, KM_SLEEP);
 }
 
 void *
 zfs_kmem_zalloc(size_t size, int kmflags)
 {
 	void *buf = kmem_alloc(size, kmflags);
-
-    if (buf) {
+	
+	if (buf) {
 		bzero(buf, size);
 	}
-
+	
 	return (buf);
 }
 
 void
 zfs_kmem_free(void *buf, size_t size)
 {
-    ASSERT(buf && size);
-    bfree(buf, size);
+	ASSERT(buf && size);
+	bfree(buf, size);
 }
 
 void *
@@ -221,7 +218,7 @@ uint64_t
 kmem_num_pages_wanted()
 {
 	uint64_t tmp = num_pages_wanted;
-    num_pages_wanted = 0;
+	num_pages_wanted = 0;
 	return tmp;
 }
 
@@ -234,13 +231,13 @@ kmem_size(void)
 uint64_t
 kmem_used(void)
 {
-    return bmalloc_app_allocated_total;
+	return bmalloc_app_allocated_total;
 }
 
 uint64_t
 kmem_avail(void)
 {
-    return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+	return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
 }
 
 int
@@ -251,7 +248,7 @@ kmem_debugging(void)
 
 int spl_vm_pool_low(void)
 {
-    return num_pages_wanted;
+	return num_pages_wanted;
 }
 
 // ===========================================================
@@ -262,18 +259,18 @@ static void
 kmem_cache_applyall(void (*func)(kmem_cache_t *), taskq_t *tq, int tqflag)
 {
 	kmem_cache_t *cp;
-
+	
 	//printf("kmem cache apply all\n");
-
+	
 	mutex_enter(&kmem_cache_lock);
 	for (cp = list_head(&kmem_caches); cp != NULL;
-         cp = list_next(&kmem_caches, cp))
+		 cp = list_next(&kmem_caches, cp))
 		if (tq != NULL)
 			(void) taskq_dispatch(tq, (task_func_t *)func, cp,
-                                  tqflag);
+								  tqflag);
 		else
 			func(cp);
-
+	
 	mutex_exit(&kmem_cache_lock);
 }
 
@@ -283,54 +280,54 @@ kmem_cache_applyall(void (*func)(kmem_cache_t *), taskq_t *tq, int tqflag)
 
 kmem_cache_t *
 kmem_cache_create(char *name, size_t bufsize, size_t align,
-                  int (*constructor)(void *, void *, int), void (*destructor)(void *, void *),
-                  void (*reclaim)(void *), void *private, vmem_t *vmp, int cflags)
+				  int (*constructor)(void *, void *, int), void (*destructor)(void *, void *),
+				  void (*reclaim)(void *), void *private, vmem_t *vmp, int cflags)
 {
-    kmem_cache_t *cache;
-    
-    ASSERT(vmp == NULL);
-    
-    cache = zfs_kmem_alloc(sizeof(*cache), KM_SLEEP);
-    strlcpy(cache->cache_name, name, sizeof(cache->cache_name));
-    cache->cache_constructor = constructor;
-    cache->cache_destructor = destructor;
-    cache->cache_reclaim = reclaim;
-    cache->cache_private = private;
-    cache->cache_bufsize = bufsize;
-    
-    mutex_enter(&kmem_cache_lock);
-    list_insert_tail(&kmem_caches, cache);
-    mutex_exit(&kmem_cache_lock);
-    
-    return (cache);
+	kmem_cache_t *cache;
+	
+	ASSERT(vmp == NULL);
+	
+	cache = zfs_kmem_alloc(sizeof(*cache), KM_SLEEP);
+	strlcpy(cache->cache_name, name, sizeof(cache->cache_name));
+	cache->cache_constructor = constructor;
+	cache->cache_destructor = destructor;
+	cache->cache_reclaim = reclaim;
+	cache->cache_private = private;
+	cache->cache_bufsize = bufsize;
+	
+	mutex_enter(&kmem_cache_lock);
+	list_insert_tail(&kmem_caches, cache);
+	mutex_exit(&kmem_cache_lock);
+	
+	return (cache);
 }
 
 void
 kmem_cache_destroy(kmem_cache_t *cp)
 {
-    mutex_enter(&kmem_cache_lock);
-    list_remove(&kmem_caches, cp);
-    mutex_exit(&kmem_cache_lock);
-    
+	mutex_enter(&kmem_cache_lock);
+	list_remove(&kmem_caches, cp);
+	mutex_exit(&kmem_cache_lock);
+	
 	zfs_kmem_free(cp, sizeof(kmem_cache_t));
 }
 
 void *
 kmem_cache_alloc(kmem_cache_t *cp, int flags)
 {
-    void *buf = zfs_kmem_alloc(cp->cache_bufsize, flags);
-    if (buf != NULL && cp->cache_constructor != NULL)
-        cp->cache_constructor(buf, cp->cache_private, flags);
-
-    return (buf);
+	void *buf = zfs_kmem_alloc(cp->cache_bufsize, flags);
+	if (buf != NULL && cp->cache_constructor != NULL)
+		cp->cache_constructor(buf, cp->cache_private, flags);
+	
+	return (buf);
 }
 
 void
 kmem_cache_free(kmem_cache_t *cp, void *buf)
 {
-    if (cp->cache_destructor != NULL)
-        cp->cache_destructor(buf, cp->cache_private);
-    zfs_kmem_free(buf, cp->cache_bufsize);
+	if (cp->cache_destructor != NULL)
+		cp->cache_destructor(buf, cp->cache_private);
+	zfs_kmem_free(buf, cp->cache_bufsize);
 }
 
 
@@ -345,8 +342,8 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
 void
 kmem_cache_reap(kmem_cache_t *cp)
 {
-    if (cp->cache_reclaim != NULL)
-        cp->cache_reclaim(cp->cache_private);
+	if (cp->cache_reclaim != NULL)
+		cp->cache_reclaim(cp->cache_private);
 }
 
 /*
@@ -377,10 +374,10 @@ kmem_reap()
 
 void kmem_flush()
 {
-   /*
-    * A mechanism to allow ZFS to request SPL to release memory 
-    * after a cleanup action. Currenly not utilised.
-    */
+	/*
+	 * A mechanism to allow ZFS to request SPL to release memory
+	 * after a cleanup action. Currenly not utilised.
+	 */
 }
 
 //===============================================================
@@ -390,56 +387,56 @@ void kmem_flush()
 void
 strfree(char *str)
 {
-    bfree(str, strlen(str) + 1);
+	bfree(str, strlen(str) + 1);
 }
 
 char *kvasprintf(const char *fmt, va_list ap)
 {
-    unsigned int len;
-    char *p;
-    va_list aq;
-
-    va_copy(aq, ap);
-    len = vsnprintf(NULL, 0, fmt, aq);
-    va_end(aq);
-
-    p = bmalloc(len+1, KM_SLEEP);
-    if (!p)
-        return NULL;
-
-    vsnprintf(p, len+1, fmt, ap);
-
-    return p;
+	unsigned int len;
+	char *p;
+	va_list aq;
+	
+	va_copy(aq, ap);
+	len = vsnprintf(NULL, 0, fmt, aq);
+	va_end(aq);
+	
+	p = bmalloc(len+1, KM_SLEEP);
+	if (!p)
+		return NULL;
+	
+	vsnprintf(p, len+1, fmt, ap);
+	
+	return p;
 }
 
 char *
 kmem_vasprintf(const char *fmt, va_list ap)
 {
-    va_list aq;
-    char *ptr;
-
-    do {
-        va_copy(aq, ap);
-        ptr = kvasprintf(fmt, aq);
-        va_end(aq);
-    } while (ptr == NULL);
-
-    return ptr;
+	va_list aq;
+	char *ptr;
+	
+	do {
+		va_copy(aq, ap);
+		ptr = kvasprintf(fmt, aq);
+		va_end(aq);
+	} while (ptr == NULL);
+	
+	return ptr;
 }
 
 char *
 kmem_asprintf(const char *fmt, ...)
 {
-    va_list ap;
-    char *ptr;
-
-    do {
-        va_start(ap, fmt);
-        ptr = kvasprintf(fmt, ap);
-        va_end(ap);
-    } while (ptr == NULL);
-
-    return ptr;
+	va_list ap;
+	char *ptr;
+	
+	do {
+		va_start(ap, fmt);
+		ptr = kvasprintf(fmt, ap);
+		va_end(ap);
+	} while (ptr == NULL);
+	
+	return ptr;
 }
 
 //===============================================================
@@ -448,35 +445,35 @@ kmem_asprintf(const char *fmt, ...)
 
 void memory_monitor_thread()
 {
-    kern_return_t kr;
-    unsigned int nsecs_monitored = 1000000000 / 4;
-    unsigned int pages_reclaimed = 0;
-    
-    while (!shutting_down) {
-        kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
-                                      &pages_reclaimed, &num_pages_wanted);
-        
-        last_pressure_pages_wanted = num_pages_wanted;
-        
-        if (!shutting_down) {
-            if (kr == KERN_SUCCESS && num_pages_wanted) {
-                
-                monitor_thread_wake_count++;
-                
-                last_pressure_pages_released = bmalloc_release_pages(num_pages_wanted);
-                
-                if (last_pressure_pages_released < num_pages_wanted) {
-                    // Update amount of memory needed to free
-                    num_pages_wanted -= last_pressure_pages_released;
-                    
-                    // And request memory holders release memory.
-                    kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-                }
-            }
-        }
-    }
-    
-    thread_exit();
+	kern_return_t kr;
+	unsigned int nsecs_monitored = 1000000000 / 4;
+	unsigned int pages_reclaimed = 0;
+	
+	while (!shutting_down) {
+		kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
+									  &pages_reclaimed, &num_pages_wanted);
+		
+		last_pressure_pages_wanted = num_pages_wanted;
+		
+		if (!shutting_down) {
+			if (kr == KERN_SUCCESS && num_pages_wanted) {
+				
+				monitor_thread_wake_count++;
+				
+				last_pressure_pages_released = bmalloc_release_pages(num_pages_wanted);
+				
+				if (last_pressure_pages_released < num_pages_wanted) {
+					// Update amount of memory needed to free
+					num_pages_wanted -= last_pressure_pages_released;
+					
+					// And request memory holders release memory.
+					kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+				}
+			}
+		}
+	}
+	
+	thread_exit();
 }
 
 static void start_memory_monitor()
@@ -486,8 +483,8 @@ static void start_memory_monitor()
 
 static void stop_memory_monitor()
 {
-    shutting_down = 1;
-    thread_wakeup((event_t) &vm_page_free_wanted);
+	shutting_down = 1;
+	thread_wakeup((event_t) &vm_page_free_wanted);
 }
 
 //===============================================================
@@ -496,11 +493,11 @@ static void stop_memory_monitor()
 
 void bmalloc_maintenance_task()
 {
-    gc_wake_count++;
-    last_gc_pages_released = bmalloc_garbage_collect();
-    if(!shutting_down) {
-        bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
-    }
+	gc_wake_count++;
+	last_gc_pages_released = bmalloc_garbage_collect();
+	if(!shutting_down) {
+		bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
+	}
 }
 
 static void bmalloc_maintenance_task_proc(void *p)
@@ -517,7 +514,7 @@ static void kmem_reap_task(void *p)
 {
 	// Request memory holders release memory.
 	kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-
+	
 	// Cache reaping is likely to be async, give the memory owners some
 	// time to implement before cleaning out unwanted memory.
 	bsd_timeout(reap_finish_task_proc, 0, &reap_finish_task_timeout);
@@ -527,7 +524,7 @@ static void kmem_reap_task_finish(void *p)
 {
 	// Drop all unwanted cached memory out of bmalloc
 	last_gc_pages_released = bmalloc_garbage_collect();
-    
+	
 	//bmalloc_release_memory();
 }
 
@@ -535,18 +532,18 @@ static void reap_finish_task_proc()
 {
 	if(!shutting_down) {
 		taskq_dispatch(kmem_taskq, kmem_reap_task_finish, 0, TQ_PUSHPAGE);
-    }
+	}
 }
 
 static void kmem_reap_all_task()
 {
 	kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-    bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
+	bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
 }
 
 static void kmem_reap_all_task_proc()
 {
-    taskq_dispatch(kmem_taskq, kmem_reap_all_task, 0, TQ_NOSLEEP);
+	taskq_dispatch(kmem_taskq, kmem_reap_all_task, 0, TQ_NOSLEEP);
 }
 
 //===============================================================
@@ -557,7 +554,7 @@ static int
 bmalloc_kstat_update(kstat_t *ksp, int rw)
 {
 	bmalloc_stats_t *bs = ksp->ks_data;
-
+	
 	if (rw == KSTAT_WRITE) {
 		return (SET_ERROR(EACCES));
 	} else {
@@ -565,62 +562,62 @@ bmalloc_kstat_update(kstat_t *ksp, int rw)
 		bs->bmalloc_system_allocated.value.ui64 = bmalloc_allocated_total;
 		bs->bmalloc_space_efficiency_percent.value.ui64 = (bmalloc_app_allocated_total * 100)/bmalloc_allocated_total;
 		bs->bmalloc_active_threads.value.ui64 = zfs_threads;
-        bs->monitor_thread_wake_count.value.ui64 = monitor_thread_wake_count;
-        bs->num_pages_wanted.value.ui64 = last_pressure_pages_wanted;
-        bs->last_pressure_pages_released.value.ui64 = last_pressure_pages_released;
-        bs->last_gc_pages_released.value.ui64 = last_gc_pages_released;
-        bs->gc_wake_count.value.ui64 = gc_wake_count;
+		bs->monitor_thread_wake_count.value.ui64 = monitor_thread_wake_count;
+		bs->num_pages_wanted.value.ui64 = last_pressure_pages_wanted;
+		bs->last_pressure_pages_released.value.ui64 = last_pressure_pages_released;
+		bs->last_gc_pages_released.value.ui64 = last_gc_pages_released;
+		bs->gc_wake_count.value.ui64 = gc_wake_count;
 	}
-
+	
 	return (0);
 }
 
 void
 spl_kmem_init(uint64_t total_memory)
 {
-    printf("SPL: Total memory %llu\n", total_memory);
-
+	printf("SPL: Total memory %llu\n", total_memory);
+	
 	// Kstats
 	bmalloc_ksp = kstat_create("spl", 0, "bmalloc", "misc", KSTAT_TYPE_NAMED,
-						   sizeof (bmalloc_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
-
+							   sizeof (bmalloc_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
+	
 	if (bmalloc_ksp != NULL) {
 		bmalloc_ksp->ks_data = &bmalloc_stats;
 		bmalloc_ksp->ks_update = bmalloc_kstat_update;
 		kstat_install(bmalloc_ksp);
 	}
-
-    // Initialise spinlocks
-    kmem_lock_attr = lck_attr_alloc_init();
-    kmem_group_attr = lck_grp_attr_alloc_init();
-    kmem_lock_group  = lck_grp_alloc_init("kmem-spinlocks", kmem_group_attr);
-
-    // Initialise the cache list
-    mutex_init(&kmem_cache_lock, "kmem", MUTEX_DEFAULT, NULL);
-    list_create(&kmem_caches, sizeof(kmem_cache_t), offsetof(kmem_cache_t, cache_link));
+	
+	// Initialise spinlocks
+	kmem_lock_attr = lck_attr_alloc_init();
+	kmem_group_attr = lck_grp_attr_alloc_init();
+	kmem_lock_group  = lck_grp_alloc_init("kmem-spinlocks", kmem_group_attr);
+	
+	// Initialise the cache list
+	mutex_init(&kmem_cache_lock, "kmem", MUTEX_DEFAULT, NULL);
+	list_create(&kmem_caches, sizeof(kmem_cache_t), offsetof(kmem_cache_t, cache_link));
 }
 
 void spl_kmem_tasks_init()
 {
-    kmem_taskq = taskq_create("kmem-taskq",
-                              1,
-                              minclsyspri,
-                              300, INT_MAX, TASKQ_PREPOPULATE);
-
-    bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
-    bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
+	kmem_taskq = taskq_create("kmem-taskq",
+							  1,
+							  minclsyspri,
+							  300, INT_MAX, TASKQ_PREPOPULATE);
+	
+	bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
+	bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
 	start_memory_monitor();
 }
 
 void spl_kmem_tasks_fini()
 {
-    shutting_down = 1;
-    bsd_untimeout(bmalloc_maintenance_task_proc, 0);
-    bsd_untimeout(kmem_reap_all_task_proc, 0);
-    bsd_untimeout(reap_finish_task_proc, 0);
+	shutting_down = 1;
+	bsd_untimeout(bmalloc_maintenance_task_proc, 0);
+	bsd_untimeout(kmem_reap_all_task_proc, 0);
+	bsd_untimeout(reap_finish_task_proc, 0);
 	stop_memory_monitor();
-
-    taskq_destroy(kmem_taskq);
+	
+	taskq_destroy(kmem_taskq);
 }
 
 void
