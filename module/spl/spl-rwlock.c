@@ -34,7 +34,6 @@
 static lck_attr_t       *zfs_rwlock_attr = NULL;
 static lck_grp_attr_t   *zfs_rwlock_group_attr = NULL;
 static lck_grp_t  *zfs_rwlock_group = NULL;
-#define SPL_DEBUG
 
 void
 rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
@@ -45,7 +44,7 @@ rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
                 zfs_rwlock_group, zfs_rwlock_attr);
     rwlp->rw_owner = NULL;
     rwlp->rw_readers = 0;
-#ifdef SPL_DEBUG
+#ifdef DEBUG
 	rwlp->rw_pad = 0x012345678;
 #endif
 }
@@ -54,7 +53,7 @@ void
 rw_destroy(krwlock_t *rwlp)
 {
     lck_rw_destroy((lck_rw_t *)&rwlp->rw_lock[0], zfs_rwlock_group);
-#ifdef SPL_DEBUG
+#ifdef DEBUG
 	rwlp->rw_pad = 0x99;
 #endif
 }
@@ -62,7 +61,7 @@ rw_destroy(krwlock_t *rwlp)
 void
 rw_enter(krwlock_t *rwlp, krw_t rw)
 {
-#ifdef SPL_DEBUG
+#ifdef DEBUG
 	if (rwlp->rw_pad != 0x012345678)
 		panic("rwlock %p not initialised\n", rwlp);
 #endif
@@ -91,7 +90,7 @@ rw_tryenter(krwlock_t *rwlp, krw_t rw)
 {
     int held = 0;
 
-#ifdef SPL_DEBUG
+#ifdef DEBUG
 	if (rwlp->rw_pad != 0x012345678)
 		panic("rwlock %p not initialised\n", rwlp);
 #endif
