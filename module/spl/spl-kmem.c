@@ -113,16 +113,17 @@ static list_t		kmem_caches;
 // Task queue for processing kmem internal tasks.
 static taskq_t		*kmem_taskq;
 
-//static vmem_t		*kmem_metadata_arena;
-//static vmem_t		*kmem_msb_arena;	/* arena for metadata caches */
-//static vmem_t		*kmem_cache_arena;
-//static vmem_t		*kmem_hash_arena;
-//static vmem_t		*kmem_log_arena;
-//static vmem_t		*kmem_oversize_arena;
-//static vmem_t		*kmem_va_arena;
-//static vmem_t		*kmem_default_arena;
-//static vmem_t		*kmem_firewall_va_arena;
-//static vmem_t		*kmem_firewall_arena;
+static vmem_t       *heap_arena;
+static vmem_t		*kmem_metadata_arena;
+static vmem_t		*kmem_msb_arena;	/* arena for metadata caches */
+static vmem_t		*kmem_cache_arena;
+static vmem_t		*kmem_hash_arena;
+static vmem_t		*kmem_log_arena;
+static vmem_t		*kmem_oversize_arena;
+static vmem_t		*kmem_va_arena;
+static vmem_t		*kmem_default_arena;
+static vmem_t		*kmem_firewall_va_arena;
+static vmem_t		*kmem_firewall_arena;
 
 //kmem_log_header_t	*kmem_transaction_log;
 //kmem_log_header_t	*kmem_content_log;
@@ -351,6 +352,26 @@ static void print_all_cache_stats_task_proc();
 #endif
 
 static void kmem_update(void *);
+
+//===============================================================
+// These ultimately belong in seg_kmem.{h,c}
+//===============================================================
+
+void *segkmem_alloc(vmem_t *vmp, size_t size, int vmflag)
+{
+	return bmalloc(size, vmflag);
+}
+
+void segkmem_free(vmem_t *vmp, void *inaddr, size_t size)
+{
+	bfree(inaddr, size);
+}
+
+// Stub out caller()
+caddr_t caller()
+{
+	return (caddr_t)(0);
+}
 
 //===============================================================
 // Allocation and release calls
@@ -1158,6 +1179,19 @@ kmem_reap()
 						 TQ_NOSLEEP);
 }
 
+/*
+ * Reclaim all unused memory from identifier arenas, called when a vmem
+ * arena not back by memory is exhausted.  Since reaping memory-backed caches
+ * cannot help with identifier exhaustion, we avoid both a large amount of
+ * work and unwanted side-effects from reclaim callbacks.
+ */
+void
+kmem_reap_idspace(void)
+{
+#warning implement kmem_reap_idspace
+// 	kmem_reap_common(&kmem_reaping_idspace);
+}
+
 void kmem_flush()
 {
 #warning work out how to implement flush
@@ -1756,6 +1790,58 @@ spl_kmem_init(uint64_t total_memory)
         list_create(&mtp->mt_list, sizeof(kmem_magazine_t), offsetof(kmem_magazine_t, mag_node));
     }
 
+#warning - vmem needs to be properly initialised
+	
+	/*
+	 * WARNING - this ends up calling cache create. Do not move earlier.
+	 */
+	
+	// Initialise vmem - This init call is a load of rubbish, it will do for now.
+	heap_arena = vmem_init("a heap",
+						   NULL, 0, 0,
+						   segkmem_alloc, segkmem_free);
+	
+	kmem_metadata_arena = vmem_create("kmem_metadata", NULL, 0, PAGESIZE,
+									  vmem_alloc, vmem_free, heap_arena, 8 * PAGESIZE,
+									  VM_SLEEP | VMC_NO_QCACHE);
+	
+	kmem_msb_arena = vmem_create("kmem_msb", NULL, 0,
+								 PAGESIZE, segkmem_alloc, segkmem_free, kmem_metadata_arena, 0,
+								 VMC_DUMPSAFE | VM_SLEEP);
+	
+	kmem_cache_arena = vmem_create("kmem_cache", NULL, 0, KMEM_ALIGN,
+								   segkmem_alloc, segkmem_free, kmem_metadata_arena, 0, VM_SLEEP);
+	
+	kmem_hash_arena = vmem_create("kmem_hash", NULL, 0, KMEM_ALIGN,
+								  segkmem_alloc, segkmem_free, kmem_metadata_arena, 0, VM_SLEEP);
+	
+	kmem_log_arena = vmem_create("kmem_log", NULL, 0, KMEM_ALIGN,
+								 segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
+	
+	//	kmem_firewall_va_arena = vmem_create("kmem_firewall_va",
+	//										 NULL, 0, PAGESIZE,
+	//										 kmem_firewall_va_alloc, kmem_firewall_va_free, heap_arena,
+	//										 0, VM_SLEEP);
+	
+	kmem_va_arena = vmem_create("kmem_va",
+								NULL, 0, PAGESIZE,
+								vmem_alloc, vmem_free, heap_arena,
+								8 * PAGESIZE, VM_SLEEP);
+	
+	kmem_firewall_arena = vmem_create("kmem_firewall", NULL, 0, PAGESIZE,
+									  segkmem_alloc, segkmem_free, kmem_firewall_va_arena, 0,
+									  VMC_DUMPSAFE | VM_SLEEP);
+	
+	/* temporary oversize arena for mod_read_system_file */
+	kmem_oversize_arena = vmem_create("kmem_oversize", NULL, 0, PAGESIZE,
+									  segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
+	
+	kmem_default_arena = vmem_create("kmem_default",
+									 NULL, 0, PAGESIZE,
+									 segkmem_alloc, segkmem_free, kmem_va_arena,
+									 0, VMC_DUMPSAFE | VM_SLEEP);
+	
+	
     // Initialise the backing store for kmem_alloc et al
     // We dont read no config files, just pretend....
     kmem_cache_init(2, FALSE);

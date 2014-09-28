@@ -113,7 +113,10 @@ extern uint64_t physmem;
     void kmem_cache_free(kmem_cache_t *cache, void *buf);
     void kmem_cache_reap_now(kmem_cache_t *cache);
     void kmem_reap(void);
-    void kmem_flush();
+	void kmem_reap_idspace(void);
+	
+	// This is not standard, to be replaced by an appropriate vmem call.
+	void kmem_flush();
     int kmem_debugging(void);
 
 #define kmem_cache_set_move(cache, movefunc)    do { } while (0)
