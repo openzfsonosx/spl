@@ -189,11 +189,11 @@ void *
 zfs_kmem_zalloc(size_t size, int kmflags)
 {
 	void *buf = kmem_alloc(size, kmflags);
-	
+
 	if (buf) {
 		bzero(buf, size);
 	}
-	
+
 	return (buf);
 }
 
@@ -259,9 +259,9 @@ static void
 kmem_cache_applyall(void (*func)(kmem_cache_t *), taskq_t *tq, int tqflag)
 {
 	kmem_cache_t *cp;
-	
+
 	//printf("kmem cache apply all\n");
-	
+
 	mutex_enter(&kmem_cache_lock);
 	for (cp = list_head(&kmem_caches); cp != NULL;
 		 cp = list_next(&kmem_caches, cp))
@@ -270,7 +270,7 @@ kmem_cache_applyall(void (*func)(kmem_cache_t *), taskq_t *tq, int tqflag)
 								  tqflag);
 		else
 			func(cp);
-	
+
 	mutex_exit(&kmem_cache_lock);
 }
 
@@ -284,9 +284,9 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 				  void (*reclaim)(void *), void *private, vmem_t *vmp, int cflags)
 {
 	kmem_cache_t *cache;
-	
+
 	ASSERT(vmp == NULL);
-	
+
 	cache = zfs_kmem_alloc(sizeof(*cache), KM_SLEEP);
 	strlcpy(cache->cache_name, name, sizeof(cache->cache_name));
 	cache->cache_constructor = constructor;
@@ -294,11 +294,11 @@ kmem_cache_create(char *name, size_t bufsize, size_t align,
 	cache->cache_reclaim = reclaim;
 	cache->cache_private = private;
 	cache->cache_bufsize = bufsize;
-	
+
 	mutex_enter(&kmem_cache_lock);
 	list_insert_tail(&kmem_caches, cache);
 	mutex_exit(&kmem_cache_lock);
-	
+
 	return (cache);
 }
 
@@ -308,7 +308,7 @@ kmem_cache_destroy(kmem_cache_t *cp)
 	mutex_enter(&kmem_cache_lock);
 	list_remove(&kmem_caches, cp);
 	mutex_exit(&kmem_cache_lock);
-	
+
 	zfs_kmem_free(cp, sizeof(kmem_cache_t));
 }
 
@@ -318,7 +318,7 @@ kmem_cache_alloc(kmem_cache_t *cp, int flags)
 	void *buf = zfs_kmem_alloc(cp->cache_bufsize, flags);
 	if (buf != NULL && cp->cache_constructor != NULL)
 		cp->cache_constructor(buf, cp->cache_private, flags);
-	
+
 	return (buf);
 }
 
@@ -395,17 +395,17 @@ char *kvasprintf(const char *fmt, va_list ap)
 	unsigned int len;
 	char *p;
 	va_list aq;
-	
+
 	va_copy(aq, ap);
 	len = vsnprintf(NULL, 0, fmt, aq);
 	va_end(aq);
-	
+
 	p = bmalloc(len+1, KM_SLEEP);
 	if (!p)
 		return NULL;
-	
+
 	vsnprintf(p, len+1, fmt, ap);
-	
+
 	return p;
 }
 
@@ -414,13 +414,13 @@ kmem_vasprintf(const char *fmt, va_list ap)
 {
 	va_list aq;
 	char *ptr;
-	
+
 	do {
 		va_copy(aq, ap);
 		ptr = kvasprintf(fmt, aq);
 		va_end(aq);
 	} while (ptr == NULL);
-	
+
 	return ptr;
 }
 
@@ -429,13 +429,13 @@ kmem_asprintf(const char *fmt, ...)
 {
 	va_list ap;
 	char *ptr;
-	
+
 	do {
 		va_start(ap, fmt);
 		ptr = kvasprintf(fmt, ap);
 		va_end(ap);
 	} while (ptr == NULL);
-	
+
 	return ptr;
 }
 
@@ -448,31 +448,34 @@ void memory_monitor_thread()
 	kern_return_t kr;
 	unsigned int nsecs_monitored = 1000000000 / 4;
 	unsigned int pages_reclaimed = 0;
-	
+	unsigned int		tmp_pages_wanted = 0;
+
 	while (!shutting_down) {
 		kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
-									  &pages_reclaimed, &num_pages_wanted);
-		
-		last_pressure_pages_wanted = num_pages_wanted;
-		
+									  &pages_reclaimed, &tmp_pages_wanted);
+
 		if (!shutting_down) {
-			if (kr == KERN_SUCCESS && num_pages_wanted) {
-				
+			if (kr == KERN_SUCCESS && tmp_pages_wanted) {
+
+				num_pages_wanted = tmp_pages_wanted;
+
+				last_pressure_pages_wanted = num_pages_wanted;
+
 				monitor_thread_wake_count++;
-				
+
 				last_pressure_pages_released = bmalloc_release_pages(num_pages_wanted);
-				
+
 				if (last_pressure_pages_released < num_pages_wanted) {
 					// Update amount of memory needed to free
 					num_pages_wanted -= last_pressure_pages_released;
-					
+
 					// And request memory holders release memory.
 					kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
 				}
 			}
 		}
 	}
-	
+
 	thread_exit();
 }
 
@@ -514,7 +517,7 @@ static void kmem_reap_task(void *p)
 {
 	// Request memory holders release memory.
 	kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-	
+
 	// Cache reaping is likely to be async, give the memory owners some
 	// time to implement before cleaning out unwanted memory.
 	bsd_timeout(reap_finish_task_proc, 0, &reap_finish_task_timeout);
@@ -524,7 +527,7 @@ static void kmem_reap_task_finish(void *p)
 {
 	// Drop all unwanted cached memory out of bmalloc
 	last_gc_pages_released = bmalloc_garbage_collect();
-	
+
 	//bmalloc_release_memory();
 }
 
@@ -554,7 +557,7 @@ static int
 bmalloc_kstat_update(kstat_t *ksp, int rw)
 {
 	bmalloc_stats_t *bs = ksp->ks_data;
-	
+
 	if (rw == KSTAT_WRITE) {
 		return (SET_ERROR(EACCES));
 	} else {
@@ -568,7 +571,7 @@ bmalloc_kstat_update(kstat_t *ksp, int rw)
 		bs->last_gc_pages_released.value.ui64 = last_gc_pages_released;
 		bs->gc_wake_count.value.ui64 = gc_wake_count;
 	}
-	
+
 	return (0);
 }
 
@@ -576,22 +579,22 @@ void
 spl_kmem_init(uint64_t total_memory)
 {
 	printf("SPL: Total memory %llu\n", total_memory);
-	
+
 	// Kstats
 	bmalloc_ksp = kstat_create("spl", 0, "bmalloc", "misc", KSTAT_TYPE_NAMED,
 							   sizeof (bmalloc_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
-	
+
 	if (bmalloc_ksp != NULL) {
 		bmalloc_ksp->ks_data = &bmalloc_stats;
 		bmalloc_ksp->ks_update = bmalloc_kstat_update;
 		kstat_install(bmalloc_ksp);
 	}
-	
+
 	// Initialise spinlocks
 	kmem_lock_attr = lck_attr_alloc_init();
 	kmem_group_attr = lck_grp_attr_alloc_init();
 	kmem_lock_group  = lck_grp_alloc_init("kmem-spinlocks", kmem_group_attr);
-	
+
 	// Initialise the cache list
 	mutex_init(&kmem_cache_lock, "kmem", MUTEX_DEFAULT, NULL);
 	list_create(&kmem_caches, sizeof(kmem_cache_t), offsetof(kmem_cache_t, cache_link));
@@ -603,7 +606,7 @@ void spl_kmem_tasks_init()
 							  1,
 							  minclsyspri,
 							  300, INT_MAX, TASKQ_PREPOPULATE);
-	
+
 	bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
 	bsd_timeout(kmem_reap_all_task_proc, 0, &kmem_reap_all_task_timeout);
 	start_memory_monitor();
@@ -616,7 +619,7 @@ void spl_kmem_tasks_fini()
 	bsd_untimeout(kmem_reap_all_task_proc, 0);
 	bsd_untimeout(reap_finish_task_proc, 0);
 	stop_memory_monitor();
-	
+
 	taskq_destroy(kmem_taskq);
 }
 
