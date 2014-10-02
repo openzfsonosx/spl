@@ -61,6 +61,11 @@ extern unsigned int vm_page_free_wanted;
 extern unsigned int vm_page_free_count;
 extern unsigned int vm_page_speculative_count;
 
+// Start and end address of kernel memory
+//http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L135
+extern vm_offset_t virtual_space_start;
+extern vm_offset_t virtual_space_end;
+
 // Can be polled to determine if the VM is experiecing
 // a shortage of free pages.
 extern int vm_pool_low(void);
@@ -203,7 +208,7 @@ static kmutex_t kmem_cache_kstat_lock;
  * We want allocations that are multiples of the coherency granularity
  * (64 bytes) to be satisfied from a cache which is a multiple of 64
  * bytes, so that it will be 64-byte aligned.  For all multiples of 64,
- * the next kmem_cache_size greater than or equal to it must be a
+ * the next 1 greater than or equal to it must be a
  * multiple of 64.
  *
  * We split the table into two sections:  size <= 4k and size > 4k.  This
@@ -3860,8 +3865,8 @@ spl_kmem_init(uint64_t total_memory)
                 offsetof(kmem_cache_t, cache_link));
 
 	// Initialise vmem - This init call is a load of rubbish, it will do for now.
-	heap_arena = vmem_init("a heap",
-						   NULL, 0, 0,
+	heap_arena = vmem_init("the_heap",
+						   virtual_space_start, virtual_space_end, PAGE_SIZE,
 						   segkmem_alloc, segkmem_free);
 	
     kmem_metadata_arena = vmem_create("kmem_metadata", NULL, 0, PAGESIZE,
