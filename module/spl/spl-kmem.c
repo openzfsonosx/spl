@@ -3967,8 +3967,11 @@ spl_kmem_init(uint64_t total_memory)
 //    } else {
         kmem_oversize_arena = vmem_create("kmem_oversize",
                                           NULL, 0, PAGESIZE,
-                                          segkmem_alloc, segkmem_free, kmem_minfirewall < ULONG_MAX?
-                                          kmem_firewall_va_arena : heap_arena, 0, VMC_DUMPSAFE |
+                                          segkmem_alloc, segkmem_free,
+//										  kmem_minfirewall < ULONG_MAX?
+//                                          kmem_firewall_va_arena : heap_arena,
+										  heap_arena,
+										  0, VMC_DUMPSAFE |
                                           VM_SLEEP);
 //    }
     
