@@ -69,14 +69,17 @@ extern uint64_t physmem;
     void zfs_kmem_free(void *buf, size_t size);
 
     void spl_kmem_init(uint64_t);
-    void spl_kmem_tasks_init();
-    uint64_t kmem_size(void);
-    uint64_t kmem_used(void);
-    uint64_t kmem_avail(void);
-    uint64_t kmem_num_pages_wanted();
+    void spl_kmem_thread_init();
+	void spl_kmem_mp_init();
+	void spl_kmem_thread_fini();
+	void spl_kmem_fini();
+	
+    size_t kmem_size(void);
+    size_t kmem_used(void);
+    size_t kmem_avail(void);
+    size_t kmem_num_pages_wanted();
 	int	spl_vm_pool_low(void);
-    void spl_kmem_tasks_fini();
-    void spl_kmem_fini(void);
+
 
 #define KMC_NOTOUCH     0x00010000
 #define KMC_NODEBUG     0x00020000
@@ -118,8 +121,8 @@ extern uint64_t physmem;
 	// This is not standard, to be replaced by an appropriate vmem call.
 	void kmem_flush();
     int kmem_debugging(void);
-
-#define kmem_cache_set_move(cache, movefunc)    do { } while (0)
+    void kmem_cache_set_move(kmem_cache_t *,
+                             kmem_cbrc_t (*)(void *, void *, size_t, void *));
 
     void *calloc(size_t n, size_t s);
     char *kmem_asprintf(const char *fmt, ...);

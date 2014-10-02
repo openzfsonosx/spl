@@ -199,7 +199,7 @@ extern "C" {
      */
 
 #define	KMEM_CPU_CACHE(cp)						\
-((kmem_cpu_cache_t *)((char *)(&cp->cache_cpu) + CPU->cpu_cache_offset))
+(&cp->cache_cpu[cpu_number()])
 
 #define	KMEM_MAGAZINE_VALID(cp, mp)	\
 (((kmem_slab_t *)P2END((uintptr_t)(mp), PAGESIZE) - 1)->slab_cache == \
@@ -241,42 +241,23 @@ extern "C" {
 
 #define KMEM_CACHE_NAMELEN 31
 
-    /*
-     * Magazine
-     */
     typedef struct kmem_magazine {
-        list_node_t		mag_node;		/* Unused Magazines cached */
-        void			*mag_round[1];	/* Magazine round(s) */
+        void	*mag_next;
+        void	*mag_round[1];		/* one or more rounds */
     } kmem_magazine_t;
 
 	/*
 	 * The magazine types for fast per-cpu allocation
 	 */
-//	typedef struct kmem_magtype {
-//		short			mt_magsize;		/* magazine size (number of rounds) */
-//		int				mt_align;		/* magazine alignment */
-//		size_t			mt_minbuf;		/* all smaller buffers qualify */
-//		size_t			mt_maxbuf;		/* no larger buffers qualify */
-//		kmem_cache_t	*mt_cache;		/* magazine cache */
-//	} kmem_magtype_t;
-
-	// The definition above is the true illumos one
-	// Not used until I understand how the magazines
-	// themselves can be allocated from a cache
-	// (which also uses magazines)
-
 	typedef struct kmem_magtype {
-		short			mt_magsize;	/* magazine size (number of rounds) */
-		int				mt_align;	/* magazine alignment */
-		uint32_t		mt_minbuf;	/* all smaller buffers qualify */
-		uint32_t		mt_maxbuf;	/* no larger buffers qualify */
-		lck_spin_t		*mt_lock;   /* protect the list of magazines */
-//		kmem_cache_t	*mt_cache;	/* magazine cache */ /* NOT COMPLETE */
-		list_t			mt_list;    /* cache of magazines of this size */
+		short			mt_magsize;		/* magazine size (number of rounds) */
+		int				mt_align;		/* magazine alignment */
+		size_t			mt_minbuf;		/* all smaller buffers qualify */
+		size_t			mt_maxbuf;		/* no larger buffers qualify */
+		kmem_cache_t	*mt_cache;		/* magazine cache */
 	} kmem_magtype_t;
 
-
-#define	KMEM_CPU_CACHE_SIZE	64	/* must be power of 2 */
+#define	KMEM_CPU_CACHE_SIZE	128	/* must be power of 2 */
 #define	KMEM_CPU_PAD		(KMEM_CPU_CACHE_SIZE - sizeof (kmutex_t) - \
 	2 * sizeof (uint64_t) - 2 * sizeof (void *) - sizeof (int) - \
 	5 * sizeof (short))
@@ -292,22 +273,25 @@ extern "C" {
      * Per CPU cache data
      */
     typedef struct kmem_cpu_cache {
-        kmutex_t          cc_lock;		/* protects this cpu's local cache */
-        uint64_t          cc_alloc;		/* allocations from this cpu */
-        uint64_t          cc_free;		/* frees to this cpu */
-        kmem_magazine_t  *cc_loaded;	/* the currently loaded magazine */
-        kmem_magazine_t  *cc_ploaded;	/* the previously loaded magazine */
-        int               cc_flags;		/* CPU-local copy of cache_flags */
-        short             cc_rounds;	/* number of objects in loaded mag */
-        short             cc_prounds;	/* number of objects in previous mag */
-        short             cc_magsize;	/* number of rounds in a full mag */
+        kmutex_t	cc_lock;	/* protects this cpu's local cache */
+        uint64_t	cc_alloc;	/* allocations from this cpu */
+        uint64_t	cc_free;	/* frees to this cpu */
+        kmem_magazine_t	*cc_loaded;	/* the currently loaded magazine */
+        kmem_magazine_t	*cc_ploaded;	/* the previously loaded magazine */
+        int		cc_flags;	/* CPU-local copy of cache_flags */
+        short		cc_rounds;	/* number of objects in loaded mag */
+        short		cc_prounds;	/* number of objects in previous mag */
+        short		cc_magsize;	/* number of rounds in a full mag */
+        short		cc_dump_rounds;	/* dump time copy of cc_rounds */
+        short		cc_dump_prounds; /* dump time copy of cc_prounds */
+        char		cc_pad[KMEM_CPU_PAD]; /* for nice alignment */
     } kmem_cpu_cache_t;
 
     /*
      * The magazine lists used in the depot.
      */
     typedef struct kmem_maglist {
-        list_t			ml_list;       /* magazine list */
+        kmem_magazine_t	*ml_list;      /* magazine list */
         long			ml_total;      /* number of magazines */
         long			ml_min;        /* min since last update */
         long			ml_reaplimit;  /* max reapable magazines */
