@@ -262,12 +262,15 @@ extern "C" {
 	2 * sizeof (uint64_t) - 2 * sizeof (void *) - sizeof (int) - \
 	5 * sizeof (short))
 #define	KMEM_CACHE_SIZE(ncpus)	\
-	((size_t)(&((kmem_cache_t *)0)->cache_cpu[ncpus]))
+	__builtin_offsetof(kmem_cache_t, cache_cpu[ncpus])
 
 	/* Offset from kmem_cache->cache_cpu for per cpu caches */
-#define	KMEM_CPU_CACHE_OFFSET(cpuid)					\
-	((size_t)(&((kmem_cache_t *)0)->cache_cpu[cpuid]) -		\
-	(size_t)(&((kmem_cache_t *)0)->cache_cpu))
+#define	KMEM_CPU_CACHE_OFFSET(cpuid)						\
+	__builtin_offsetof(kmem_cache_t, cache_cpu[cpuid]) - 	\
+	__builtin_offsetof(kmem_cache_t, cache_cpu)
+	
+//	((size_t)(&((kmem_cache_t *)0)->cache_cpu[cpuid]) -		\
+//	(size_t)(&((kmem_cache_t *)0)->cache_cpu))
 
     /*
      * Per CPU cache data
@@ -426,7 +429,8 @@ extern "C" {
         /*
          * Per CPU structures
          */
-        kmem_cpu_cache_t    *cache_cpu;					/* per-cpu data */
+		// XNU adjust to suit __builtin_offsetof
+        kmem_cpu_cache_t    cache_cpu[1];				/* per-cpu data */
 
     } ;
 
