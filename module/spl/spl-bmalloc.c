@@ -300,7 +300,7 @@ extern void kmem_free(vm_map_t map, void *addr, vm_size_t size);
 extern int vm_pool_low(void);
 #endif /* IN_KERNEL */
 
-static void *
+void *
 osif_malloc(sa_size_t size)
 {
 #ifdef IN_KERNEL
@@ -320,7 +320,7 @@ osif_malloc(sa_size_t size)
 #endif /* IN_KERNEL */
 }
 
-static inline void
+void
 osif_free(void* buf, sa_size_t size)
 {
 #ifdef IN_KERNEL

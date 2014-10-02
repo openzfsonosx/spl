@@ -1,3 +1,4 @@
+
 /*
  * CDDL HEADER START
  *
@@ -153,6 +154,9 @@ typedef struct slice_allocator {
 	lck_spin_t						*spinlock;
 } slice_allocator_t;
 
+// Convenient way to access kernel_memory_allocate and kmem_free
+void * osif_malloc(sa_size_t size);
+void osif_free(void* buf, sa_size_t size);
 
 //
 // Initialises the allocator, must be called before any other function.

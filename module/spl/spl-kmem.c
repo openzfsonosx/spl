@@ -496,12 +496,12 @@ void memory_pressure_task();
 
 void *segkmem_alloc(vmem_t *vmp, size_t size, int vmflag)
 {
-    return bmalloc(size, vmflag);
+    return osif_malloc(size);
 }
 
 void segkmem_free(vmem_t *vmp, void *inaddr, size_t size)
 {
-    bfree(inaddr, size);
+    osif_free(inaddr, size);
 }
 
 // Stub out caller()
