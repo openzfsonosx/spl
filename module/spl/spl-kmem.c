@@ -3747,31 +3747,15 @@ static void release_memory(uint64_t num_pages)
 	num_pages_released = bmalloc_release_pages(num_pages);
 
 	num_pages -= num_pages_released;
-	total_pages_released += num_pages_released;
+	total_pages_released += num_pages_released;s
 
-	// Now see what the caches can contribute from thier
-	// free slab lists.
-	if (num_pages) {
-		mutex_enter(&kmem_cache_lock);
-
-		for (cp = list_head(&kmem_caches); cp != NULL && (num_pages > 0);
-			 cp = list_next(&kmem_caches, cp)) {
-			num_pages_released = slice_allocator_release_pages(&cp->cache_slices, num_pages);
-			num_pages -= num_pages_released;
-			total_pages_released += num_pages_released;
-		}
-
-		mutex_exit(&kmem_cache_lock);
-	}
-
-	if (num_pages > 0) {
+	if (likely(num_pages > 0)) {
 		// Set flag for spl_vm_pool_low callers
 		num_pages_wanted = num_pages;
 		machine_is_swapping = 1;
 
 		// And request memory holders release memory.
 		kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-
 	}
 }
 
@@ -5207,7 +5191,7 @@ void kmem_flush()
 void
 strfree(char *str)
 {
-    bfree(str, strlen(str) + 1);
+    zfs_kmem_free(str, strlen(str) + 1);
 }
 
 char *kvasprintf(const char *fmt, va_list ap)
@@ -5220,7 +5204,7 @@ char *kvasprintf(const char *fmt, va_list ap)
     len = vsnprintf(NULL, 0, fmt, aq);
     va_end(aq);
 
-    p = bmalloc(len+1, KM_SLEEP);
+    p = zfs_kmem_alloc(len+1, KM_SLEEP);
     if (!p)
         return NULL;
 
