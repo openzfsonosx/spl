@@ -118,8 +118,6 @@ extern uint64_t physmem;
     void kmem_reap(void);
 	void kmem_reap_idspace(void);
 	
-	// This is not standard, to be replaced by an appropriate vmem call.
-	void kmem_flush();
     int kmem_debugging(void);
     void kmem_cache_set_move(kmem_cache_t *,
                              kmem_cbrc_t (*)(void *, void *, size_t, void *));

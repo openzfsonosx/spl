@@ -320,7 +320,7 @@ static vmem_t		*kmem_log_arena;
 static vmem_t		*kmem_oversize_arena;
 static vmem_t		*kmem_va_arena;
 static vmem_t		*kmem_default_arena;
-static vmem_t		*kmem_firewall_va_arena;
+//static vmem_t		*kmem_firewall_va_arena;
 static vmem_t		*kmem_firewall_arena;
 
 /*
@@ -510,23 +510,12 @@ caddr_t caller()
     return (caddr_t)(0);
 }
 
-//===============================================================
-// Is this used?
-//===============================================================
-
 void *
 calloc(size_t n, size_t s)
 {
     return (zfs_kmem_zalloc(n * s, KM_NOSLEEP));
 }
 
-
-
-// ===========================================================
-// Begin Illumos code
-// ===========================================================
-
-// BGH - available elsewhere?
 #define	IS_DIGIT(c)	((c) >= '0' && (c) <= '9')
 
 #define	IS_ALPHA(c)	\
@@ -3850,7 +3839,7 @@ spl_kmem_init(uint64_t total_memory)
 
 	// Initialise vmem - This init call is a load of rubbish, it will do for now.
 	heap_arena = vmem_init("the_heap",
-						   virtual_space_start, virtual_space_end, PAGE_SIZE,
+						   (void*)virtual_space_start, (void*)virtual_space_end, PAGE_SIZE,
 						   segkmem_alloc, segkmem_free);
 
     kmem_metadata_arena = vmem_create("kmem_metadata", NULL, 0, PAGESIZE,
@@ -5142,10 +5131,6 @@ kmem_cache_scan(kmem_cache_t *cp)
     }
 }
 
-// ===========================================================
-// End Illumos code
-// ===========================================================
-
 //===============================================================
 // Status
 //===============================================================
@@ -5167,8 +5152,11 @@ kmem_size(void)
 size_t
 kmem_used(void)
 {
-#warning - fixme - this is nothing like the total amount of memory allocated.
-    return bmalloc_app_allocated_total;
+	// All allocations are currently made kmem->osif_malloc or bmalloc->osif_malloc.
+	// osif_malloc/free() count the current bytes allocated via that interface,
+	// and this now represents our only cohesive "how much memory in use"
+	// statistic.
+    return bmalloc_allocated_total;
 }
 
 
@@ -5177,11 +5165,6 @@ int spl_vm_pool_low(void)
     int r = machine_is_swapping;
     machine_is_swapping = 0;
     return r;
-}
-
-void kmem_flush()
-{
-
 }
 
 //===============================================================
