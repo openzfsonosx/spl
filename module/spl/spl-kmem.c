@@ -289,11 +289,11 @@ int kmem_lite_pcs = 4;		/* number of PCs to store in KMF_LITE mode */
 size_t kmem_maxverify;		/* maximum bytes to inspect in debug routines */
 size_t kmem_minfirewall;	/* hardware-enforced redzone threshold */
 
-#ifdef _LP64
+//#ifdef _LP64
 size_t	kmem_max_cached = KMEM_BIG_MAXBUF;	/* maximum kmem_alloc cache */
-#else
-size_t	kmem_max_cached = KMEM_BIG_MAXBUF_32BIT; /* maximum kmem_alloc cache */
-#endif
+//#else
+//size_t	kmem_max_cached = KMEM_BIG_MAXBUF_32BIT; /* maximum kmem_alloc cache */
+//#endif
 
 #ifdef DEBUG
 int kmem_flags = KMF_AUDIT | KMF_DEADBEEF | KMF_REDZONE | KMF_CONTENTS;
@@ -322,6 +322,10 @@ static vmem_t		*kmem_va_arena;
 static vmem_t		*kmem_default_arena;
 //static vmem_t		*kmem_firewall_va_arena;
 static vmem_t		*kmem_firewall_arena;
+
+// These arenas normally reside in seg_kmem.c
+vmem_t *zio_arena = NULL;	    /* arena for allocating zio memory */
+vmem_t *zio_alloc_arena = NULL;	/* arena for allocating zio memory */
 
 /*
  * Define KMEM_STATS to turn on statistic gathering. By default, it is only
@@ -3859,6 +3863,20 @@ spl_kmem_init(uint64_t total_memory)
     kmem_log_arena = vmem_create("kmem_log", NULL, 0, KMEM_ALIGN,
                                  segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
 
+	// These really belong in segkmem.c
+	
+	/*
+	 * To reduce VA space fragmentation, we set up quantum caches for the
+	 * smaller sizes;  we chose 32k because that translates to 128k VA
+	 * slabs, which matches nicely with the common 128k zio_data bufs.
+	 */
+	zio_arena = vmem_create("zfs_file_data", virtual_space_start, virtual_space_end,
+							PAGESIZE, NULL, NULL, NULL, 32 * 1024, VM_SLEEP);
+	
+	zio_alloc_arena = vmem_create("zfs_file_data_buf", NULL, 0, PAGESIZE,
+//								  segkmem_zio_alloc, segkmem_zio_free, zio_arena, 0, VM_SLEEP);
+								  segkmem_alloc, segkmem_free, zio_arena, 0, VM_SLEEP);
+	
 #ifndef APPLE
 //    kmem_firewall_va_arena = vmem_create("kmem_firewall_va",
 //                                         NULL, 0, PAGESIZE,
