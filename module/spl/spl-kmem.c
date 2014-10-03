@@ -3747,7 +3747,7 @@ static void release_memory(uint64_t num_pages)
 	num_pages_released = bmalloc_release_pages(num_pages);
 
 	num_pages -= num_pages_released;
-	total_pages_released += num_pages_released;s
+	total_pages_released += num_pages_released;
 
 	if (likely(num_pages > 0)) {
 		// Set flag for spl_vm_pool_low callers
