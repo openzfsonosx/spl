@@ -81,8 +81,6 @@ mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
 // Which CPU are we executing on?
 extern int cpu_number();
 
-extern thread_t current_thread(void);
-
 // Invoke the kernel debugger
 extern void Debugger(const char *message);
 
@@ -2099,7 +2097,7 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
      * callback function.
      */
     ASSERT(cp->cache_defrag == NULL ||
-           cp->cache_defrag->kmd_thread != current_thread() ||
+           cp->cache_defrag->kmd_thread != spl_current_thread() ||
            (buf != cp->cache_defrag->kmd_from_buf &&
             buf != cp->cache_defrag->kmd_to_buf));
 
@@ -4418,7 +4416,7 @@ kmem_move_buffer(kmem_move_t *callback)
     KMEM_STAT_COND_ADD((callback->kmm_flags & KMM_NOTIFY),
                        kmem_move_stats.kms_notify_callbacks);
     cp->cache_defrag->kmd_callbacks++;
-	cp->cache_defrag->kmd_thread = current_thread();
+	cp->cache_defrag->kmd_thread = spl_current_thread();
     cp->cache_defrag->kmd_from_buf = callback->kmm_from_buf;
     cp->cache_defrag->kmd_to_buf = callback->kmm_to_buf;
     DTRACE_PROBE2(kmem__move__start, kmem_cache_t *, cp, kmem_move_t *,

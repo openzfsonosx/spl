@@ -67,6 +67,8 @@ extern kthread_t *spl_thread_create(caddr_t stk, size_t stksize,
 #define	thread_exit spl_thread_exit
 extern void spl_thread_exit(void);
 
+extern kthread_t *spl_current_thread(void);
+
 #define	delay osx_delay
 extern void osx_delay(int);
 

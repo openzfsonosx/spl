@@ -60,6 +60,12 @@ spl_thread_create(
         return ((kthread_t *)thread);
 }
 
+kthread_t *
+spl_current_thread(void)
+{
+    thread_t cur_thread = current_thread();
+    return ((kthread_t *)cur_thread);
+}
 
 void spl_thread_exit(void)
 {
