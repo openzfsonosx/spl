@@ -33,6 +33,7 @@
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/kstat.h>
+#include <sys/seg_kmem.h>
 #include <sys/systm.h>
 #include <sys/sysctl.h>
 #include <sys/thread.h>
@@ -79,6 +80,11 @@ mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
 
 // Which CPU are we executing on?
 extern int cpu_number();
+
+extern thread_t current_thread(void);
+
+// Invoke the kernel debugger
+extern void Debugger(const char *message);
 
 //===============================================================
 // Non Illumos Variables
@@ -308,10 +314,9 @@ static kmem_cache_t	*kmem_bufctl_audit_cache;
 
 static kmutex_t		kmem_cache_lock;	/* inter-cache linkage only */
 static list_t		kmem_caches;
-
+extern vmem_t		*heap_arena;
 static taskq_t		*kmem_taskq;
 static kmutex_t		kmem_flags_lock;
-static vmem_t       *heap_arena;        /* normally declared elsewhere in Illumos */
 static vmem_t		*kmem_metadata_arena;
 static vmem_t		*kmem_msb_arena;	/* arena for metadata caches */
 static vmem_t		*kmem_cache_arena;
@@ -322,10 +327,6 @@ static vmem_t		*kmem_va_arena;
 static vmem_t		*kmem_default_arena;
 //static vmem_t		*kmem_firewall_va_arena;
 static vmem_t		*kmem_firewall_arena;
-
-// These arenas normally reside in seg_kmem.c
-vmem_t *zio_arena = NULL;	    /* arena for allocating zio memory */
-vmem_t *zio_alloc_arena = NULL;	/* arena for allocating zio memory */
 
 /*
  * Define KMEM_STATS to turn on statistic gathering. By default, it is only
@@ -493,20 +494,6 @@ static void bmalloc_maintenance_task_proc(void *p);
 
 void bmalloc_release_memory_task();
 void memory_pressure_task();
-
-//===============================================================
-// These ultimately belong in seg_kmem.{h,c}
-//===============================================================
-
-void *segkmem_alloc(vmem_t *vmp, size_t size, int vmflag)
-{
-    return osif_malloc(size);
-}
-
-void segkmem_free(vmem_t *vmp, void *inaddr, size_t size)
-{
-    osif_free(inaddr, size);
-}
 
 // Stub out caller()
 caddr_t caller()
@@ -797,9 +784,11 @@ kmem_error(int error, kmem_cache_t *cparg, void *bufarg)
     if (kmem_panic > 0)
         panic("kernel heap corruption detected");
 
-#warning does GNU have a way to jump into the kernel debugger?
-//    if (kmem_panic == 0)
+	if (kmem_panic == 0) {
 //        debug_enter(NULL);
+		Debugger("Kernel heap corruption detected");
+	}
+
 
     kmem_logging = 1;	/* resume logging */
 }
@@ -850,12 +839,10 @@ kmem_log_enter(kmem_log_header_t *lhp, void *data, size_t size)
 {
     void *logspace;
 
-#warning work this out
-    //    kmem_cpu_log_header_t *clhp = &lhp->lh_cpu[CPU->cpu_seqid];
-    kmem_cpu_log_header_t *clhp = &lhp->lh_cpu[0];
+    kmem_cpu_log_header_t *clhp = &lhp->lh_cpu[cpu_number()];
 
 //    if (lhp == NULL || kmem_logging == 0 || panicstr)
-    if (lhp == NULL || kmem_logging == 0)
+	if (lhp == NULL || kmem_logging == 0)
         return (NULL);
 
     mutex_enter(&clhp->clh_lock);
@@ -2111,7 +2098,7 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
      * callback function.
      */
     ASSERT(cp->cache_defrag == NULL ||
-           cp->cache_defrag->kmd_thread != curthread ||
+           cp->cache_defrag->kmd_thread != current_thread() ||
            (buf != cp->cache_defrag->kmd_from_buf &&
             buf != cp->cache_defrag->kmd_to_buf));
 
@@ -3825,10 +3812,8 @@ spl_kmem_init(uint64_t total_memory)
     list_create(&kmem_caches, sizeof (kmem_cache_t),
                 offsetof(kmem_cache_t, cache_link));
 
-	// Initialise vmem - This init call is a load of rubbish, it will do for now.
-	heap_arena = vmem_init("the_heap",
-						   (void*)virtual_space_start, (void*)virtual_space_end, PAGE_SIZE,
-						   segkmem_alloc, segkmem_free);
+	// Initialise seg_kmem, only the first two parameters are valid for us.
+	kernelheap_init((void*)virtual_space_start, (void*)virtual_space_end, 0, 0, 0);
 
     kmem_metadata_arena = vmem_create("kmem_metadata", NULL, 0, PAGESIZE,
                                       vmem_alloc, vmem_free, heap_arena, 8 * PAGESIZE,
@@ -3846,20 +3831,8 @@ spl_kmem_init(uint64_t total_memory)
 
     kmem_log_arena = vmem_create("kmem_log", NULL, 0, KMEM_ALIGN,
                                  segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
-
-	// These really belong in segkmem.c
 	
-	/*
-	 * To reduce VA space fragmentation, we set up quantum caches for the
-	 * smaller sizes;  we chose 32k because that translates to 128k VA
-	 * slabs, which matches nicely with the common 128k zio_data bufs.
-	 */
-	zio_arena = vmem_create("zfs_file_data", virtual_space_start, virtual_space_end,
-							PAGESIZE, NULL, NULL, NULL, 32 * 1024, VM_SLEEP);
-	
-	zio_alloc_arena = vmem_create("zfs_file_data_buf", NULL, 0, PAGESIZE,
-//								  segkmem_zio_alloc, segkmem_zio_free, zio_arena, 0, VM_SLEEP);
-								  segkmem_alloc, segkmem_free, zio_arena, 0, VM_SLEEP);
+	segkmem_zio_init(virtual_space_start, virtual_space_end);
 	
 #ifndef APPLE
 //    kmem_firewall_va_arena = vmem_create("kmem_firewall_va",
@@ -4444,9 +4417,7 @@ kmem_move_buffer(kmem_move_t *callback)
     KMEM_STAT_COND_ADD((callback->kmm_flags & KMM_NOTIFY),
                        kmem_move_stats.kms_notify_callbacks);
     cp->cache_defrag->kmd_callbacks++;
-#warning - set kmd_thread appropriately
-//	cp->cache_defrag->kmd_thread = curthread;
-    cp->cache_defrag->kmd_thread = 0;
+	cp->cache_defrag->kmd_thread = current_thread();
     cp->cache_defrag->kmd_from_buf = callback->kmm_from_buf;
     cp->cache_defrag->kmd_to_buf = callback->kmm_to_buf;
     DTRACE_PROBE2(kmem__move__start, kmem_cache_t *, cp, kmem_move_t *,

@@ -40,7 +40,7 @@
 //#include <sys/dumphdr.h>
 //#include <sys/bootconf.h>
 //#include <sys/lgrp.h>
-//#include <vm/seg_kmem.h>
+#include <vm/seg_kmem.h>
 //#include <vm/hat.h>
 //#include <vm/page.h>
 //#include <vm/vm_dep.h>
@@ -49,6 +49,7 @@
 //#include <vm/seg_kp.h>
 //#include <sys/bitmap.h>
 //#include <sys/mem_cage.h>
+#include <spl-bmalloc.h>
 
 #ifdef __sparc
 #include <sys/ivintr.h>
@@ -109,17 +110,20 @@
 
 typedef int page_t;
 
+void *segkmem_alloc(vmem_t *vmp, size_t size, int vmflag);
+void segkmem_free(vmem_t *vmp, void *inaddr, size_t size);
+
 /* Total memory held allocated */
 uint64_t segkmem_total_allocated = 0;
 
 //extern ulong_t *segkp_bitmap;   /* Is set if segkp is from the kernel heap */
 
-//char *kernelheap;		/* start of primary kernel heap */
-//char *ekernelheap;		/* end of primary kernel heap */
+char *kernelheap;		/* start of primary kernel heap */
+char *ekernelheap;		/* end of primary kernel heap */
 //struct seg kvseg;		/* primary kernel heap segment */
 //struct seg kvseg_core;		/* "core" kernel heap segment */
 //struct seg kzioseg;		/* Segment for zio mappings */
-//vmem_t *heap_arena;		/* primary kernel heap arena */
+vmem_t *heap_arena;		/* primary kernel heap arena */
 //vmem_t *heap_core_arena;	/* core kernel heap arena */
 //char *heap_core_base;		/* start of core kernel heap arena */
 //char *heap_lp_base;		/* start of kernel large page heap arena */
@@ -228,17 +232,17 @@ vmem_t *zio_alloc_arena = NULL;	/* arena for allocating zio memory */
 /*
  * Initialize kernel heap boundaries.
  */
-//void
-//kernelheap_init(
-//				void *heap_start,
-//				void *heap_end,
-//				char *first_avail,
-//				void *core_start,
-//				void *core_end)
-//{
+void
+kernelheap_init(
+				void *heap_start,
+				void *heap_end,
+				char *first_avail,
+				void *core_start,
+				void *core_end)
+{
 //	uintptr_t textbase;
 //	size_t core_size;
-//	size_t heap_size;
+	size_t heap_size;
 //	vmem_t *heaptext_parent;
 //	size_t	heap_lp_size = 0;
 //#ifdef __sparc
@@ -280,9 +284,9 @@ vmem_t *zio_alloc_arena = NULL;	/* arena for allocating zio memory */
 //	}
 //#endif
 //
-//	heap_size = (uintptr_t)ekernelheap - (uintptr_t)kernelheap;
-//	heap_arena = vmem_init("heap", kernelheap, heap_size, PAGESIZE,
-//						   segkmem_alloc, segkmem_free);
+	heap_size = (uintptr_t)ekernelheap - (uintptr_t)kernelheap;
+	heap_arena = vmem_init("heap", kernelheap, heap_size, PAGESIZE,
+						   segkmem_alloc, segkmem_free);
 //
 //	if (core_size > 0) {
 //		heap_core_arena = vmem_create("heap_core", core_start,
@@ -366,7 +370,7 @@ vmem_t *zio_alloc_arena = NULL;	/* arena for allocating zio memory */
 //	hat_memload_arena = vmem_create("hat_memload", NULL, 0, PAGESIZE,
 //									hat_memload_alloc, segkmem_free, heap_arena, 0,
 //									VM_SLEEP | VMC_POPULATOR | VMC_DUMPSAFE);
-//}
+}
 
 //void
 //boot_mapin(caddr_t addr, size_t size)
@@ -937,51 +941,6 @@ vmem_t *zio_alloc_arena = NULL;	/* arena for allocating zio memory */
 //
 //	return (addr);
 //}
-
-/*
- * Wrappers for XNU kernel allocate functions
- */
-
-#ifdef _KERNEL
-
-// NOTE: these functions refer to XNU kmem_ functions not kmem.c style functions
-extern vm_map_t kernel_map;
-
-extern kern_return_t kernel_memory_allocate(vm_map_t map, void **addrp,
-											vm_size_t size, vm_offset_t mask, int flags);
-
-extern void kmem_free(vm_map_t map, void *addr, vm_size_t size);
-
-#endif /* _KERNEL */
-
-static void *
-osif_malloc(uint64_t size)
-{
-#ifdef _KERNEL
-	void *tr;
-	kern_return_t kr;
-	
-	kr = kernel_memory_allocate(kernel_map, &tr, size, 0, 0);
-	
-	if (kr == KERN_SUCCESS) {
-		atomic_add_64(&segkmem_total_allocated, size);
-		return (tr);
-	} else {
-		return (NULL);
-	}
-#else
-	return 0;
-#endif
-}
-
-static void
-osif_free(void* buf, uint64_t size)
-{
-#ifdef _KERNEL
-	kmem_free(kernel_map, buf, size);
-	atomic_sub_64(&segkmem_total_allocated, size);
-#endif
-}
 
 static void *
 segkmem_alloc_vn(vmem_t *vmp, size_t size, int vmflag, struct vnode *vp)
@@ -1578,6 +1537,8 @@ segkmem_zio_free(vmem_t *vmp, void *inaddr, size_t size)
 void
 segkmem_zio_init(void *zio_mem_base, void *zio_mem_end)
 {
+	size_t heap_size;
+	
 	ASSERT(zio_mem_base != NULL);
 	ASSERT(zio_mem_size != 0);
 	
@@ -1586,7 +1547,8 @@ segkmem_zio_init(void *zio_mem_base, void *zio_mem_end)
 	 * smaller sizes;  we chose 32k because that translates to 128k VA
 	 * slabs, which matches nicely with the common 128k zio_data bufs.
 	 */
-	zio_arena = vmem_create("zfs_file_data", zio_mem_base, zio_mem_end,
+	heap_size = (uintptr_t)zio_mem_end - (uintptr_t)zio_mem_base;
+	zio_arena = vmem_create("zfs_file_data", zio_mem_base, heap_size,
 							PAGESIZE, NULL, NULL, NULL, 32 * 1024, VM_SLEEP);
 	
 	zio_alloc_arena = vmem_create("zfs_file_data_buf", NULL, 0, PAGESIZE,

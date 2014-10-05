@@ -80,14 +80,14 @@ extern "C" {
 //	extern page_t *segkmem_page_create(void *, size_t, int, void *);
 //	extern void *segkmem_xalloc(vmem_t *, void *, size_t, int, uint_t,
 //								page_t *(*page_create_func)(void *, size_t, int, void *), void *);
-	extern void *segkmem_alloc(vmem_t *, size_t, int);
+	void *segkmem_alloc(vmem_t *, size_t, int);
 //	extern void *segkmem_alloc_permanent(vmem_t *, size_t, int);
 	extern void segkmem_free(vmem_t *, void *, size_t);
 //	extern void segkmem_xfree(vmem_t *, void *, size_t, void (*)(page_t *));
 	
 //	extern void *boot_alloc(void *, size_t, uint_t);
 //	extern void boot_mapin(caddr_t addr, size_t size);
-//	extern void kernelheap_init(void *, void *, char *, void *, void *);
+	extern void kernelheap_init(void *, void *, char *, void *, void *);
 //	extern void segkmem_gc(void);
 	
 	extern void *segkmem_zio_alloc(vmem_t *, size_t, int);

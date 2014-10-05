@@ -51,6 +51,7 @@ spl_SOURCES = 	\
 	spl-proc.c \
 	spl-processor.c \
 	spl-rwlock.c \
+	spl-seg_kmem.c \
 	spl-taskq.c \
 	spl-thread.c \
 	spl-time.c \
