@@ -3727,12 +3727,6 @@ static void release_memory(uint64_t num_pages)
 	uint64_t total_pages_released = 0;
 	kmem_cache_t *cp = 0;
 
-	// Make sure everything you do in this method is syncronous.
-	// We want it to be somewhat self throttling, but more importantly
-	// this thread can wake very frequently when the machine
-	// is under memory pressure, and it can quickly overwhelm
-	// the bsd_timeout mechanism and other queues.
-
 	// Attempt to give the OS as many pages as it is
 	// seeking from the memory cached by bmalloc.
 
@@ -3766,24 +3760,13 @@ static void memory_monitor_thread()
 
 		bmalloc_stats.monitor_thread_wake_count.value.ui64++;
 
-		if (kr == KERN_SUCCESS && os_num_pages_wanted) {
+		if ((!shutting_down) && kr == KERN_SUCCESS && os_num_pages_wanted) {
 			bmalloc_stats.monitor_thread_last_num_pages_requested.value.ui64 = os_num_pages_wanted;
 			release_memory(os_num_pages_wanted);
 		}
 	}
 
 	thread_exit();
-}
-
-static void start_memory_monitor()
-{
-	(void)thread_create(NULL, 0, memory_monitor_thread, 0, 0, 0, 0, 0);
-}
-
-static void stop_memory_monitor()
-{
-	shutting_down = 1;
-	thread_wakeup((event_t) &vm_page_free_wanted);
 }
 
 static int
@@ -3812,7 +3795,8 @@ spl_kmem_init(uint64_t total_memory)
     size_t maxverify, minfirewall;
 
     printf("SPL: Total memory %llu\n", total_memory);
-
+	printf("SPL: sizeof size_t=%lu\n", sizeof(size_t));
+	
 	// Initialise the kstat lock
 	mutex_init(&kmem_cache_lock, "kmem_cache_lock", MUTEX_DEFAULT, NULL); // XNU
 	mutex_init(&kmem_flags_lock, "kmem_flags_lock", MUTEX_DEFAULT, NULL); // XNU
@@ -4097,7 +4081,7 @@ spl_kmem_thread_init(void)
     kmem_taskq = taskq_create("kmem_taskq", 1, minclsyspri,
                                        300, INT_MAX, TASKQ_PREPOPULATE);
 	bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
-	start_memory_monitor();
+	(void)thread_create(NULL, 0, memory_monitor_thread, 0, 0, 0, 0, 0);
 }
 
 void
@@ -4109,13 +4093,24 @@ spl_kmem_thread_fini(void)
 	// in here somewhere to ensure that all tasks are dead during
 	// shutdown.
 
+	printf("SPL: stop memory monitor\n");
+	thread_wakeup((event_t) &vm_page_free_wanted);
+
+	printf("SPL: bsd_untimeout\n");
 	bsd_untimeout(kmem_update, 0);
 	bsd_untimeout(bmalloc_maintenance_task_proc, 0);
+	bsd_untimeout(kmem_reap_timeout, 0);
 
-	stop_memory_monitor();
-
+	printf("SPL: wait for taskqs to empty\n");
+	taskq_wait(kmem_taskq);
+	taskq_wait(kmem_move_taskq);
+	
+	printf("SPL: destroy taskq\n");
 	taskq_destroy(kmem_taskq);
-
+	taskq_destroy(kmem_move_taskq);
+	kmem_taskq = 0;
+	kmem_move_taskq = 0;
+	
 	// FIXME - maybe it should tear down for symmetry
 }
 
