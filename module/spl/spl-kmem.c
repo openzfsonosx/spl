@@ -41,7 +41,6 @@
 #include <sys/kmem_impl.h>
 #include <sys/vmem_impl.h>
 #include <kern/sched_prim.h>
-#include "spl-bmalloc.h"
 
 //===============================================================
 // Options
@@ -99,25 +98,14 @@ static int					shutting_down = 0;
 
 uint64_t			physmem = 0;
 
-// Size in bytes of the memory allocated by bmalloc resuling from
-// allocation calls to the SPL. The ratio of
-// total_in_use :bmalloc_allocated_total is an indication of
-// the space efficiency of bmalloc.
-extern uint64_t		bmalloc_allocated_total;
-
-// Size in bytes of all memory allocated by applications via bmalloc
-extern uint64_t		bmalloc_app_allocated_total;
+// Size in bytes of the memory allocated in seg_kmem
+extern uint64_t		segkmem_total_mem_allocated;
 
 // Number of active threads
 extern uint64_t		zfs_threads;
 
-// Number of garbage collects against bmalloc
-static uint64_t		bmalloc_gc_count = 0;
-
 // Number of pages the OS last reported that it needed freed
 static unsigned int		num_pages_wanted = 0;
-
-static struct timespec	bmalloc_task_timeout		= {5, 0};			// 5 Seconds
 
 //===============================================================
 // Illumos Variables
@@ -465,34 +453,21 @@ struct {
     kmem_bufctl_t	*kmp_bufctl;	/* bufctl */
 } kmem_panic_info;
 
-typedef struct bmalloc_stats {
-    kstat_named_t bmalloc_spl_internal_alloc;
-    kstat_named_t bmalloc_os_alloc;
-    kstat_named_t bmalloc_gc_count;
-    kstat_named_t bmalloc_active_threads;
-    kstat_named_t monitor_thread_wake_count;
-    kstat_named_t monitor_thread_last_num_pages_requested;
-} bmalloc_stats_t;
+typedef struct spl_stats {
+    kstat_named_t spl_os_alloc;
+    kstat_named_t spl_active_threads;
+    kstat_named_t spl_monitor_thread_wake_count;
+    kstat_named_t spl_monitor_thread_last_num_pages_requested;
+} spl_stats_t;
 
-static bmalloc_stats_t bmalloc_stats = {
-    {"spl_internal_alloc", KSTAT_DATA_UINT64},
-    {"bmalloc_os_alloc", KSTAT_DATA_UINT64},
-    {"bmalloc_gc_count", KSTAT_DATA_UINT64},
+static spl_stats_t spl_stats = {
+    {"os_mem_alloc", KSTAT_DATA_UINT64},
     {"active_threads", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
     {"monitor_thread_page_req", KSTAT_DATA_UINT64},
 };
 
-static kstat_t *bmalloc_ksp = 0;
-
-//===============================================================
-// Forward Declarations
-//===============================================================
-
-static void bmalloc_maintenance_task_proc(void *p);
-
-void bmalloc_release_memory_task();
-void memory_pressure_task();
+static kstat_t *spl_ksp = 0;
 
 // Stub out caller()
 caddr_t caller()
@@ -3709,19 +3684,6 @@ kmem_cache_init(int pass, int use_large_pages)
 
 static void release_memory(uint64_t num_pages)
 {
-	uint64_t num_pages_released = 0;
-	uint64_t total_pages_released = 0;
-	kmem_cache_t *cp = 0;
-
-	// Attempt to give the OS as many pages as it is
-	// seeking from the memory cached by bmalloc.
-
-	// Lets see if bmalloc has anything to release
-	num_pages_released = bmalloc_release_pages(num_pages);
-
-	num_pages -= num_pages_released;
-	total_pages_released += num_pages_released;
-
 	if (likely(num_pages > 0)) {
 		// Set flag for spl_vm_pool_low callers
 		num_pages_wanted = num_pages;
@@ -3744,10 +3706,10 @@ static void memory_monitor_thread()
 		kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
 									  &pages_reclaimed, &os_num_pages_wanted);
 
-		bmalloc_stats.monitor_thread_wake_count.value.ui64++;
+		spl_stats.spl_monitor_thread_wake_count.value.ui64++;
 
 		if ((!shutting_down) && kr == KERN_SUCCESS && os_num_pages_wanted) {
-			bmalloc_stats.monitor_thread_last_num_pages_requested.value.ui64 = os_num_pages_wanted;
+			spl_stats.spl_monitor_thread_last_num_pages_requested.value.ui64 = os_num_pages_wanted;
 			release_memory(os_num_pages_wanted);
 		}
 	}
@@ -3756,17 +3718,15 @@ static void memory_monitor_thread()
 }
 
 static int
-bmalloc_kstat_update(kstat_t *ksp, int rw)
+spl_kstat_update(kstat_t *ksp, int rw)
 {
-	bmalloc_stats_t *bs = ksp->ks_data;
+	spl_stats_t *ks = ksp->ks_data;
 
 	if (rw == KSTAT_WRITE) {
 		return (SET_ERROR(EACCES));
 	} else {
-		bs->bmalloc_spl_internal_alloc.value.ui64 = bmalloc_app_allocated_total;
-		bs->bmalloc_os_alloc.value.ui64 = bmalloc_allocated_total;
-		bs->bmalloc_active_threads.value.ui64 = zfs_threads;
-		bs->bmalloc_gc_count.value.ui64 = bmalloc_gc_count;
+		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
+		ks->spl_active_threads.value.ui64 = zfs_threads;
 	}
 
 	return (0);
@@ -3993,14 +3953,14 @@ spl_kmem_init(uint64_t total_memory)
 
     kmem_ready = 1;
 
-	// Install bmalloc kstats
-	bmalloc_ksp = kstat_create("spl", 0, "bmalloc", "misc", KSTAT_TYPE_NAMED,
-							   sizeof (bmalloc_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
+	// Install spl kstats
+	spl_ksp = kstat_create("spl", 0, "spl_misc", "misc", KSTAT_TYPE_NAMED,
+							   sizeof (spl_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
 
-	if (bmalloc_ksp != NULL) {
-		bmalloc_ksp->ks_data = &bmalloc_stats;
-		bmalloc_ksp->ks_update = bmalloc_kstat_update;
-		kstat_install(bmalloc_ksp);
+	if (spl_ksp != NULL) {
+		spl_ksp->ks_data = &spl_stats;
+		spl_ksp->ks_update = spl_kstat_update;
+		kstat_install(spl_ksp);
 	}
 
     /*
@@ -4023,7 +3983,7 @@ spl_kmem_init(uint64_t total_memory)
 void
 spl_kmem_fini(void)
 {
-	kstat_delete(bmalloc_ksp);
+	kstat_delete(spl_ksp);
 }
 
 static void
@@ -4052,7 +4012,6 @@ spl_kmem_thread_init(void)
     kmem_move_init();
     kmem_taskq = taskq_create("kmem_taskq", 1, minclsyspri,
                                        300, INT_MAX, TASKQ_PREPOPULATE);
-	bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
 	(void)thread_create(NULL, 0, memory_monitor_thread, 0, 0, 0, 0, 0);
 }
 
@@ -4070,7 +4029,6 @@ spl_kmem_thread_fini(void)
 
 	printf("SPL: bsd_untimeout\n");
 	bsd_untimeout(kmem_update, 0);
-	bsd_untimeout(bmalloc_maintenance_task_proc, 0);
 	bsd_untimeout(kmem_reap_timeout, 0);
 
 	printf("SPL: wait for taskqs to empty\n");
@@ -5135,11 +5093,7 @@ kmem_size(void)
 size_t
 kmem_used(void)
 {
-	// All allocations are currently made kmem->osif_malloc or bmalloc->osif_malloc.
-	// osif_malloc/free() count the current bytes allocated via that interface,
-	// and this now represents our only cohesive "how much memory in use"
-	// statistic.
-    return bmalloc_allocated_total;
+    return segkmem_total_mem_allocated;
 }
 
 
@@ -5209,29 +5163,3 @@ kmem_asprintf(const char *fmt, ...)
     return ptr;
 }
 
-//===============================================================
-// Memory pressure monitor thread
-//===============================================================
-
-
-
-//===============================================================
-// Garbage Collection and maintenance done for bmalloc
-//===============================================================
-
-static void
-bmalloc_maintenance_task()
-{
-    //printf("bmalloc gc\n");
-    bmalloc_gc_count++;
-    bmalloc_garbage_collect();
-    if(!shutting_down) {
-        bsd_timeout(bmalloc_maintenance_task_proc, 0, &bmalloc_task_timeout);
-    }
-}
-
-static void
-bmalloc_maintenance_task_proc(void *p)
-{
-    taskq_dispatch(kmem_taskq, bmalloc_maintenance_task, 0, TQ_PUSHPAGE);
-}

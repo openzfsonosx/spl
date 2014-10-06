@@ -49,7 +49,6 @@
 //#include <vm/seg_kp.h>
 //#include <sys/bitmap.h>
 //#include <sys/mem_cage.h>
-#include <spl-bmalloc.h>
 
 #ifdef __sparc
 #include <sys/ivintr.h>
@@ -108,13 +107,23 @@
  * Copyright (c) 2014 Brendon Humphrey (brendon.humphrey@mac.com)
  */
 
+#ifdef _KERNEL
+extern vm_map_t kernel_map;
+
+extern kern_return_t kernel_memory_allocate(vm_map_t map, void **addrp,
+                                            vm_size_t size, vm_offset_t mask, int flags);
+
+extern void kmem_free(vm_map_t map, void *addr, vm_size_t size);
+
+#endif /* _KERNEL */
+
 typedef int page_t;
 
 void *segkmem_alloc(vmem_t *vmp, size_t size, int vmflag);
 void segkmem_free(vmem_t *vmp, void *inaddr, size_t size);
 
 /* Total memory held allocated */
-uint64_t segkmem_total_allocated = 0;
+uint64_t segkmem_total_mem_allocated = 0;
 
 //extern ulong_t *segkp_bitmap;   /* Is set if segkp is from the kernel heap */
 
@@ -228,6 +237,38 @@ vmem_t *zio_alloc_arena = NULL;	/* arena for allocating zio memory */
 //{
 //	return (segkmem_alloc(vmp, size, flags | VM_NORELOC));
 //}
+
+
+static void *
+osif_malloc(uint64_t size)
+{
+#ifdef _KERNEL
+    void *tr;
+    kern_return_t kr;
+    
+    kr = kernel_memory_allocate(kernel_map, &tr, size, 0, 0);
+    
+    if (kr == KERN_SUCCESS) {
+        atomic_add_64(&segkmem_total_mem_allocated, size);
+        return (tr);
+    } else {
+        return (NULL);
+    }
+#else
+    return ((void*)malloc(size));
+#endif /* _KERNEL */
+}
+
+static void
+osif_free(void* buf, uint64_t size)
+{
+#ifdef _KERNEL
+    kmem_free(kernel_map, buf, size);
+    atomic_sub_64(&segkmem_total_mem_allocated, size);
+#else
+    free(buf);
+#endif /* _KERNEL */
+}
 
 /*
  * Initialize kernel heap boundaries.

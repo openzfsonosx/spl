@@ -36,7 +36,13 @@
 #include <sys/cmn_err.h>
 #include <sys/time.h>
 #include <sys/sysctl.h>
-#include <spl-bmalloc.h>
+
+/*
+ * We need to get dynamically allocated memory from the kernel allocator
+ * (Our needs are small, we wont blow the zone_map).
+ */
+extern void *kalloc(vm_size_t size);
+extern void kfree(void *data, vm_size_t size);
 
 /*
  * Statically declared toplevel OID that all kstats
@@ -160,7 +166,8 @@ get_kstat_parent(struct sysctl_oid_list* root, char *module_name, char* class_na
 	the_module = get_oid_with_name(root, module_name);
 	
 	if (!the_module) {
-		new_node = bzmalloc(sizeof(sysctl_tree_node_t), KM_SLEEP);
+		new_node = kalloc(sizeof(sysctl_tree_node_t));
+        bzero(new_node, sizeof(sysctl_tree_node_t));
 		init_oid_tree_node(root, module_name, new_node);
 		the_module = &new_node->tn_oid;
 	}
@@ -172,7 +179,8 @@ get_kstat_parent(struct sysctl_oid_list* root, char *module_name, char* class_na
 	the_class = get_oid_with_name(container, class_name);
 	
 	if (!the_class) {
-		new_node = bzmalloc(sizeof(sysctl_tree_node_t), KM_SLEEP);
+		new_node = kalloc(sizeof(sysctl_tree_node_t));
+        bzero(new_node, sizeof(sysctl_tree_node_t));
 		init_oid_tree_node(container, class_name, new_node);
 		the_class = &new_node->tn_oid;
 	}
@@ -289,7 +297,8 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
      * Allocate memory for the new kstat header.
      */
     size = sizeof (ekstat_t);
-    e = (ekstat_t *)bzmalloc(size, KM_SLEEP);
+    e = (ekstat_t *)kalloc(size);
+    bzero(e, size);
     if (e == NULL) {
         cmn_err(CE_NOTE, "kstat_create('%s', %d, '%s'): "
                 "insufficient kernel memory",
@@ -361,7 +370,8 @@ kstat_install(kstat_t *ksp)
 		}
 		
 		// Create the leaf node OID objects
-		e->e_vals = (sysctl_leaf_t*)bmalloc(ksp->ks_ndata * sizeof(sysctl_leaf_t), KM_SLEEP);
+		e->e_vals = (sysctl_leaf_t*)kalloc(ksp->ks_ndata * sizeof(sysctl_leaf_t));
+        bzero(e->e_vals, ksp->ks_ndata * sizeof(sysctl_leaf_t));
 		e->e_num_vals = ksp->ks_ndata;
 		
         named_base = (kstat_named_t*)(ksp->ks_data);
@@ -393,7 +403,7 @@ kstat_install(kstat_t *ksp)
             // flags to the sysctl.
             switch (named->data_type) {
                 case KSTAT_DATA_INT64:
-					params = (sysctl_leaf_t*)bmalloc(sizeof(sysctl_leaf_t), KM_SLEEP);
+					params = (sysctl_leaf_t*)kalloc(sizeof(sysctl_leaf_t));
 					params->l_named = named;
 					params->l_ksp = ksp;
 					
@@ -404,7 +414,7 @@ kstat_install(kstat_t *ksp)
 					params = 0;
                     break;
                 case KSTAT_DATA_UINT64:
-					params = (sysctl_leaf_t*)bmalloc(sizeof(sysctl_leaf_t), KM_SLEEP);
+					params = (sysctl_leaf_t*)kalloc(sizeof(sysctl_leaf_t));
 					params->l_named = named;
 					params->l_ksp = ksp;
 
@@ -480,7 +490,7 @@ remove_child_sysctls(ekstat_t *e)
 			named_base[i].data_type == KSTAT_DATA_UINT64) {
 			
 			sysctl_leaf_t *leaf = (sysctl_leaf_t*)vals_base[i].l_oid.oid_arg1;
-			bfree(leaf, sizeof(sysctl_leaf_t));
+			kfree(leaf, sizeof(sysctl_leaf_t));
 		}
 	}
 }
@@ -511,10 +521,10 @@ kstat_delete(kstat_t *ksp)
 	sysctl_unregister_oid(&e->e_oid);
 	
 	if (e->e_vals) {
-		bfree(e->e_vals, sizeof(sysctl_leaf_t) * e->e_num_vals);
+		kfree(e->e_vals, sizeof(sysctl_leaf_t) * e->e_num_vals);
 	}
     cv_destroy(&e->e_cv);
-	bfree(e, e->e_size);
+	kfree(e, e->e_size);
 }
 
 
@@ -575,7 +585,7 @@ spl_kstat_fini()
 	while (tree_nodes) {
 		sysctl_tree_node_t *tn = tree_nodes;
 		tree_nodes = tn->tn_next;
-		bfree(tn, sizeof(sysctl_tree_node_t));
+		kfree(tn, sizeof(sysctl_tree_node_t));
 	}
 	
     /*

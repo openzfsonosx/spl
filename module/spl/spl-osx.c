@@ -86,7 +86,6 @@ uint32_t zone_get_hostid(void *zone)
 extern void *(*__ihook_malloc)(size_t size);
 extern void (*__ihook_free)(void *);
 
-#include <spl-bmalloc.h>
 #include <sys/systeminfo.h>
 
 
@@ -161,12 +160,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     strlcpy(utsname.nodename, hostname, sizeof(utsname.nodename));
 
     spl_mutex_subsystem_init();
-    bmalloc_init();
     spl_kmem_init(total_memory);
-	// spl_kstat_init();
-	// spl_tsd_init();
-    // spl_rwlock_init();
-    // spl_taskq_init();
     spl_vnode_init();
 	spl_kmem_thread_init();
 	spl_kmem_mp_init();
@@ -190,7 +184,6 @@ kern_return_t spl_stop (kmod_info_t * ki, void * d)
     spl_mutex_subsystem_fini();
     spl_kmem_fini();
 	spl_kstat_fini();
-    bmalloc_fini();
     IOLog("SPL: Unloaded module\n");
     return KERN_SUCCESS;
 }
