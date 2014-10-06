@@ -47,6 +47,9 @@
 //===============================================================
 //#define PRINT_CACHE_STATS 1
 
+// Uncomment to turn on kmems' debug features.
+//#define DEBUG 1
+
 //===============================================================
 // OS Interface
 //===============================================================
@@ -82,6 +85,9 @@ extern int cpu_number();
 
 // Invoke the kernel debugger
 extern void Debugger(const char *message);
+
+// Read from /dev/random
+void read_random(void* buffer, u_int numbytes);
 
 //===============================================================
 // Non Illumos Variables
@@ -487,6 +493,17 @@ calloc(size_t n, size_t s)
 (((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z'))
 
 /*
+ * Get bytes from the /dev/random generator. Returns 0
+ * on success. Returns EAGAIN if there is insufficient entropy.
+ */
+int
+random_get_bytes(uint8_t *ptr, size_t len)
+{
+	read_random(ptr, len);
+	return 0;
+}
+
+/*
  * BGH - Missing from OSX?
  *
  * Convert a string into a valid C identifier by replacing invalid
@@ -510,6 +527,20 @@ strident_canon(char *s, size_t n)
             *s = '_';
     }
     *s = 0;
+}
+
+int
+strident_valid(const char *id)
+{
+	int c = *id++;
+	
+	if (!IS_ALPHA(c) && c != '_')
+		return (0);
+	while ((c = *id++) != 0) {
+		if (!IS_ALPHA(c) && !IS_DIGIT(c) && c != '_')
+			return (0);
+	}
+	return (1);
 }
 
 static void
