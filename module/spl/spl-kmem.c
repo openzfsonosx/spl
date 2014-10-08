@@ -274,7 +274,7 @@ static struct timespec	kmem_reap_interval	= {15, 0};
 int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 pgcnt_t kmem_reapahead = 0;	/* start reaping N pages before pageout */
 //int kmem_panic = 1;		/* whether to panic on error */
-int kmem_panic = 0;		/* whether to panic on error */
+int kmem_panic = 1;		/* whether to panic on error */
 int kmem_logging = 1;		/* kmem_log_enter() override */
 uint32_t kmem_mtbf = 0;		/* mean time between failures [default: off] */
 size_t kmem_transaction_log_size; /* transaction log size [2% of memory] */
@@ -786,9 +786,11 @@ kmem_error(int error, kmem_cache_t *cparg, void *bufarg)
 //    }
 #endif
 
-    if (kmem_panic > 0)
+    if (kmem_panic > 0) {
+        delay(hz);
         panic("kernel heap corruption detected");
-
+    }
+    
 //	if (kmem_panic == 0) {
 //        debug_enter(NULL);
 //		Debugger("Kernel heap corruption detected");
@@ -5124,7 +5126,7 @@ kmem_size(void)
 size_t
 kmem_used(void)
 {
-    return segkmem_total_mem_allocated;
+    return kmem_size() - kmem_avail();
 }
 
 
