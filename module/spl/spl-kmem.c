@@ -5132,9 +5132,10 @@ kmem_used(void)
 
 int spl_vm_pool_low(void)
 {
-    int r = machine_is_swapping;
-    machine_is_swapping = 0;
-    return r;
+    return vm_pool_low();
+    //int r = machine_is_swapping;
+    //machine_is_swapping = 0;
+    //return r;
 }
 
 //===============================================================
