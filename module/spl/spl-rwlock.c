@@ -34,6 +34,10 @@
 static lck_attr_t       *zfs_rwlock_attr = NULL;
 static lck_grp_attr_t   *zfs_rwlock_group_attr = NULL;
 static lck_grp_t  *zfs_rwlock_group = NULL;
+
+uint64_t zfs_active_rwlock = 0;
+
+
 #define SPL_DEBUG
 
 void
@@ -48,6 +52,8 @@ rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
 #ifdef SPL_DEBUG
 	rwlp->rw_pad = 0x012345678;
 #endif
+	atomic_inc_64(&zfs_active_rwlock);
+
 }
 
 void
@@ -57,6 +63,7 @@ rw_destroy(krwlock_t *rwlp)
 #ifdef SPL_DEBUG
 	rwlp->rw_pad = 0x99;
 #endif
+	atomic_dec_64(&zfs_active_rwlock);
 }
 
 void

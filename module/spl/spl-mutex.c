@@ -47,6 +47,7 @@ static lck_grp_attr_t   *zfs_group_attr = NULL;
 
 static lck_grp_t *zfs_mutex_group = NULL;
 
+uint64_t zfs_active_mutex = 0;
 
 
 int spl_mutex_subsystem_init(void)
@@ -78,12 +79,14 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
     ASSERT(ibc == NULL);
     mp->m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
     mp->m_owner = NULL;
+	atomic_inc_64(&zfs_active_mutex);
 }
 
 void spl_mutex_destroy(kmutex_t *mp)
 {
     if (!mp) return;
     lck_mtx_free(mp->m_lock, zfs_mutex_group);
+	atomic_dec_64(&zfs_active_mutex);
 }
 
 void mutex_enter(kmutex_t *mp)

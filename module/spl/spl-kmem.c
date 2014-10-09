@@ -109,6 +109,8 @@ extern uint64_t		segkmem_total_mem_allocated;
 
 // Number of active threads
 extern uint64_t		zfs_threads;
+extern uint64_t		zfs_active_mutex;
+extern uint64_t		zfs_active_rwlock;
 
 // Number of pages the OS last reported that it needed freed
 static unsigned int		num_pages_wanted = 0;
@@ -273,8 +275,8 @@ static uint32_t kmem_reaping_idspace;
 static struct timespec	kmem_reap_interval	= {15, 0};
 int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 pgcnt_t kmem_reapahead = 0;	/* start reaping N pages before pageout */
-//int kmem_panic = 1;		/* whether to panic on error */
-int kmem_panic = 0;		/* whether to panic on error */
+int kmem_panic = 1;		/* whether to panic on error */
+//int kmem_panic = 0;		/* whether to panic on error */
 int kmem_logging = 1;		/* kmem_log_enter() override */
 uint32_t kmem_mtbf = 0;		/* mean time between failures [default: off] */
 size_t kmem_transaction_log_size; /* transaction log size [2% of memory] */
@@ -462,6 +464,8 @@ struct {
 typedef struct spl_stats {
     kstat_named_t spl_os_alloc;
     kstat_named_t spl_active_threads;
+    kstat_named_t spl_active_mutex;
+    kstat_named_t spl_active_rwlock;
     kstat_named_t spl_monitor_thread_wake_count;
     kstat_named_t spl_monitor_thread_last_num_pages_requested;
 } spl_stats_t;
@@ -469,6 +473,8 @@ typedef struct spl_stats {
 static spl_stats_t spl_stats = {
     {"os_mem_alloc", KSTAT_DATA_UINT64},
     {"active_threads", KSTAT_DATA_UINT64},
+    {"active_mutex", KSTAT_DATA_UINT64},
+    {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
     {"monitor_thread_page_req", KSTAT_DATA_UINT64},
 };
@@ -533,7 +539,7 @@ int
 strident_valid(const char *id)
 {
 	int c = *id++;
-	
+
 	if (!IS_ALPHA(c) && c != '_')
 		return (0);
 	while ((c = *id++) != 0) {
@@ -3758,6 +3764,8 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
 		ks->spl_active_threads.value.ui64 = zfs_threads;
+		ks->spl_active_mutex.value.ui64 = zfs_active_mutex;
+		ks->spl_active_rwlock.value.ui64 = zfs_active_rwlock;
 	}
 
 	return (0);
@@ -3773,7 +3781,7 @@ spl_kmem_init(uint64_t total_memory)
 
     printf("SPL: Total memory %llu\n", total_memory);
 	printf("SPL: sizeof size_t=%lu\n", sizeof(size_t));
-	
+
 	// Initialise the kstat lock
 	mutex_init(&kmem_cache_lock, "kmem_cache_lock", MUTEX_DEFAULT, NULL); // XNU
 	mutex_init(&kmem_flags_lock, "kmem_flags_lock", MUTEX_DEFAULT, NULL); // XNU
@@ -3821,9 +3829,9 @@ spl_kmem_init(uint64_t total_memory)
 
     kmem_log_arena = vmem_create("kmem_log", NULL, 0, KMEM_ALIGN,
                                  segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
-	
+
 	segkmem_zio_init(virtual_space_start, virtual_space_end);
-	
+
 #ifndef APPLE
 //    kmem_firewall_va_arena = vmem_create("kmem_firewall_va",
 //                                         NULL, 0, PAGESIZE,
@@ -4065,13 +4073,13 @@ spl_kmem_thread_fini(void)
 	printf("SPL: wait for taskqs to empty\n");
 	taskq_wait(kmem_taskq);
 	taskq_wait(kmem_move_taskq);
-	
+
 	printf("SPL: destroy taskq\n");
 	taskq_destroy(kmem_taskq);
 	taskq_destroy(kmem_move_taskq);
 	kmem_taskq = 0;
 	kmem_move_taskq = 0;
-	
+
 	// FIXME - maybe it should tear down for symmetry
 }
 
@@ -5193,4 +5201,3 @@ kmem_asprintf(const char *fmt, ...)
 
     return ptr;
 }
-
