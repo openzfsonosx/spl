@@ -245,9 +245,9 @@ osif_malloc(uint64_t size)
 #ifdef _KERNEL
     void *tr;
     kern_return_t kr;
-    
+
     kr = kernel_memory_allocate(kernel_map, &tr, size, 0, 0);
-    
+
     if (kr == KERN_SUCCESS) {
         atomic_add_64(&segkmem_total_mem_allocated, size);
         return (tr);
@@ -412,6 +412,13 @@ kernelheap_init(
 //									hat_memload_alloc, segkmem_free, heap_arena, 0,
 //									VM_SLEEP | VMC_POPULATOR | VMC_DUMPSAFE);
 }
+
+
+void kernelheap_fini(void)
+{
+	vmem_fini(heap_arena);
+}
+
 
 //void
 //boot_mapin(caddr_t addr, size_t size)
@@ -1017,7 +1024,7 @@ segkmem_alloc_vn(vmem_t *vmp, size_t size, int vmflag, struct vnode *vp)
 //	}
 //	return (segkmem_xalloc(vmp, NULL, size, vmflag, 0,
 //						   segkmem_page_create, vp));
-	
+
 	return osif_malloc(size);
 }
 
@@ -1579,10 +1586,10 @@ void
 segkmem_zio_init(void *zio_mem_base, void *zio_mem_end)
 {
 	size_t heap_size;
-	
+
 	ASSERT(zio_mem_base != NULL);
 	ASSERT(zio_mem_size != 0);
-	
+
 	/*
 	 * To reduce VA space fragmentation, we set up quantum caches for the
 	 * smaller sizes;  we chose 32k because that translates to 128k VA
@@ -1591,13 +1598,22 @@ segkmem_zio_init(void *zio_mem_base, void *zio_mem_end)
 	heap_size = (uintptr_t)zio_mem_end - (uintptr_t)zio_mem_base;
 	zio_arena = vmem_create("zfs_file_data", zio_mem_base, heap_size,
 							PAGESIZE, NULL, NULL, NULL, 32 * 1024, VM_SLEEP);
-	
+
 	zio_alloc_arena = vmem_create("zfs_file_data_buf", NULL, 0, PAGESIZE,
 								  segkmem_zio_alloc, segkmem_zio_free, zio_arena, 0, VM_SLEEP);
-	
+
 	ASSERT(zio_arena != NULL);
 	ASSERT(zio_alloc_arena != NULL);
 }
+
+void
+segkmem_zio_fini(void)
+{
+	vmem_destroy(zio_arena);
+	vmem_destroy(zio_alloc_arena);
+}
+
+
 
 //#ifdef __sparc
 //

@@ -31,8 +31,8 @@
 #ifdef	__cplusplus
 extern "C" {
 #endif
-	
-	
+
+
 	/*
 	 * Per-allocation flags
 	 */
@@ -42,11 +42,11 @@ extern "C" {
 #define	VM_PUSHPAGE		0x00000004	/* same as KM_PUSHPAGE */
 #define	VM_NORMALPRI	0x00000008	/* same as KM_NORMALPRI */
 #define	VM_KMFLAGS		0x000000ff	/* flags that must match KM_* flags */
-	
+
 #define	VM_BESTFIT		0x00000100
 #define	VM_FIRSTFIT		0x00000200
 #define	VM_NEXTFIT		0x00000400
-	
+
 	/*
 	 * The following flags are restricted for use only within the kernel.
 	 * VM_MEMLOAD is for use by the HAT to avoid infinite recursion.
@@ -54,22 +54,22 @@ extern "C" {
 	 */
 #define	VM_MEMLOAD		0x00000800
 #define	VM_NORELOC		0x00001000
-	
+
 	/*
 	 * VM_ABORT requests that vmem_alloc() *ignore* the VM_SLEEP/VM_NOSLEEP flags
 	 * and forgo reaping if the allocation or attempted import, fails.  This
 	 * flag is a segkmem-specific flag, and should not be used by anyone else.
 	 */
 #define	VM_ABORT		0x00002000
-	
+
 	/*
 	 * VM_ENDALLOC requests that large addresses be preferred in allocations.
 	 * Has no effect if VM_NEXTFIT is active.
 	 */
 #define	VM_ENDALLOC		0x00004000
-	
+
 #define	VM_FLAGS		0x0000FFFF
-	
+
 	/*
 	 * Arena creation flags
 	 */
@@ -87,20 +87,20 @@ extern "C" {
 #define	VMC_XALLOC		0x00080000
 #define	VMC_XALIGN		0x00100000
 #define	VMC_FLAGS		0xFFFF0000
-	
+
 	/*
 	 * Public segment types
 	 */
 #define	VMEM_ALLOC		0x01
 #define	VMEM_FREE		0x02
-	
+
 	/*
 	 * Implementation-private segment types
 	 */
 #define	VMEM_SPAN		0x10
 #define	VMEM_ROTOR		0x20
 #define	VMEM_WALKER		0x40
-	
+
 	/*
 	 * VMEM_REENTRANT indicates to vmem_walk() that the callback routine may
 	 * call back into the arena being walked, so vmem_walk() must drop the
@@ -111,27 +111,28 @@ extern "C" {
 	 * see segkmem_dump() for sample usage.
 	 */
 #define	VMEM_REENTRANT	0x80000000
-	
+
 	struct vmem;
-	
+
 	typedef struct vmem vmem_t;
 	typedef void *(vmem_alloc_t)(vmem_t *, size_t, int);
 	typedef void (vmem_free_t)(vmem_t *, void *, size_t);
-	
+
 	/*
 	 * Alternate import style; the requested size is passed in a pointer,
 	 * which can be increased by the import function if desired.
 	 */
 	typedef void *(vmem_ximport_t)(vmem_t *, size_t *, size_t, int);
-	
+
 #ifdef _KERNEL
 	extern vmem_t *vmem_init(const char *, void *, size_t, size_t,
 							 vmem_alloc_t *, vmem_free_t *);
+	extern void    vmem_fini(vmem_t *);
 	extern void vmem_update(void *);
 	extern int vmem_is_populator();
 	extern size_t vmem_seg_size;
 #endif
-	
+
 	extern vmem_t *vmem_create(const char *, void *, size_t, size_t,
 							   vmem_alloc_t *, vmem_free_t *, vmem_t *, size_t, int);
 	extern vmem_t *vmem_xcreate(const char *, void *, size_t, size_t,
@@ -147,7 +148,7 @@ extern "C" {
 	extern void vmem_walk(vmem_t *, int, void (*)(void *, void *, size_t), void *);
 	extern size_t vmem_size(vmem_t *, int);
 	extern void vmem_qcache_reap(vmem_t *vmp);
-	
+
 #ifdef	__cplusplus
 }
 #endif

@@ -30,22 +30,22 @@
 #ifdef	__cplusplus
 extern "C" {
 #endif
-	
+
 //#include <sys/types.h>
 //#include <sys/vnode.h>
 #include <sys/vmem.h>
 //#include <vm/as.h>
 //#include <vm/seg.h>
 //#include <vm/page.h>
-	
+
 	/*
 	 * VM - Kernel Segment Driver
 	 */
-	
+
 #if defined(_KERNEL)
-	
+
 	extern uint64_t segkmem_total_allocated;
-	
+
 //	extern char *kernelheap;	/* start of primary kernel heap */
 //	extern char *ekernelheap;	/* end of primary kernel heap */
 //	extern char *heap_lp_base;	/* start of kernel large page heap arena */
@@ -75,7 +75,7 @@ extern "C" {
 #define	mpvp		(kvps[KV_MPVP])
 #define	promvp		(kvps[KV_PROMVP])
 #endif	/* __sparc */
-	
+
 //	extern int segkmem_create(struct seg *);
 //	extern page_t *segkmem_page_create(void *, size_t, int, void *);
 //	extern void *segkmem_xalloc(vmem_t *, void *, size_t, int, uint_t,
@@ -84,17 +84,19 @@ extern "C" {
 //	extern void *segkmem_alloc_permanent(vmem_t *, size_t, int);
 	extern void segkmem_free(vmem_t *, void *, size_t);
 //	extern void segkmem_xfree(vmem_t *, void *, size_t, void (*)(page_t *));
-	
+
 //	extern void *boot_alloc(void *, size_t, uint_t);
 //	extern void boot_mapin(caddr_t addr, size_t size);
 	extern void kernelheap_init(void *, void *, char *, void *, void *);
+	extern void kernelheap_fini(void);
 //	extern void segkmem_gc(void);
-	
+
 	extern void *segkmem_zio_alloc(vmem_t *, size_t, int);
 //	extern int segkmem_zio_create(struct seg *);
 	extern void segkmem_zio_free(vmem_t *, void *, size_t);
 	extern void segkmem_zio_init(void *, void*);
-	
+	extern void segkmem_zio_fini(void);
+
 	/*
 	 * Flags for segkmem_xalloc().
 	 *
@@ -104,7 +106,7 @@ extern "C" {
 	 * This is a hack for seg_dev that should be cleaned up in the future.
 	 */
 #define	SEGKMEM_SHARELOCKED	0x20000
-	
+
 	/*
 	 * Large page for kmem caches support
 	 */
@@ -114,7 +116,7 @@ extern "C" {
 //		uint_t		lp_wait;
 //		uint_t		lp_uselp;
 //		ulong_t		lp_throttle;
-		
+
 		/* stats */
 //		uint64_t	sleep_allocs_failed;
 //		uint64_t	nosleep_allocs_failed;
@@ -122,24 +124,24 @@ extern "C" {
 //		uint64_t	allocs_limited;
 //		uint64_t	alloc_bytes_failed;
 //	} segkmem_lpcb_t;
-	
+
 //	extern void	*segkmem_alloc_lp(vmem_t *, size_t *, size_t, int);
 //	extern void	segkmem_free_lp(vmem_t *, void *, size_t);
 //	extern int	segkmem_lpsetup();
 //	extern void	segkmem_heap_lp_init(void);
-	
+
 //	extern size_t	segkmem_lpsize;
 //	extern int	segkmem_lpszc;
 //	extern size_t	segkmem_heaplp_quantum;
 //	extern size_t	segkmem_kmemlp_max;
-	
+
 #define	SEGKMEM_USE_LARGEPAGES (segkmem_lpsize > PAGESIZE)
-	
+
 #define	IS_KMEM_VA_LARGEPAGE(vaddr)				        \
 (((vaddr) >= heap_lp_base) && ((vaddr) < heap_lp_end))
-	
+
 #endif	/* _KERNEL */
-	
+
 #ifdef	__cplusplus
 }
 #endif

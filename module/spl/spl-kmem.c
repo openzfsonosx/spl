@@ -845,6 +845,38 @@ kmem_log_init(size_t logsize)
     return (lhp);
 }
 
+
+static void
+kmem_log_fini(kmem_log_header_t *lhp)
+{
+    int nchunks = 4 * max_ncpus;
+    size_t lhsize = (size_t)&((kmem_log_header_t *)0)->lh_cpu[max_ncpus];
+    int i;
+
+
+
+    for (i = 0; i < max_ncpus; i++) {
+        kmem_cpu_log_header_t *clhp = &lhp->lh_cpu[i];
+        mutex_destroy(&clhp->clh_lock);
+    }
+
+    vmem_free(kmem_log_arena,
+			  lhp->lh_free,
+			  nchunks * sizeof (int));
+
+	vmem_free(kmem_log_arena,
+			  lhp->lh_base,
+			  lhp->lh_chunksize * nchunks);
+
+    mutex_destroy(&lhp->lh_lock);
+
+    lhsize = P2ROUNDUP(lhsize, KMEM_ALIGN);
+    vmem_xfree(kmem_log_arena,
+			   lhp,
+			   lhsize);
+}
+
+
 static void *
 kmem_log_enter(kmem_log_header_t *lhp, void *data, size_t size)
 {
@@ -1875,7 +1907,6 @@ kmem_cache_alloc(kmem_cache_t *cp, int kmflag)
     kmem_cpu_cache_t *ccp = KMEM_CPU_CACHE(cp);
     kmem_magazine_t *fmp;
     void *buf;
-
     mutex_enter(&ccp->cc_lock);
     for (;;) {
         /*
@@ -2175,7 +2206,7 @@ static void
 kmem_slab_prefill(kmem_cache_t *cp, kmem_slab_t *sp)
 {
     kmem_cpu_cache_t *ccp = KMEM_CPU_CACHE(cp);
-    int cache_flags = cp->cache_flags;
+    //int cache_flags = cp->cache_flags;
 
     kmem_bufctl_t *next, *head;
     size_t nbufs;
@@ -3526,6 +3557,7 @@ kmem_cache_destroy(kmem_cache_t *cp)
     kmem_cache_magazine_purge(cp);
 
     mutex_enter(&cp->cache_lock);
+
     if (cp->cache_buftotal != 0)
         cmn_err(CE_WARN, "kmem_cache_destroy: '%s' (%p) not empty",
                 cp->cache_name, (void *)cp);
@@ -3554,7 +3586,7 @@ kmem_cache_destroy(kmem_cache_t *cp)
                   (cp->cache_hash_mask + 1) * sizeof (void *));
 
     for (cpu_seqid = 0; cpu_seqid < max_ncpus; cpu_seqid++)
-        mutex_destroy(&cp->cache_cpu[cpu_seqid].cc_lock);
+        mutex_destroy(&cp->cache_cpu[cpu_seqid].cc_lock);     // XNU
 
     mutex_destroy(&cp->cache_depot_lock);
     mutex_destroy(&cp->cache_lock);
@@ -3614,6 +3646,48 @@ kmem_alloc_caches_create(const int *array, size_t count,
 
         while (size <= cache_size) {
             alloc_table[(size - 1) >> shift] = cp;
+            size += table_unit;
+        }
+    }
+
+    ASSERT(size > maxbuf);		/* i.e. maxbuf <= max(cache_size) */
+}
+
+static void
+kmem_alloc_caches_destroy(const int *array, size_t count,
+                         kmem_cache_t **alloc_table, size_t maxbuf, uint_t shift)
+{
+    size_t table_unit = (1 << shift); /* range of one alloc_table entry */
+    size_t size = table_unit;
+    int i;
+
+    for (i = 0; i < count; i++) {
+        size_t cache_size = array[i];
+        size_t align = KMEM_ALIGN;
+        kmem_cache_t *cp;
+
+        /* if the table has an entry for maxbuf, we're done */
+        if (size > maxbuf)
+            break;
+
+        /* cache size must be a multiple of the table unit */
+        ASSERT(P2PHASE(cache_size, table_unit) == 0);
+
+        /*
+         * If they allocate a multiple of the coherency granularity,
+         * they get a coherency-granularity-aligned address.
+         */
+        if (IS_P2ALIGNED(cache_size, 64))
+            align = 64;
+        if (IS_P2ALIGNED(cache_size, PAGESIZE))
+            align = PAGESIZE;
+
+		cp = alloc_table[(size - 1) >> shift];
+		kmem_cache_destroy(cp);
+        //cp = kmem_cache_create(name, cache_size, align,
+		//               NULL, NULL, NULL, NULL, NULL, KMC_KMEM_ALLOC);
+
+        while (size <= cache_size) {
             size += table_unit;
         }
     }
@@ -3719,6 +3793,83 @@ kmem_cache_init(int pass, int use_large_pages)
     kmem_big_alloc_table_max = maxbuf >> KMEM_BIG_SHIFT;
 }
 
+
+static void
+kmem_cache_fini(int pass, int use_large_pages)
+{
+    int i;
+    size_t maxbuf;
+    kmem_magtype_t *mtp;
+
+    if (pass == 2) {
+
+        /* Figure out what our maximum cache size is */
+        maxbuf = kmem_max_cached;
+        if (maxbuf <= KMEM_MAXBUF) {
+            maxbuf = 0;
+            kmem_max_cached = KMEM_MAXBUF;
+        } else {
+            size_t size = 0;
+            size_t max =
+            sizeof (kmem_big_alloc_sizes) / sizeof (int);
+            /*
+             * Round maxbuf up to an existing cache size.  If maxbuf
+             * is larger than the largest cache, we truncate it to
+             * the largest cache's size.
+             */
+            for (i = 0; i < max; i++) {
+                size = kmem_big_alloc_sizes[i];
+                if (maxbuf <= size)
+                    break;
+            }
+            kmem_max_cached = maxbuf = size;
+        }
+
+    } else {
+        /*
+         * During the first pass, the kmem_alloc_* caches
+         * are treated as metadata.
+         */
+        kmem_default_arena = kmem_msb_arena;
+        maxbuf = KMEM_BIG_MAXBUF_32BIT;
+    }
+
+
+    kmem_alloc_caches_destroy(
+                             kmem_big_alloc_sizes, sizeof (kmem_big_alloc_sizes) / sizeof (int),
+                             kmem_big_alloc_table, maxbuf, KMEM_BIG_SHIFT);
+
+    kmem_alloc_caches_destroy(
+                             kmem_alloc_sizes, sizeof (kmem_alloc_sizes) / sizeof (int),
+                             kmem_alloc_table, KMEM_MAXBUF, KMEM_ALIGN_SHIFT);
+
+
+	if (pass == 2) {
+		vmem_destroy(kmem_va_arena);
+		vmem_destroy(kmem_default_arena);
+	}
+
+	kmem_cache_destroy(kmem_bufctl_audit_cache);
+
+	kmem_cache_destroy(kmem_bufctl_cache);
+
+	kmem_cache_destroy(kmem_slab_cache);
+
+    for (i = 0; i < sizeof (kmem_magtype) / sizeof (*mtp); i++) {
+        mtp = &kmem_magtype[i];
+
+		kmem_depot_ws_reap(mtp->mt_cache);
+
+		if (!mtp->mt_cache->cache_buftotal)
+			kmem_cache_destroy(mtp->mt_cache);
+		else
+			printf("kmem_cache_destroy(kmem_magtype[%u] still has allocations %llu\n",
+				   i,
+				   mtp->mt_cache->cache_buftotal);
+	}
+
+}
+
 static void release_memory(uint64_t num_pages)
 {
 	if (likely(num_pages > 0)) {
@@ -3774,7 +3925,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 void
 spl_kmem_init(uint64_t total_memory)
 {
-    kmem_cache_t *cp;
+    //kmem_cache_t *cp;
     int old_kmem_flags = kmem_flags;
     int use_large_pages = 0;
     size_t maxverify, minfirewall;
@@ -3830,7 +3981,7 @@ spl_kmem_init(uint64_t total_memory)
     kmem_log_arena = vmem_create("kmem_log", NULL, 0, KMEM_ALIGN,
                                  segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
 
-	segkmem_zio_init(virtual_space_start, virtual_space_end);
+	segkmem_zio_init((void *)virtual_space_start, (void *)virtual_space_end);
 
 #ifndef APPLE
 //    kmem_firewall_va_arena = vmem_create("kmem_firewall_va",
@@ -4023,6 +4174,42 @@ void
 spl_kmem_fini(void)
 {
 	kstat_delete(spl_ksp);
+
+	kmem_log_fini(kmem_slab_log);
+    kmem_log_fini(kmem_failure_log);
+
+    if (kmem_flags & (KMF_CONTENTS | KMF_RANDOMIZE)) {
+        if (kmem_content_log_size == 0)
+            kmem_content_log_size = kmem_maxavail() / 50;
+        kmem_log_fini(kmem_content_log);
+    }
+
+    if (kmem_flags & (KMF_AUDIT | KMF_RANDOMIZE)) {
+        if (kmem_transaction_log_size == 0)
+            kmem_transaction_log_size = kmem_maxavail() / 50;
+		kmem_log_fini(kmem_transaction_log);
+    }
+
+	kmem_cache_fini(2, /*use_large_pages*/ 0);
+
+	vmem_destroy(kmem_oversize_arena);
+
+	segkmem_zio_fini();
+
+	vmem_destroy(kmem_log_arena);
+	vmem_destroy(kmem_hash_arena);
+	vmem_destroy(kmem_cache_arena);
+	vmem_destroy(kmem_msb_arena);
+	vmem_destroy(kmem_metadata_arena);
+
+	kernelheap_fini();
+
+	list_destroy(&kmem_caches);
+
+	mutex_destroy(&kmem_cache_kstat_lock);
+	mutex_destroy(&kmem_flags_lock);
+	mutex_destroy(&kmem_cache_lock);
+
 }
 
 static void
@@ -4043,6 +4230,18 @@ kmem_move_init(void)
      */
     kmem_move_taskq = taskq_create("kmem_move_taskq", 1,
                                             minclsyspri, 100, INT_MAX, TASKQ_PREPOPULATE);
+}
+
+void kmem_move_fini(void)
+{
+
+	taskq_wait(kmem_move_taskq);
+	taskq_destroy(kmem_move_taskq);
+	kmem_move_taskq = 0;
+
+	kmem_cache_destroy(kmem_move_cache);
+	kmem_cache_destroy(kmem_defrag_cache);
+
 }
 
 void
@@ -4072,15 +4271,14 @@ spl_kmem_thread_fini(void)
 
 	printf("SPL: wait for taskqs to empty\n");
 	taskq_wait(kmem_taskq);
-	taskq_wait(kmem_move_taskq);
 
 	printf("SPL: destroy taskq\n");
 	taskq_destroy(kmem_taskq);
-	taskq_destroy(kmem_move_taskq);
 	kmem_taskq = 0;
-	kmem_move_taskq = 0;
 
 	// FIXME - maybe it should tear down for symmetry
+	kmem_move_fini();
+
 }
 
 void
