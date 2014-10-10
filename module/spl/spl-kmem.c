@@ -3886,6 +3886,7 @@ static void memory_monitor_thread()
 	unsigned int os_num_pages_wanted = 0;
 
 	while (!shutting_down) {
+		
 		kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
 									  &pages_reclaimed, &os_num_pages_wanted);
 
@@ -3893,6 +3894,8 @@ static void memory_monitor_thread()
 
 		if ((!shutting_down) && kr == KERN_SUCCESS && spl_vm_pool_low()) {
 			kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+		} else {
+			delay(hz/10);
 		}
 	}
 
