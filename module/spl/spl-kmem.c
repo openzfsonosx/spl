@@ -60,7 +60,7 @@
 // indication of paging activity, and therefore as a
 // proxy to the machine experiencing memory pressure.
 extern unsigned int vm_page_free_wanted;
-
+extern unsigned int vm_page_free_min;
 extern unsigned int vm_page_free_count;
 extern unsigned int vm_page_speculative_count;
 
@@ -5357,7 +5357,8 @@ kmem_used(void)
 
 int spl_vm_pool_low(void)
 {
-    return vm_pool_low();
+    return vm_page_free_count < (vm_page_free_min);
+    //return vm_pool_low();
     //int r = machine_is_swapping;
     //machine_is_swapping = 0;
     //return r;
