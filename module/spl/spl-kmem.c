@@ -792,8 +792,10 @@ kmem_error(int error, kmem_cache_t *cparg, void *bufarg)
 //    }
 #endif
 
-    if (kmem_panic > 0)
+    if (kmem_panic > 0) {
+        delay(hz);
         panic("kernel heap corruption detected");
+    }
 
 //	if (kmem_panic == 0) {
 //        debug_enter(NULL);
@@ -5330,15 +5332,16 @@ kmem_size(void)
 size_t
 kmem_used(void)
 {
-    return segkmem_total_mem_allocated;
+    return kmem_size() - kmem_avail();
 }
 
 
 int spl_vm_pool_low(void)
 {
-    int r = machine_is_swapping;
-    machine_is_swapping = 0;
-    return r;
+    return vm_pool_low();
+    //int r = machine_is_swapping;
+    //machine_is_swapping = 0;
+    //return r;
 }
 
 //===============================================================
