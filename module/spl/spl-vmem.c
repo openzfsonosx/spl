@@ -1659,6 +1659,64 @@ vmem_destroy(vmem_t *vmp)
 	vmem_free(vmem_vmem_arena, vmp, sizeof (vmem_t));
 }
 
+
+/*
+ * Destroy arena vmp.
+ */
+void
+vmem_destroy_internal(vmem_t *vmp)
+{
+	vmem_t *cur, **vmpp;
+	vmem_seg_t *seg0 = &vmp->vm_seg0;
+	vmem_seg_t *vsp, *anext;
+	size_t leaked;
+	int i;
+
+	mutex_enter(&vmem_list_lock);
+	vmpp = &vmem_list;
+	while ((cur = *vmpp) != vmp)
+		vmpp = &cur->vm_next;
+	*vmpp = vmp->vm_next;
+	mutex_exit(&vmem_list_lock);
+
+
+	for (i = 0; i < VMEM_NQCACHE_MAX; i++)
+		if (vmp->vm_qcache[i])
+			kmem_cache_destroy(vmp->vm_qcache[i]);
+
+	leaked = vmem_size(vmp, VMEM_ALLOC);
+	if (leaked != 0)
+		cmn_err(CE_WARN, "vmem_destroy('%s'): leaked %lu %s",
+				vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
+				"identifiers" : "bytes");
+
+	if (vmp->vm_hash_table != vmp->vm_hash0)
+		vmem_free(vmem_hash_arena, vmp->vm_hash_table,
+		    (vmp->vm_hash_mask + 1) * sizeof (void *));
+
+	/*
+	 * Give back the segment structures for anything that's left in the
+	 * arena, e.g. the primary spans and their free segments.
+	 */
+	VMEM_DELETE(&vmp->vm_rotor, a);
+	for (vsp = seg0->vs_anext; vsp != seg0; vsp = anext) {
+		anext = vsp->vs_anext;
+		vmem_putseg_global(vsp);
+	}
+
+	while (vmp->vm_nsegfree > 0)
+		vmem_putseg_global(vmem_getseg(vmp));
+
+	kstat_delete(vmp->vm_ksp);
+
+	mutex_destroy(&vmp->vm_lock);
+	cv_destroy(&vmp->vm_cv);
+
+	// Alas, to free, requires access to "vmem_vmem_arena" the very thing
+	// we release first.
+	//vmem_free(vmem_vmem_arena, vmp, sizeof (vmem_t));
+}
+
 /*
  * Resize vmp's hash table to keep the average lookup depth near 1.0.
  */
@@ -1801,11 +1859,11 @@ vmem_init(const char *heap_name,
 								  VM_SLEEP);
 
 	// 5 vmem_create before this line.
-	for (id = 0; id < vmem_id; id++)
+	for (id = 0; id < vmem_id; id++) {
 		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
 									   1, 0, 0, &vmem0[id], &vmem0[id + 1],
 										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
-
+	}
 	return (heap);
 }
 
@@ -1815,16 +1873,15 @@ void vmem_fini(vmem_t *heap)
 {
 	uint32_t id;
 
-	for (id = 0; id < 5; id++) // From vmem_init, 5 vmem_create
+	for (id = 0; id < 5; id++) {// From vmem_init, 5 vmem_create
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
+	}
 
-#if 0 // These panic: "vmem_hash_delete(0xffffff7f9bb581d0, ffffff7f9bb57378, 3672): bad free"@spl-vmem.c:519
-	vmem_destroy(vmem_vmem_arena);
-	vmem_destroy(vmem_hash_arena);
-	vmem_destroy(vmem_seg_arena);
-	vmem_destroy(vmem_metadata_arena);
-	vmem_destroy(heap);
-#endif
+	vmem_destroy_internal(vmem_vmem_arena);
+	vmem_destroy_internal(vmem_hash_arena);
+	vmem_destroy_internal(vmem_seg_arena);
+	vmem_destroy_internal(vmem_metadata_arena);
+	vmem_destroy_internal(heap);
 
 	mutex_destroy(&vmem_panic_lock);
 	mutex_destroy(&vmem_pushpage_lock);

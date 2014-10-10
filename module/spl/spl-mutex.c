@@ -153,6 +153,9 @@ void spl_mutex_subsystem_fini(void)
 }
 
 
+
+static int warned = 0;
+
 #ifdef MUTEX_LEAK
 void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc,
 					const char *file, const char *fn, int line)
@@ -166,6 +169,12 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
     mp->m_owner = NULL;
 
 	atomic_inc_64(&zfs_active_mutex);
+
+	if (unlikely(!warned) && (zfs_active_mutex >= 1000000)) {
+		warned = 1;
+		printf("SPL: Warning, over 1.000.000 mutex allocations active\n");
+	}
+
 
 #ifdef MUTEX_LEAK
 	if (!mp->m_lock) panic("[SPL] Unable to allocate MUTEX\n");

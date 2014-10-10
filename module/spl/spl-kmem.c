@@ -2695,6 +2695,23 @@ kmem_cache_magazine_enable(kmem_cache_t *cp)
 
 }
 
+static void
+kmem_cache_magazine_disable(kmem_cache_t *cp)
+{
+    int cpu_seqid;
+
+    if (cp->cache_flags & KMF_NOMAGAZINE)
+        return;
+
+    for (cpu_seqid = 0; cpu_seqid < max_ncpus; cpu_seqid++) {
+        kmem_cpu_cache_t *ccp = &cp->cache_cpu[cpu_seqid];
+        mutex_enter(&ccp->cc_lock);
+        ccp->cc_magsize = 0;
+        mutex_exit(&ccp->cc_lock);
+    }
+
+}
+
 /*
  * Reap (almost) everything right now.  See kmem_cache_magazine_purge()
  * for explanation of the back-to-back kmem_depot_ws_update() calls.
@@ -3847,8 +3864,8 @@ kmem_cache_fini(int pass, int use_large_pages)
 
 
 	if (pass == 2) {
-		vmem_destroy(kmem_va_arena);
 		vmem_destroy(kmem_default_arena);
+		vmem_destroy(kmem_va_arena);
 	}
 
 	kmem_cache_destroy(kmem_bufctl_audit_cache);
@@ -3859,8 +3876,6 @@ kmem_cache_fini(int pass, int use_large_pages)
 
     for (i = 0; i < sizeof (kmem_magtype) / sizeof (*mtp); i++) {
         mtp = &kmem_magtype[i];
-
-		kmem_depot_ws_reap(mtp->mt_cache);
 
 		if (!mtp->mt_cache->cache_buftotal)
 			kmem_cache_destroy(mtp->mt_cache);
@@ -4064,6 +4079,7 @@ spl_kmem_init(uint64_t total_memory)
 //                                           PAGESIZE, segkmem_alloc_lp, segkmem_free_lp, heap_arena,
 //                                            0, VMC_DUMPSAFE | VM_SLEEP);
 //    } else {
+#if 0
         kmem_oversize_arena = vmem_create("kmem_oversize",
                                           NULL, 0, PAGESIZE,
                                           segkmem_alloc, segkmem_free,
@@ -4072,6 +4088,7 @@ spl_kmem_init(uint64_t total_memory)
 										  heap_arena,
 										  0, VMC_DUMPSAFE |
                                           VM_SLEEP);
+#endif
 //    }
 
     kmem_cache_init(2, use_large_pages);
@@ -4175,6 +4192,8 @@ spl_kmem_init(uint64_t total_memory)
 void
 spl_kmem_fini(void)
 {
+    kmem_cache_applyall(kmem_cache_magazine_disable, NULL, TQ_SLEEP);
+
 	kstat_delete(spl_ksp);
 
 	kmem_log_fini(kmem_slab_log);
@@ -5363,7 +5382,6 @@ char *kvasprintf(const char *fmt, va_list ap)
     va_copy(aq, ap);
     len = vsnprintf(NULL, 0, fmt, aq);
     va_end(aq);
-
     p = zfs_kmem_alloc(len+1, KM_SLEEP);
     if (!p)
         return NULL;

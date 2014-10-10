@@ -1609,8 +1609,8 @@ segkmem_zio_init(void *zio_mem_base, void *zio_mem_end)
 void
 segkmem_zio_fini(void)
 {
-	vmem_destroy(zio_arena);
 	vmem_destroy(zio_alloc_arena);
+	vmem_destroy(zio_arena);
 }
 
 
