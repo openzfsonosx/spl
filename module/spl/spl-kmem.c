@@ -3703,7 +3703,8 @@ kmem_alloc_caches_destroy(const int *array, size_t count,
             //alloc_table[(size - 1) >> shift] = cp;
 			cp = alloc_table[(size - 1) >> shift];
 			if (last_cp != cp) {
-				kmem_cache_destroy(cp);
+				if (!cp->cache_buftotal)
+					kmem_cache_destroy(cp);
 			}
 			last_cp = cp;
 

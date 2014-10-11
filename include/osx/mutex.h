@@ -3,6 +3,8 @@
 #ifndef OSX_MUTEX_H
 #define OSX_MUTEX_H
 
+#include <../spl_config.h> // For SPL_DEBUG_MUTEX
+
 #ifdef _KERNEL
 #include <libkern/locks.h>
 
