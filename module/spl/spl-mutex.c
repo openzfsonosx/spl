@@ -49,8 +49,7 @@ static lck_grp_t *zfs_mutex_group = NULL;
 
 uint64_t zfs_active_mutex = 0;
 
-#define MUTEX_LEAK
-#ifdef MUTEX_LEAK
+#ifdef SPL_DEBUG_MUTEX
 #include <sys/list.h>
 static list_t mutex_list;
 static kmutex_t mutex_list_mutex;
@@ -59,9 +58,9 @@ static kmutex_t mutex_list_mutex;
 struct leak {
     list_node_t     mutex_leak_node;
 
-#define MUTEX_LEAK_MAXCHAR 32
-	char location_file[MUTEX_LEAK_MAXCHAR];
-	char location_function[MUTEX_LEAK_MAXCHAR];
+#define SPL_DEBUG_MUTEX_MAXCHAR 32
+	char location_file[SPL_DEBUG_MUTEX_MAXCHAR];
+	char location_function[SPL_DEBUG_MUTEX_MAXCHAR];
 	uint64_t location_line;
 	void *mp;
 };
@@ -76,7 +75,7 @@ int spl_mutex_subsystem_init(void)
     zfs_mutex_group  = lck_grp_alloc_init("zfs-mutex", zfs_group_attr);
 
 
-#ifdef MUTEX_LEAK
+#ifdef SPL_DEBUG_MUTEX
 	list_create(&mutex_list, sizeof (struct leak),
 				offsetof(struct leak, mutex_leak_node));
 	mutex_list_mutex.m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
@@ -89,7 +88,7 @@ int spl_mutex_subsystem_init(void)
 
 void spl_mutex_subsystem_fini(void)
 {
-#ifdef MUTEX_LEAK
+#ifdef SPL_DEBUG_MUTEX
 	uint64_t total = 0;
 	printf("Dumping leaked mutex allocations...\n");
 
@@ -156,7 +155,7 @@ void spl_mutex_subsystem_fini(void)
 
 static int warned = 0;
 
-#ifdef MUTEX_LEAK
+#ifdef SPL_DEBUG_MUTEX
 void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc,
 					const char *file, const char *fn, int line)
 #else
@@ -176,7 +175,7 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 	}
 
 
-#ifdef MUTEX_LEAK
+#ifdef SPL_DEBUG_MUTEX
 	if (!mp->m_lock) panic("[SPL] Unable to allocate MUTEX\n");
 
 	struct leak *leak;
@@ -186,8 +185,8 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 
 	if (leak) {
 		bzero(leak, sizeof(struct leak));
-		strlcpy(leak->location_file, file, MUTEX_LEAK_MAXCHAR);
-		strlcpy(leak->location_function, fn, MUTEX_LEAK_MAXCHAR);
+		strlcpy(leak->location_file, file, SPL_DEBUG_MUTEX_MAXCHAR);
+		strlcpy(leak->location_function, fn, SPL_DEBUG_MUTEX_MAXCHAR);
 		leak->location_line = line;
 		leak->mp = mp;
 
@@ -207,7 +206,7 @@ void spl_mutex_destroy(kmutex_t *mp)
 
 	atomic_dec_64(&zfs_active_mutex);
 
-#ifdef MUTEX_LEAK
+#ifdef SPL_DEBUG_MUTEX
 	if (mp->leak) {
 		struct leak *leak = (struct leak *)mp->leak;
 		mutex_enter(&mutex_list_mutex);

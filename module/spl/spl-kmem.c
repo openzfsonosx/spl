@@ -3676,7 +3676,9 @@ kmem_alloc_caches_destroy(const int *array, size_t count,
     for (i = 0; i < count; i++) {
         size_t cache_size = array[i];
         size_t align = KMEM_ALIGN;
-        kmem_cache_t *cp;
+        kmem_cache_t *cp, *last_cp;
+
+		printf("caches_destroy %d\n", i);
 
         /* if the table has an entry for maxbuf, we're done */
         if (size > maxbuf)
@@ -3694,16 +3696,21 @@ kmem_alloc_caches_destroy(const int *array, size_t count,
         if (IS_P2ALIGNED(cache_size, PAGESIZE))
             align = PAGESIZE;
 
-		cp = alloc_table[(size - 1) >> shift];
-		kmem_cache_destroy(cp);
         //cp = kmem_cache_create(name, cache_size, align,
 		//               NULL, NULL, NULL, NULL, NULL, KMC_KMEM_ALLOC);
-
+		last_cp = NULL;
         while (size <= cache_size) {
+            //alloc_table[(size - 1) >> shift] = cp;
+			cp = alloc_table[(size - 1) >> shift];
+			if (last_cp != cp) {
+				kmem_cache_destroy(cp);
+			}
+			last_cp = cp;
+
             size += table_unit;
         }
     }
-
+	printf("SPL: kmem_alloc_caches_destroy done.\n");
     ASSERT(size > maxbuf);		/* i.e. maxbuf <= max(cache_size) */
 }
 
@@ -3813,12 +3820,6 @@ kmem_cache_fini(int pass, int use_large_pages)
     size_t maxbuf;
     kmem_magtype_t *mtp;
 
-
-
-	return;
-
-
-
     if (pass == 2) {
 
         /* Figure out what our maximum cache size is */
@@ -3894,7 +3895,7 @@ static void memory_monitor_thread()
 	unsigned int os_num_pages_wanted = 0;
 
 	while (!shutting_down) {
-		
+
 		kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
 									  &pages_reclaimed, &os_num_pages_wanted);
 
@@ -3907,6 +3908,8 @@ static void memory_monitor_thread()
 		}
 	}
 
+	printf("memory_monitor_thread exit\n");
+	shutting_down = 2;
 	thread_exit();
 }
 
@@ -4284,6 +4287,9 @@ spl_kmem_thread_fini(void)
 	printf("SPL: destroy taskq\n");
 	taskq_destroy(kmem_taskq);
 	kmem_taskq = 0;
+
+	// Find a better way to wait for memory_monitor_thread to quit.
+	while(shutting_down != 2) delay(hz>>4);
 
 	// FIXME - maybe it should tear down for symmetry
 	kmem_move_fini();
@@ -5328,7 +5334,7 @@ kmem_num_pages_wanted()
     if (vm_pool_low()) {
         return (vm_page_free_min - vm_page_free_count);
     }
-    
+
     return 0;
 }
 

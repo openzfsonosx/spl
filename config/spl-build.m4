@@ -18,6 +18,7 @@ AC_DEFUN([SPL_AC_CONFIG_KERNEL], [
 	SPL_AC_DEBUG_LOG
 	SPL_AC_DEBUG_KMEM
 	SPL_AC_DEBUG_KMEM_TRACKING
+	SPL_AC_DEBUG_MUTEX
 	SPL_AC_TEST_MODULE
 ])
 
@@ -531,4 +532,30 @@ AC_DEFUN([SPL_AC_TEST_MODULE],
 		AC_MSG_RESULT([no])
 		AC_MSG_ERROR([*** Unable to build an empty module.])
 	])
+])
+
+
+dnl #
+dnl # Enable MUTEX leak accounting.
+dnl #
+AC_DEFUN([SPL_AC_DEBUG_MUTEX], [
+	AC_ARG_ENABLE([debug-mutex],
+		[AS_HELP_STRING([--enable-debug-mutex],
+		[Enable MUTEX leak accounting @<:@default=no@:>@])],
+		[],
+		[enable_debug_mutex=no])
+
+	AS_IF([test "x$enable_debug_mutex" = xyes],
+	[
+		KERNELCPPFLAGS="${KERNELCPPFLAGS} -DSPL_DEBUG_MUTEX"
+		DEBUG_LOG="_with_debug_mutex"
+		AC_DEFINE([SPL_DEBUG_MUTEX], [1],
+		[Define to 1 to enable mutex leak accounting])
+	], [
+		DEBUG_LOG="_without_debug_mutex"
+	])
+
+	AC_SUBST(SPL_DEBUG_MUTEX)
+	AC_MSG_CHECKING([whether mutex debug is enabled])
+	AC_MSG_RESULT([$enable_debug_mutex])
 ])

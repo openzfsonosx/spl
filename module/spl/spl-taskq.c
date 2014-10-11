@@ -625,8 +625,6 @@ taskq_constructor(void *buf, void *cdrarg, int kmflags)
 {
 	taskq_t *tq = buf;
 
-	printf("ctor: %p\n", buf);
-
 	bzero(tq, sizeof (taskq_t));
 
 	mutex_init(&tq->tq_lock, NULL, MUTEX_DEFAULT, NULL);
@@ -645,8 +643,6 @@ static void
 taskq_destructor(void *buf, void *cdrarg)
 {
 	taskq_t *tq = buf;
-
-	printf("dtor: %p\n", buf);
 
 	mutex_destroy(&tq->tq_lock);
 	rw_destroy(&tq->tq_threadlock);
@@ -702,7 +698,6 @@ spl_taskq_init(void)
 void
 spl_taskq_fini(void)
 {
-	printf("taskq_fini start\n");
 	if (taskq_cache) {
 		kmem_cache_destroy(taskq_cache);
 		taskq_cache = NULL;
@@ -711,7 +706,6 @@ spl_taskq_fini(void)
 		kmem_cache_destroy(taskq_ent_cache);
 		taskq_ent_cache = NULL;
 	}
-	printf("taskq_fini end\n");
 }
 
 /*

@@ -11,9 +11,6 @@
 #include <kern/thread.h>
 #include <sys/proc.h>
 
-#define MUTEX_LEAK
-
-
 
 typedef enum {
     MUTEX_ADAPTIVE = 0,     /* spin if owner is running, otherwise block */
@@ -40,7 +37,7 @@ typedef struct kmutex {
     void           *m_owner;
     lck_mtx_t *m_lock;
 
-#ifdef MUTEX_LEAK
+#ifdef SPL_DEBUG_MUTEX
 
 	void *leak;
     uint8_t m_padding[6];
@@ -65,7 +62,7 @@ typedef struct kmutex {
  * On OS X, CoreStorage provides these symbols, so we have to redefine them,
  * preferably without having to modify SPL users.
  */
-#ifdef MUTEX_LEAK
+#ifdef SPL_DEBUG_MUTEX
 
 #define mutex_init(A,B,C,D) spl_mutex_init(A,B,C,D,__FILE__,__FUNCTION__,__LINE__)
 void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc, const char *f, const char *fn, int l);
