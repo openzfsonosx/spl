@@ -1199,11 +1199,13 @@ kmem_slab_alloc(kmem_cache_t *cp, int kmflag)
          * call the destructor on a newly constructed object without any
          * client involvement.
          */
+/*
         if ((cp->cache_constructor == NULL) ||
             cp->cache_constructor(buf, cp->cache_private,
                                   kmflag) == 0) {
 			//cp->cache_destructor(buf, cp->cache_private);
             }
+*/
         copy_pattern(KMEM_UNINITIALIZED_PATTERN, buf,
                      cp->cache_bufsize);
         if (cp->cache_flags & KMF_DEADBEEF) {
@@ -3819,6 +3821,12 @@ kmem_cache_fini(int pass, int use_large_pages)
     int i;
     size_t maxbuf;
     kmem_magtype_t *mtp;
+
+
+
+	return;
+
+
 
     if (pass == 2) {
 
