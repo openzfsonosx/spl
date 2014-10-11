@@ -4203,6 +4203,8 @@ spl_kmem_fini(void)
 		kmem_log_fini(kmem_transaction_log);
     }
 
+	return;
+
 	kmem_cache_fini(2, /*use_large_pages*/ 0);
 
 	vmem_destroy(kmem_oversize_arena);
