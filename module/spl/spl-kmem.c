@@ -93,15 +93,11 @@ void read_random(void* buffer, u_int numbytes);
 // Non Illumos Variables
 //===============================================================
 
-// Indicates that the machine is believed to be swapping
-// due to thread waking. This is reset when spl_vm_pool_low()
-// is called and reports the activity to ZFS.
-static int					machine_is_swapping = 0;
-
 // Flag to cause tasks and threads to terminate as
 // the kmem module is preparing to unload.
-static int					shutting_down = 0;
+static int			shutting_down = 0;
 
+// Amount of RAM in machine
 uint64_t			physmem = 0;
 
 // Size in bytes of the memory allocated in seg_kmem
@@ -111,9 +107,6 @@ extern uint64_t		segkmem_total_mem_allocated;
 extern uint64_t		zfs_threads;
 extern uint64_t		zfs_active_mutex;
 extern uint64_t		zfs_active_rwlock;
-
-// Number of pages the OS last reported that it needed freed
-static unsigned int		num_pages_wanted = 0;
 
 //===============================================================
 // Illumos Variables
@@ -467,7 +460,6 @@ typedef struct spl_stats {
     kstat_named_t spl_active_mutex;
     kstat_named_t spl_active_rwlock;
     kstat_named_t spl_monitor_thread_wake_count;
-    kstat_named_t spl_monitor_thread_last_num_pages_requested;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -476,7 +468,6 @@ static spl_stats_t spl_stats = {
     {"active_mutex", KSTAT_DATA_UINT64},
     {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
-    {"monitor_thread_page_req", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -3895,18 +3886,6 @@ kmem_cache_fini(int pass, int use_large_pages)
 
 }
 
-static void release_memory(uint64_t num_pages)
-{
-	if (likely(num_pages > 0)) {
-		// Set flag for spl_vm_pool_low callers
-		num_pages_wanted = num_pages;
-		machine_is_swapping = 1;
-
-		// And request memory holders release memory.
-		kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
-	}
-}
-
 static void memory_monitor_thread()
 {
 	kern_return_t kr;
@@ -3914,16 +3893,17 @@ static void memory_monitor_thread()
 	unsigned int pages_reclaimed = 0;
 	unsigned int os_num_pages_wanted = 0;
 
-
 	while (!shutting_down) {
+		
 		kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
 									  &pages_reclaimed, &os_num_pages_wanted);
 
 		spl_stats.spl_monitor_thread_wake_count.value.ui64++;
 
-		if ((!shutting_down) && kr == KERN_SUCCESS && os_num_pages_wanted) {
-			spl_stats.spl_monitor_thread_last_num_pages_requested.value.ui64 = os_num_pages_wanted;
-			release_memory(os_num_pages_wanted);
+		if ((!shutting_down) && kr == KERN_SUCCESS && spl_vm_pool_low()) {
+			kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+		} else {
+			delay(hz/10);
 		}
 	}
 
@@ -5345,9 +5325,11 @@ kmem_cache_scan(kmem_cache_t *cp)
 size_t
 kmem_num_pages_wanted()
 {
-    uint64_t tmp = num_pages_wanted;
-    num_pages_wanted = 0;
-    return tmp;
+    if (vm_pool_low()) {
+        return (vm_page_free_min - vm_page_free_count);
+    }
+    
+    return 0;
 }
 
 size_t
@@ -5365,11 +5347,7 @@ kmem_used(void)
 
 int spl_vm_pool_low(void)
 {
-    return vm_page_free_count < (vm_page_free_min);
-    //return vm_pool_low();
-    //int r = machine_is_swapping;
-    //machine_is_swapping = 0;
-    //return r;
+    return vm_page_free_count < vm_page_free_min;
 }
 
 //===============================================================
