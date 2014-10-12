@@ -440,8 +440,13 @@ extern "C" {
 		size_t				clh_avail;
 		int					clh_chunk;
 		int					clh_hits;
+#ifdef SPL_DEBUG_MUTEX
 		char				clh_pad[128 - sizeof (kmutex_t) - sizeof (char *) -
 							sizeof (size_t) - 2 * sizeof (int)];
+#else
+		char				clh_pad[64 - sizeof (kmutex_t) - sizeof (char *) -
+							sizeof (size_t) - 2 * sizeof (int)];
+#endif
 	} kmem_cpu_log_header_t;
 
 	typedef struct kmem_log_header {
