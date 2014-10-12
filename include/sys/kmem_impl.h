@@ -268,7 +268,7 @@ extern "C" {
 #define	KMEM_CPU_CACHE_OFFSET(cpuid)						\
 	__builtin_offsetof(kmem_cache_t, cache_cpu[cpuid]) - 	\
 	__builtin_offsetof(kmem_cache_t, cache_cpu)
-	
+
 //	((size_t)(&((kmem_cache_t *)0)->cache_cpu[cpuid]) -		\
 //	(size_t)(&((kmem_cache_t *)0)->cache_cpu))
 
@@ -392,7 +392,7 @@ extern "C" {
 		 */
 		kmutex_t			cache_lock;					/* protects slab layer */
 		slice_allocator_t   cache_slices;               /* bmallocs slice allocator */
-		
+
 		// basically not used yet below
 		size_t				cache_chunksize;			/* buf + alignment [+ debug] */
 		size_t				cache_slabsize;				/* size of a slab */
@@ -415,7 +415,7 @@ extern "C" {
 		kmem_defrag_t		*cache_defrag;				/* slab consolidator fields */
 
 		// end not used
-		
+
 		/*
 		 * Depot layer
 		 */
@@ -440,7 +440,7 @@ extern "C" {
 		size_t				clh_avail;
 		int					clh_chunk;
 		int					clh_hits;
-		char				clh_pad[64 - sizeof (kmutex_t) - sizeof (char *) -
+		char				clh_pad[128 - sizeof (kmutex_t) - sizeof (char *) -
 							sizeof (size_t) - 2 * sizeof (int)];
 	} kmem_cpu_log_header_t;
 

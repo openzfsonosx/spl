@@ -74,11 +74,13 @@ int spl_mutex_subsystem_init(void)
     zfs_group_attr = lck_grp_attr_alloc_init();
     zfs_mutex_group  = lck_grp_alloc_init("zfs-mutex", zfs_group_attr);
 
-
+	printf("SPL: direct mutex allocations enabled\n");
 #ifdef SPL_DEBUG_MUTEX
 	list_create(&mutex_list, sizeof (struct leak),
 				offsetof(struct leak, mutex_leak_node));
-	mutex_list_mutex.m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
+	//mutex_list_mutex.m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
+	lck_mtx_init((lck_mtx_t *)&mutex_list_mutex.m_lock, zfs_mutex_group, zfs_lock_attr);
+
 #endif
 
     return 0;
@@ -137,7 +139,8 @@ void spl_mutex_subsystem_fini(void)
 	mutex_exit(&mutex_list_mutex);
 	printf("Dumped %llu leaked allocations\n", total);
 
-	lck_mtx_free(mutex_list_mutex.m_lock, zfs_mutex_group);
+	lck_mtx_destroy((lck_mtx_t *)&mutex_list_mutex.m_lock, zfs_mutex_group);
+	//lck_mtx_free(mutex_list_mutex.m_lock, zfs_mutex_group);
 	list_destroy(&mutex_list);
 #endif
 
@@ -164,7 +167,8 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 {
     ASSERT(type != MUTEX_SPIN);
     ASSERT(ibc == NULL);
-    mp->m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
+	lck_mtx_init((lck_mtx_t *)&mp->m_lock, zfs_mutex_group, zfs_lock_attr);
+    //mp->m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
     mp->m_owner = NULL;
 
 	atomic_inc_64(&zfs_active_mutex);
@@ -176,7 +180,7 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 
 
 #ifdef SPL_DEBUG_MUTEX
-	if (!mp->m_lock) panic("[SPL] Unable to allocate MUTEX\n");
+	//if (!mp->m_lock) panic("[SPL] Unable to allocate MUTEX\n");
 
 	struct leak *leak;
 
@@ -202,7 +206,9 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 void spl_mutex_destroy(kmutex_t *mp)
 {
     if (!mp) return;
-    lck_mtx_free(mp->m_lock, zfs_mutex_group);
+
+    //lck_mtx_free(mp->m_lock, zfs_mutex_group);
+	lck_mtx_destroy((lck_mtx_t *)&mp->m_lock, zfs_mutex_group);
 
 	atomic_dec_64(&zfs_active_mutex);
 
@@ -223,14 +229,14 @@ void mutex_enter(kmutex_t *mp)
     if (mp->m_owner == current_thread())
         panic("mutex_enter: locking against myself!");
 
-    lck_mtx_lock(mp->m_lock);
+    lck_mtx_lock((lck_mtx_t *)&mp->m_lock);
     mp->m_owner = current_thread();
 }
 
 void spl_mutex_exit(kmutex_t *mp)
 {
     mp->m_owner = NULL;
-    lck_mtx_unlock(mp->m_lock);
+    lck_mtx_unlock((lck_mtx_t *)&mp->m_lock);
 }
 
 
@@ -241,7 +247,7 @@ int spl_mutex_tryenter(kmutex_t *mp)
     if (mp->m_owner == current_thread())
         panic("mutex_tryenter: locking against myself!");
 
-    held = lck_mtx_try_lock(mp->m_lock);
+    held = lck_mtx_try_lock((lck_mtx_t *)&mp->m_lock);
     if (held)
         mp->m_owner = current_thread();
     return (held);
