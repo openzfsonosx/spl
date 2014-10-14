@@ -3903,7 +3903,16 @@ static void memory_monitor_thread()
 		spl_stats.spl_monitor_thread_wake_count.value.ui64++;
 
 		if ((!shutting_down) && kr == KERN_SUCCESS && spl_vm_pool_low()) {
-			kmem_cache_applyall(kmem_cache_reap, 0, TQ_NOSLEEP);
+            
+            // My original intent was to execute the reap synchronously
+            // to limit the rate at which this thread spins. Turns out
+            // that kmem_reap() has a semaphoring mechanism that prevents
+            // concurrent reap activity.
+            //
+            // So we will let that mechanism work as I suspect its part of
+            // kmems locking strategy.
+            kmem_reap();
+            
 		} else {
 			delay(hz/10);
 		}
