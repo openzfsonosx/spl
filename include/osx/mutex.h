@@ -24,7 +24,7 @@ typedef enum {
 // Does anyone know where lck_mtx_t; is actually defined? Not just the opaque
 // typedef in i386/locks.h ?
 typedef struct {
-        uint32_t  opaque[8];
+        uint32_t  opaque[4];
 } mutex_t;
 
 /*

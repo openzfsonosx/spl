@@ -75,12 +75,27 @@ int spl_mutex_subsystem_init(void)
     zfs_mutex_group  = lck_grp_alloc_init("zfs-mutex", zfs_group_attr);
 
 	printf("SPL: direct mutex allocations enabled\n");
+
+
+
+
 #ifdef SPL_DEBUG_MUTEX
+		{
+			unsigned char mutex[128];
+			int i;
+
+			memset(mutex, 0xAF, sizeof(mutex));
+			lck_mtx_init((lck_mtx_t *)&mutex[0], zfs_mutex_group, zfs_lock_attr);
+			for (i = sizeof(mutex)-1; i >=0 ; i--)
+				if (mutex[i] != 0xAF) break;
+
+			printf("SPL: mutex size is %u\n", i+1);
+
+		}
+
 	list_create(&mutex_list, sizeof (struct leak),
 				offsetof(struct leak, mutex_leak_node));
-	//mutex_list_mutex.m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
 	lck_mtx_init((lck_mtx_t *)&mutex_list_mutex.m_lock, zfs_mutex_group, zfs_lock_attr);
-
 #endif
 
     return 0;
