@@ -33,7 +33,7 @@
 #include <sys/sysmacros.h>
 #include <sys/tsd.h>
 #include <sys/condvar.h>
-
+#include <kern/sched_prim.h>
 
 typedef struct kthread kthread_t;
 
@@ -71,5 +71,11 @@ extern kthread_t *spl_current_thread(void);
 
 #define	delay osx_delay
 extern void osx_delay(int);
+
+#define KPREEMPT_SYNC 0
+static inline void kpreempt(int flags)
+{
+	 (void)thread_block(THREAD_CONTINUE_NULL);
+}
 
 #endif  /* _SPL_THREAD_H */
