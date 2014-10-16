@@ -108,6 +108,9 @@ extern uint64_t		zfs_threads;
 extern uint64_t		zfs_active_mutex;
 extern uint64_t		zfs_active_rwlock;
 
+uint64_t            pressure_bytes_wanted = 0;
+
+
 //===============================================================
 // Illumos Variables
 //===============================================================
@@ -3902,8 +3905,8 @@ static void memory_monitor_thread()
 
 		spl_stats.spl_monitor_thread_wake_count.value.ui64++;
 
-		if ((!shutting_down) && kr == KERN_SUCCESS && spl_vm_pool_low()) {
-            
+		if ((!shutting_down) && kr == KERN_SUCCESS) {
+
             // My original intent was to execute the reap synchronously
             // to limit the rate at which this thread spins. Turns out
             // that kmem_reap() has a semaphoring mechanism that prevents
@@ -3911,8 +3914,8 @@ static void memory_monitor_thread()
             //
             // So we will let that mechanism work as I suspect its part of
             // kmems locking strategy.
-            kmem_reap();
-            
+			pressure_bytes_wanted = os_num_pages_wanted * PAGESIZE;
+
 		} else {
 			delay(hz/10);
 		}
@@ -5343,6 +5346,12 @@ kmem_cache_scan(kmem_cache_t *cp)
 size_t
 kmem_num_pages_wanted()
 {
+
+	if (pressure_bytes_wanted) {
+		pressure_bytes_wanted = 0;
+		return pressure_bytes_wanted;
+	}
+
     if (vm_pool_low()) {
         return (vm_page_free_min - vm_page_free_count);
     }
@@ -5365,6 +5374,7 @@ kmem_used(void)
 
 int spl_vm_pool_low(void)
 {
+	if (pressure_bytes_wanted) return 1;
     return vm_page_free_count < vm_page_free_min;
 }
 
