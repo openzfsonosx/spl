@@ -26,12 +26,9 @@ AC_DEFUN([SPL_AC_KERNEL], [
 	AC_MSG_CHECKING([mach_kernel])
 	AS_IF([test -z "$machkernel"], [
 		AS_IF([test -e "/System/Library/Kernels/kernel"], [
-			machkernel="/System/Library/Kernels/kernel"
-		], [test -e "/mach_kernel"], [
-			machkernel="/mach_kernel"
-		], [
-			machkernel="[Not found]"
-		])
+			machkernel="/System/Library/Kernels/kernel" ] )
+		AS_IF([test -e "/mach_kernel"], [
+			machkernel="/mach_kernel" ] )
 		AS_IF([test ! -f "$machkernel"], [
 			AC_MSG_ERROR([
 	*** mach_kernel file not found. For 10.9 and prior, this should be
