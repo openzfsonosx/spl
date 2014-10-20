@@ -108,7 +108,9 @@ extern uint64_t		zfs_threads;
 extern uint64_t		zfs_active_mutex;
 extern uint64_t		zfs_active_rwlock;
 
-uint64_t            pressure_bytes_wanted = 0;
+// Set the memory target wanted when we detect pressure, this
+// will get cleared once we are under it.
+uint64_t            pressure_bytes_target = 0;
 
 
 //===============================================================
@@ -463,6 +465,7 @@ typedef struct spl_stats {
     kstat_named_t spl_active_mutex;
     kstat_named_t spl_active_rwlock;
     kstat_named_t spl_monitor_thread_wake_count;
+    kstat_named_t spl_simulate_pressure;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -471,6 +474,7 @@ static spl_stats_t spl_stats = {
     {"active_mutex", KSTAT_DATA_UINT64},
     {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
+    {"simulate_pressure", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -3914,7 +3918,15 @@ static void memory_monitor_thread()
             //
             // So we will let that mechanism work as I suspect its part of
             // kmems locking strategy.
-			pressure_bytes_wanted = os_num_pages_wanted * PAGESIZE;
+			uint64_t newtarget;
+
+			newtarget = kmem_used() -
+				(os_num_pages_wanted * PAGESIZE);
+
+			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
+				pressure_bytes_target = newtarget;
+				printf("pressure: new target %llu\n", newtarget);
+			}
 
 		} else {
 			delay(hz/10);
@@ -3932,12 +3944,17 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	spl_stats_t *ks = ksp->ks_data;
 
 	if (rw == KSTAT_WRITE) {
-		return (SET_ERROR(EACCES));
+
+		if (ks->spl_simulate_pressure.value.ui64) {
+			pressure_bytes_target = kmem_used() -
+				(ks->spl_simulate_pressure.value.ui64 * 1024 * 1024);
+		}
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
 		ks->spl_active_threads.value.ui64 = zfs_threads;
 		ks->spl_active_mutex.value.ui64 = zfs_active_mutex;
 		ks->spl_active_rwlock.value.ui64 = zfs_active_rwlock;
+		ks->spl_simulate_pressure.value.ui64 = 0;
 	}
 
 	return (0);
@@ -4168,7 +4185,8 @@ spl_kmem_init(uint64_t total_memory)
 
 	// Install spl kstats
 	spl_ksp = kstat_create("spl", 0, "spl_misc", "misc", KSTAT_TYPE_NAMED,
-							   sizeof (spl_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
+							   sizeof (spl_stats) / sizeof (kstat_named_t),
+						   KSTAT_FLAG_VIRTUAL|KSTAT_FLAG_WRITABLE);
 
 	if (spl_ksp != NULL) {
 		spl_ksp->ks_data = &spl_stats;
@@ -5347,14 +5365,9 @@ size_t
 kmem_num_pages_wanted()
 {
 
-	if (pressure_bytes_wanted) {
-		pressure_bytes_wanted = 0;
-		return pressure_bytes_wanted;
+	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
+		return (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
 	}
-
-    if (vm_pool_low()) {
-        return (vm_page_free_min - vm_page_free_count);
-    }
 
     return 0;
 }
@@ -5374,8 +5387,24 @@ kmem_used(void)
 
 int spl_vm_pool_low(void)
 {
-	if (pressure_bytes_wanted) return 1;
-    return vm_page_free_count < vm_page_free_min;
+	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
+		return 1;
+	}
+
+	if ( vm_page_free_count < vm_page_free_min ) {
+		uint64_t newtarget;
+		newtarget = kmem_used() -
+			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE);
+		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
+			pressure_bytes_target = newtarget;
+			printf("pool low: new target %llu\n", newtarget);
+		}
+		return 1;
+	}
+
+	pressure_bytes_target = 0;
+
+	return 0;
 }
 
 //===============================================================
