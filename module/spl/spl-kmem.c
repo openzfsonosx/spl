@@ -4293,8 +4293,8 @@ spl_kmem_thread_fini(void)
 	thread_wakeup((event_t) &vm_page_free_wanted);
 
 	printf("SPL: bsd_untimeout\n");
-	bsd_untimeout(kmem_update, 0);
-	bsd_untimeout(kmem_reap_timeout, 0);
+	bsd_untimeout(kmem_update,  0);
+	bsd_untimeout(kmem_reap_timeout, &kmem_reaping);
 
 	printf("SPL: wait for taskqs to empty\n");
 	taskq_wait(kmem_taskq);
