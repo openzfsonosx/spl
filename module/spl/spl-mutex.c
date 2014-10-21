@@ -231,7 +231,7 @@ void spl_mutex_destroy(kmutex_t *mp)
 #endif
 }
 
-void mutex_enter(kmutex_t *mp)
+void spl_mutex_enter(kmutex_t *mp)
 {
     if (mp->m_owner == current_thread())
         panic("mutex_enter: locking against myself!");
