@@ -96,8 +96,8 @@ extern unsigned int max_ncpus;
  */
 //#define minclsyspri			(MAX_RT_PRIO)
 //#define maxclsyspri			(MAX_PRIO-1)
-#define minclsyspri  0
-#define maxclsyspri  0
+#define minclsyspri  PRIBIO
+#define maxclsyspri  PVM
 
 #define NICE_TO_PRIO(nice)		(MAX_RT_PRIO + (nice) + 20)
 #define PRIO_TO_NICE(prio)		((prio) - MAX_RT_PRIO - 20)
@@ -238,7 +238,7 @@ extern void spl_cleanup(void);
 
 /* avoid any possibility of clashing with <stddef.h> version */
 #if defined(_KERNEL) && !defined(_KMEMUSER) && !defined(offsetof)
-  /* Use the correct builtin mechanism. The Traditional macro is 
+  /* Use the correct builtin mechanism. The Traditional macro is
      not safe on this platform. */
   #define offsetof(s, m)  __builtin_offsetof(s, m)
 #endif

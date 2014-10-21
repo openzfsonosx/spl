@@ -112,6 +112,7 @@ extern uint64_t		zfs_active_rwlock;
 // will get cleared once we are under it.
 uint64_t            pressure_bytes_target = 0;
 
+#define MULT 16
 
 //===============================================================
 // Illumos Variables
@@ -2866,6 +2867,8 @@ kmem_cache_update(kmem_cache_t *cp)
     if (cp->cache_defrag != NULL)
         (void) taskq_dispatch(kmem_taskq,
                               (task_func_t *)kmem_cache_scan, cp, TQ_NOSLEEP);
+
+	kmem_reap();
 }
 
 static void kmem_update(void *);
@@ -3921,7 +3924,7 @@ static void memory_monitor_thread()
 			uint64_t newtarget;
 
 			newtarget = kmem_used() -
-				(os_num_pages_wanted * PAGESIZE);
+				(os_num_pages_wanted * PAGESIZE * MULT);
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
@@ -5394,7 +5397,7 @@ int spl_vm_pool_low(void)
 	if ( vm_page_free_count < vm_page_free_min ) {
 		uint64_t newtarget;
 		newtarget = kmem_used() -
-			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE);
+			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
 			printf("pool low: new target %llu\n", newtarget);

@@ -60,10 +60,23 @@ typedef void (*thread_func_t)(void *);
 #define thread_join(t)			VERIFY(0)
 
 // Drop the p0 argument, not used.
+
+#ifdef SPL_DEBUG_THREAD
+
+#define	thread_create(A,B,C,D,E,F,G,H) spl_thread_create(A,B,C,D,E,G,__FILE__, __LINE__, H)
+extern kthread_t *spl_thread_create(caddr_t stk, size_t stksize,
+	void (*proc)(void *), void *arg, size_t len, /*proc_t *pp,*/ int state,
+									char *, int, pri_t pri);
+
+#else
+
 #define	thread_create(A,B,C,D,E,F,G,H) spl_thread_create(A,B,C,D,E,G,H)
 extern kthread_t *spl_thread_create(caddr_t stk, size_t stksize,
 	void (*proc)(void *), void *arg, size_t len, /*proc_t *pp,*/ int state,
     pri_t pri);
+
+#endif
+
 #define	thread_exit spl_thread_exit
 extern void spl_thread_exit(void);
 
