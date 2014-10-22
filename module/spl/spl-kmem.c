@@ -3928,7 +3928,7 @@ static void memory_monitor_thread()
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
-				printf("pressure: new target %llu\n", newtarget);
+				//printf("pressure: new target %llu\n", newtarget);
 			}
 
 		} else {
@@ -5400,7 +5400,7 @@ int spl_vm_pool_low(void)
 			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
-			printf("pool low: new target %llu\n", newtarget);
+			//printf("pool low: new target %llu\n", newtarget);
 		}
 		return 1;
 	}
