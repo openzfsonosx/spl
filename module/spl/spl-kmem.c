@@ -2613,6 +2613,7 @@ kmem_reap_common(void *flag_arg)
 void
 kmem_reap(void)
 {
+	printf("kmem_reap\n");
     kmem_reap_common(&kmem_reaping);
 }
 
@@ -2868,7 +2869,6 @@ kmem_cache_update(kmem_cache_t *cp)
         (void) taskq_dispatch(kmem_taskq,
                               (task_func_t *)kmem_cache_scan, cp, TQ_NOSLEEP);
 
-	kmem_reap();
 }
 
 static void kmem_update(void *);
@@ -2884,6 +2884,7 @@ kmem_update(void *dummy)
 {
     kmem_cache_applyall(kmem_cache_update, NULL, TQ_NOSLEEP);
 
+	kmem_reap();
     /*
      * We use taskq_dispatch() to reschedule the timeout so that
      * kmem_update() becomes self-throttling: it won't schedule
@@ -2891,6 +2892,7 @@ kmem_update(void *dummy)
      */
     if (!taskq_dispatch(kmem_taskq, kmem_update_timeout, dummy, TQ_NOSLEEP))
         kmem_update_timeout(NULL);
+
 }
 
 static int
