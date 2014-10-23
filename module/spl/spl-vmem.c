@@ -1616,7 +1616,6 @@ vmem_destroy(vmem_t *vmp)
 	vmem_seg_t *seg0 = &vmp->vm_seg0;
 	vmem_seg_t *vsp, *anext;
 	size_t leaked;
-	int i;
 
 	mutex_enter(&vmem_list_lock);
 	vmpp = &vmem_list;
@@ -1625,13 +1624,9 @@ vmem_destroy(vmem_t *vmp)
 	*vmpp = vmp->vm_next;
 	mutex_exit(&vmem_list_lock);
 
-	for (i = 0; i < VMEM_NQCACHE_MAX; i++)
-		if (vmp->vm_qcache[i])
-			kmem_cache_destroy(vmp->vm_qcache[i]);
-
 	leaked = vmem_size(vmp, VMEM_ALLOC);
 	if (leaked != 0)
-		cmn_err(CE_WARN, "vmem_destroy('%s'): leaked %lu %s",
+		printf( "vmem_destroy('%s'): leaked %lu %s\n",
 				vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
 				"identifiers" : "bytes");
 
@@ -1670,7 +1665,6 @@ vmem_destroy_internal(vmem_t *vmp)
 	vmem_seg_t *seg0 = &vmp->vm_seg0;
 	vmem_seg_t *vsp, *anext;
 	size_t leaked;
-	int i;
 
 	mutex_enter(&vmem_list_lock);
 	vmpp = &vmem_list;
@@ -1679,14 +1673,9 @@ vmem_destroy_internal(vmem_t *vmp)
 	*vmpp = vmp->vm_next;
 	mutex_exit(&vmem_list_lock);
 
-
-	for (i = 0; i < VMEM_NQCACHE_MAX; i++)
-		if (vmp->vm_qcache[i])
-			kmem_cache_destroy(vmp->vm_qcache[i]);
-
 	leaked = vmem_size(vmp, VMEM_ALLOC);
 	if (leaked != 0)
-		cmn_err(CE_WARN, "vmem_destroy('%s'): leaked %lu %s",
+		printf("vmem_destroy('%s'): leaked %lu %s\n",
 				vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
 				"identifiers" : "bytes");
 
@@ -1872,6 +1861,13 @@ vmem_init(const char *heap_name,
 void vmem_fini(vmem_t *heap)
 {
 	uint32_t id;
+
+	/*
+
+	  We also need to release the slabs that vmem_populate() has allocated
+	  in the vmem_seg_arena here.
+
+	 */
 
 	for (id = 0; id < 5; id++) {// From vmem_init, 5 vmem_create
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));

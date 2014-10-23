@@ -60,6 +60,9 @@ static uint64_t  total_memory = 0;
 #include <IOKit/IOLib.h>
 
 
+// Size in bytes of the memory allocated in seg_kmem
+extern uint64_t		segkmem_total_mem_allocated;
+
 extern char hostname[MAXHOSTNAMELEN];
 
 /*
@@ -184,7 +187,8 @@ kern_return_t spl_stop (kmod_info_t * ki, void * d)
     spl_kmem_fini();
 	spl_kstat_fini();
     spl_mutex_subsystem_fini();
-    IOLog("SPL: Unloaded module\n");
+    IOLog("SPL: Unloaded module. (os_mem_alloc: %llu)\n",
+		segkmem_total_mem_allocated);
     return KERN_SUCCESS;
 }
 

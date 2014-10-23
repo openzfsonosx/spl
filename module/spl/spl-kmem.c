@@ -2613,7 +2613,6 @@ kmem_reap_common(void *flag_arg)
 void
 kmem_reap(void)
 {
-	printf("kmem_reap\n");
     kmem_reap_common(&kmem_reaping);
 }
 
@@ -3677,55 +3676,6 @@ kmem_alloc_caches_create(const int *array, size_t count,
     ASSERT(size > maxbuf);		/* i.e. maxbuf <= max(cache_size) */
 }
 
-static void
-kmem_alloc_caches_destroy(const int *array, size_t count,
-                         kmem_cache_t **alloc_table, size_t maxbuf, uint_t shift)
-{
-    size_t table_unit = (1 << shift); /* range of one alloc_table entry */
-    size_t size = table_unit;
-    int i;
-
-    for (i = 0; i < count; i++) {
-        size_t cache_size = array[i];
-        size_t align = KMEM_ALIGN;
-        kmem_cache_t *cp, *last_cp;
-
-		printf("caches_destroy %d\n", i);
-
-        /* if the table has an entry for maxbuf, we're done */
-        if (size > maxbuf)
-            break;
-
-        /* cache size must be a multiple of the table unit */
-        ASSERT(P2PHASE(cache_size, table_unit) == 0);
-
-        /*
-         * If they allocate a multiple of the coherency granularity,
-         * they get a coherency-granularity-aligned address.
-         */
-        if (IS_P2ALIGNED(cache_size, 64))
-            align = 64;
-        if (IS_P2ALIGNED(cache_size, PAGESIZE))
-            align = PAGESIZE;
-
-        //cp = kmem_cache_create(name, cache_size, align,
-		//               NULL, NULL, NULL, NULL, NULL, KMC_KMEM_ALLOC);
-		last_cp = NULL;
-        while (size <= cache_size) {
-            //alloc_table[(size - 1) >> shift] = cp;
-			cp = alloc_table[(size - 1) >> shift];
-			if (last_cp != cp) {
-				if (!cp->cache_buftotal)
-					kmem_cache_destroy(cp);
-			}
-			last_cp = cp;
-
-            size += table_unit;
-        }
-    }
-	printf("SPL: kmem_alloc_caches_destroy done.\n");
-    ASSERT(size > maxbuf);		/* i.e. maxbuf <= max(cache_size) */
-}
 
 static void
 kmem_cache_init(int pass, int use_large_pages)
@@ -3826,79 +3776,145 @@ kmem_cache_init(int pass, int use_large_pages)
 }
 
 
-static void
-kmem_cache_fini(int pass, int use_large_pages)
+
+struct free_slab {
+	vmem_t *vmp;
+	size_t slabsize;
+	void *slab;
+	list_node_t next;
+};
+
+static list_t freelist;
+
+
+void fudge(kmem_cache_t *cp)
 {
-    int i;
-    size_t maxbuf;
-    kmem_magtype_t *mtp;
+	int cpu_seqid;
 
-    if (pass == 2) {
+	printf("Releasing '%s'\n", cp->cache_name ? cp->cache_name : "(null)");
 
-        /* Figure out what our maximum cache size is */
-        maxbuf = kmem_max_cached;
-        if (maxbuf <= KMEM_MAXBUF) {
-            maxbuf = 0;
-            kmem_max_cached = KMEM_MAXBUF;
-        } else {
-            size_t size = 0;
-            size_t max =
-            sizeof (kmem_big_alloc_sizes) / sizeof (int);
-            /*
-             * Round maxbuf up to an existing cache size.  If maxbuf
-             * is larger than the largest cache, we truncate it to
-             * the largest cache's size.
-             */
-            for (i = 0; i < max; i++) {
-                size = kmem_big_alloc_sizes[i];
-                if (maxbuf <= size)
-                    break;
-            }
-            kmem_max_cached = maxbuf = size;
-        }
+	// lund
 
-    } else {
-        /*
-         * During the first pass, the kmem_alloc_* caches
-         * are treated as metadata.
-         */
-        kmem_default_arena = kmem_msb_arena;
-        maxbuf = KMEM_BIG_MAXBUF_32BIT;
+	// release
+
+	// cache_magtype points to one of the array of magtype[], which is
+    // freed separately.
+	// kmem_magtype_t		*cache_magtype;				/* magazine type */
+	//cp->cache_magtype = NULL;
+
+	// kmem_maglist_t		cache_full;					/* full magazines */
+	// kmem_maglist_t		cache_empty;
+	// kmem_cpu_cache_t    cache_cpu[1];				/* per-cpu data */
+
+
+    vmem_t *vmp = cp->cache_arena;
+    kmem_slab_t *sp;
+	struct free_slab *fs;
+
+    for (sp = list_head(&cp->cache_complete_slabs); sp != NULL;
+         sp = list_next(&cp->cache_complete_slabs, sp)) {
+
+		MALLOC(fs, struct free_slab *, sizeof(struct free_slab), M_TEMP, M_WAITOK);
+		fs->vmp = vmp;
+		fs->slabsize = cp->cache_slabsize;
+		fs->slab = (void *)P2ALIGN((uintptr_t)sp->slab_base, vmp->vm_quantum);
+		list_link_init(&fs->next);
+		list_insert_tail(&freelist, fs);
+		// leaking "sp"
+    }
+
+    for (sp = avl_first(&cp->cache_partial_slabs); sp != NULL;
+         sp = AVL_NEXT(&cp->cache_partial_slabs, sp)) {
+
+		MALLOC(fs, struct free_slab *, sizeof(struct free_slab), M_TEMP, M_WAITOK);
+		fs->vmp = vmp;
+		fs->slabsize = cp->cache_slabsize;
+		fs->slab = (void *)P2ALIGN((uintptr_t)sp->slab_base, vmp->vm_quantum);
+		list_link_init(&fs->next);
+		list_insert_tail(&freelist, fs);
+
+		// leaking "sp"
     }
 
 
-    kmem_alloc_caches_destroy(
-                             kmem_big_alloc_sizes, sizeof (kmem_big_alloc_sizes) / sizeof (int),
-                             kmem_big_alloc_table, maxbuf, KMEM_BIG_SHIFT);
+    kstat_delete(cp->cache_kstat);
 
-    kmem_alloc_caches_destroy(
-                             kmem_alloc_sizes, sizeof (kmem_alloc_sizes) / sizeof (int),
-                             kmem_alloc_table, KMEM_MAXBUF, KMEM_ALIGN_SHIFT);
+    if (cp->cache_hash_table != NULL)
+        vmem_free(kmem_hash_arena, cp->cache_hash_table,
+                  (cp->cache_hash_mask + 1) * sizeof (void *));
 
+    for (cpu_seqid = 0; cpu_seqid < max_ncpus; cpu_seqid++)
+        mutex_destroy(&cp->cache_cpu[cpu_seqid].cc_lock);     // XNU
+
+    mutex_destroy(&cp->cache_depot_lock);
+    mutex_destroy(&cp->cache_lock);
+
+    vmem_free(kmem_cache_arena, cp, KMEM_CACHE_SIZE(max_ncpus));
+
+}
+
+
+static void
+kmem_cache_fini(int pass, int use_large_pages)
+{
+	kmem_cache_t *cp;
+	int i;
+	struct free_slab *fs;
+
+	printf("kmem_cache_fini\n");
+
+
+	list_create(&freelist, sizeof (struct free_slab),
+				offsetof(struct free_slab, next));
+
+    mutex_enter(&kmem_cache_lock);
+	// lund
+
+#if 0
+	for(cp = list_head(&kmem_caches);
+		cp != NULL;
+		list_next(&kmem_caches, cp)) {
+
+		printf("Purging magazine '%s'\n",
+			   cp->cache_name ? cp->cache_name : "(null)");
+
+		mutex_exit(&kmem_cache_lock);
+		kmem_cache_magazine_purge(cp);
+		mutex_enter(&kmem_cache_lock);
+
+	}
+#endif
+
+	while((cp = list_head(&kmem_caches))) {
+			list_remove(&kmem_caches, cp);
+			mutex_exit(&kmem_cache_lock);
+			fudge(cp);
+			mutex_enter(&kmem_cache_lock);
+	}
+
+	mutex_exit(&kmem_cache_lock);
+
+
+	printf("Releasing slabs\n");
+	i = 0;
+	while((fs = list_head(&freelist))) {
+		i++;
+		list_remove(&freelist, fs);
+		vmem_free(fs->vmp, fs->slab, fs->slabsize);
+		FREE(fs, M_TEMP);
+
+	}
+	printf("Released %u slabs\n", i);
+	list_destroy(&freelist);
 
 	if (pass == 2) {
 		vmem_destroy(kmem_default_arena);
 		vmem_destroy(kmem_va_arena);
 	}
 
-	kmem_cache_destroy(kmem_bufctl_audit_cache);
-
-	kmem_cache_destroy(kmem_bufctl_cache);
-
-	kmem_cache_destroy(kmem_slab_cache);
-
-    for (i = 0; i < sizeof (kmem_magtype) / sizeof (*mtp); i++) {
-        mtp = &kmem_magtype[i];
-
-		if (!mtp->mt_cache->cache_buftotal)
-			kmem_cache_destroy(mtp->mt_cache);
-		else
-			printf("kmem_cache_destroy(kmem_magtype[%u] still has allocations %llu\n",
-				   i,
-				   mtp->mt_cache->cache_buftotal);
-	}
-
+	printf("Done.\n");
 }
+
 
 static void memory_monitor_thread()
 {
@@ -4238,13 +4254,17 @@ spl_kmem_fini(void)
 		kmem_log_fini(kmem_transaction_log);
     }
 
-	return;
-
 	kmem_cache_fini(2, /*use_large_pages*/ 0);
+
+	printf("A\n");
 
 	vmem_destroy(kmem_oversize_arena);
 
+	printf("B\n");
+
 	segkmem_zio_fini();
+
+	printf("C\n");
 
 	vmem_destroy(kmem_log_arena);
 	vmem_destroy(kmem_hash_arena);
@@ -4252,14 +4272,21 @@ spl_kmem_fini(void)
 	vmem_destroy(kmem_msb_arena);
 	vmem_destroy(kmem_metadata_arena);
 
+	printf("D\n");
+
 	kernelheap_fini();
 
+	printf("E\n");
+
 	list_destroy(&kmem_caches);
+
+	printf("F\n");
 
 	mutex_destroy(&kmem_cache_kstat_lock);
 	mutex_destroy(&kmem_flags_lock);
 	mutex_destroy(&kmem_cache_lock);
 
+	printf("spl_kmem_fini() complete.\n");
 }
 
 static void
