@@ -3,6 +3,8 @@
 #ifndef OSX_MUTEX_H
 #define OSX_MUTEX_H
 
+#include <../spl_config.h> // For SPL_DEBUG_MUTEX
+
 #ifdef _KERNEL
 #include <libkern/locks.h>
 
@@ -10,6 +12,7 @@
 #include <kern/locks.h>
 #include <kern/thread.h>
 #include <sys/proc.h>
+
 
 typedef enum {
     MUTEX_ADAPTIVE = 0,     /* spin if owner is running, otherwise block */
@@ -21,7 +24,7 @@ typedef enum {
 // Does anyone know where lck_mtx_t; is actually defined? Not just the opaque
 // typedef in i386/locks.h ?
 typedef struct {
-        uint32_t  opaque[3];
+        uint32_t  opaque[4];
 } mutex_t;
 
 /*
@@ -31,14 +34,15 @@ typedef struct {
  * size carefully. It appears to be 32 bytes. Or rather, it needs to be
  * aligned.
  */
+
 typedef struct kmutex {
     void           *m_owner;
-    lck_mtx_t *m_lock;
-#ifdef __LP64__
-    uint8_t m_padding[14];
-#else
-    uint8_t m_padding[22];
+	mutex_t m_lock;
+
+#ifdef SPL_DEBUG_MUTEX
+	void *leak;
 #endif
+
 } kmutex_t;
 
 
@@ -49,7 +53,19 @@ typedef struct kmutex {
  * On OS X, CoreStorage provides these symbols, so we have to redefine them,
  * preferably without having to modify SPL users.
  */
+#ifdef SPL_DEBUG_MUTEX
+
+#define mutex_init(A,B,C,D) spl_mutex_init(A,B,C,D,__FILE__,__FUNCTION__,__LINE__)
+void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc, const char *f, const char *fn, int l);
+
+#else
+
 #define mutex_init spl_mutex_init
+void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc);
+
+#endif
+
+
 #define	mutex_destroy spl_mutex_destroy
 #define mutex_enter spl_mutex_enter
 #define	mutex_exit spl_mutex_exit
@@ -57,7 +73,6 @@ typedef struct kmutex {
 #define	mutex_owned spl_mutex_owned
 #define	mutex_owner spl_mutex_owner
 
-void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc);
 void spl_mutex_destroy(kmutex_t *mp);
 void spl_mutex_enter(kmutex_t *mp);
 void spl_mutex_exit(kmutex_t *mp);

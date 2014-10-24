@@ -60,6 +60,9 @@ static uint64_t  total_memory = 0;
 #include <IOKit/IOLib.h>
 
 
+// Size in bytes of the memory allocated in seg_kmem
+extern uint64_t		segkmem_total_mem_allocated;
+
 extern char hostname[MAXHOSTNAMELEN];
 
 /*
@@ -86,7 +89,6 @@ uint32_t zone_get_hostid(void *zone)
 extern void *(*__ihook_malloc)(size_t size);
 extern void (*__ihook_free)(void *);
 
-#include <spl-bmalloc.h>
 #include <sys/systeminfo.h>
 
 
@@ -161,35 +163,32 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     strlcpy(utsname.nodename, hostname, sizeof(utsname.nodename));
 
     spl_mutex_subsystem_init();
-    bmalloc_init();
-	spl_kstat_init();
     spl_kmem_init(total_memory);
-	spl_tsd_init();
-    spl_rwlock_init();
-    spl_taskq_init();
     spl_vnode_init();
-	spl_kmem_tasks_init();
+	spl_kmem_thread_init();
+	spl_kmem_mp_init();
 
     IOLog("SPL: Loaded module v%s-%s%s, "
           "(ncpu %d, memsize %llu, pages %llu)\n",
           SPL_META_VERSION, SPL_META_RELEASE, SPL_DEBUG_STR,
           max_ncpus, total_memory, physmem);
-    return KERN_SUCCESS;
+
+	return KERN_SUCCESS;
 }
 
 
 kern_return_t spl_stop (kmod_info_t * ki, void * d)
 {
-	spl_kmem_tasks_fini();
+	spl_kmem_thread_fini();
     spl_vnode_fini();
     spl_taskq_fini();
     spl_rwlock_fini();
 	spl_tsd_fini();
-    spl_mutex_subsystem_fini();
     spl_kmem_fini();
 	spl_kstat_fini();
-    bmalloc_fini();
-    IOLog("SPL: Unloaded module\n");
+    spl_mutex_subsystem_fini();
+    IOLog("SPL: Unloaded module. (os_mem_alloc: %llu)\n",
+		segkmem_total_mem_allocated);
     return KERN_SUCCESS;
 }
 

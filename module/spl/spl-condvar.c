@@ -65,7 +65,7 @@ spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, int flags, const char *msg)
         ++msg;  /* skip over '&' prefixes */
 
     mp->m_owner = NULL;
-    (void) msleep(cvp, (lck_mtx_t *)mp->m_lock, flags, msg, 0);
+    (void) msleep(cvp, (lck_mtx_t *)&mp->m_lock, flags, msg, 0);
     mp->m_owner = current_thread();
 }
 
@@ -96,7 +96,7 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, int flags,
         printf("cv_timedwait: will wait %lds\n", ts.tv_sec);
 
     mp->m_owner = NULL;
-    result = msleep(cvp, mp->m_lock, flags, msg, &ts);
+    result = msleep(cvp, (lck_mtx_t *)&mp->m_lock, flags, msg, &ts);
     mp->m_owner = current_thread();
 
     return (result == EWOULDBLOCK ? -1 : 0);
@@ -136,7 +136,7 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
 
 
     mp->m_owner = NULL;
-    result = msleep(cvp, mp->m_lock, PRIBIO, "cv_timedwait_hires", &ts);
+    result = msleep(cvp, (lck_mtx_t *)&mp->m_lock, PRIBIO, "cv_timedwait_hires", &ts);
     mp->m_owner = current_thread();
 
     return (result == EWOULDBLOCK ? -1 : 0);

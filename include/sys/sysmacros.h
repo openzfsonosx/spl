@@ -96,8 +96,8 @@ extern unsigned int max_ncpus;
  */
 //#define minclsyspri			(MAX_RT_PRIO)
 //#define maxclsyspri			(MAX_PRIO-1)
-#define minclsyspri  0
-#define maxclsyspri  0
+#define minclsyspri  PRIBIO
+#define maxclsyspri  PVM
 
 #define NICE_TO_PRIO(nice)		(MAX_RT_PRIO + (nice) + 20)
 #define PRIO_TO_NICE(prio)		((prio) - MAX_RT_PRIO - 20)
@@ -146,6 +146,7 @@ extern char hw_serial[11];
 
 /* Missing misc functions */
 //extern int highbit(unsigned long long i);
+//extern int lowbit(unsigned long long i);
 extern uint32_t zone_get_hostid(void *zone);
 extern void spl_setup(void);
 extern void spl_cleanup(void);
@@ -212,9 +213,32 @@ extern void spl_cleanup(void);
 #define P2SAMEHIGHBIT_TYPED(x, y, type) \
         (((type)(x) ^ (type)(y)) < ((type)(x) & (type)(y)))
 
+/*
+ * P2* Macros from Illumos
+ */
+
+/*
+ * return x rounded up to the next phase (offset) within align.
+ * phase should be < align.
+ * eg, P2PHASEUP(0x1234, 0x100, 0x10) == 0x1310 (0x13*align + phase)
+ * eg, P2PHASEUP(0x5600, 0x100, 0x10) == 0x5610 (0x56*align + phase)
+ */
+#define	P2PHASEUP(x, align, phase)	((phase) - (((phase) - (x)) & -(align)))
+
+/*
+ * Return TRUE if they have the same highest bit set.
+ * eg, P2SAMEHIGHBIT(0x1234, 0x1001) == TRUE (the high bit is 0x1000)
+ * eg, P2SAMEHIGHBIT(0x1234, 0x3010) == FALSE (high bit of 0x3010 is 0x2000)
+ */
+#define	P2SAMEHIGHBIT(x, y)		(((x) ^ (y)) < ((x) & (y)))
+
+/*
+ * End Illumos copy-fest
+ */
+
 /* avoid any possibility of clashing with <stddef.h> version */
 #if defined(_KERNEL) && !defined(_KMEMUSER) && !defined(offsetof)
-  /* Use the correct builtin mechanism. The Traditional macro is 
+  /* Use the correct builtin mechanism. The Traditional macro is
      not safe on this platform. */
   #define offsetof(s, m)  __builtin_offsetof(s, m)
 #endif

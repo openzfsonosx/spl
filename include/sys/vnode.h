@@ -219,14 +219,9 @@ void spl_vn_fini(void);
   */
 
 void spl_rele_async(void *arg);
+void vn_rele_async(struct vnode *vp, void *taskq);
 
-#define VN_RELE_ASYNC(vp,tq)                                            \
-    do {                                                                \
-        if ((vp) && (vp) != DNLC_NO_VNODE)                              \
-            (void) thread_create(NULL, 0, spl_rele_async, vp, 0, &p0,   \
-                                 TS_RUN, minclsyspri);                  \
-    } while (0)
-
+#define VN_RELE_ASYNC(vp,tq) vn_rele_async((vp),(tq))
 
 #define vn_exists(vp)
 #define vn_is_readonly(vp)  vnode_vfsisrdonly(vp)

@@ -33,6 +33,8 @@
 #include <sys/file.h>
 #include <IOKit/IOLib.h>
 
+#include <sys/taskq.h>
+
 int
 vn_open(char *pnamep, enum uio_seg seg, int filemode, int createmode,
         struct vnode **vpp, enum create crwhy, mode_t umask)
@@ -594,6 +596,17 @@ int spl_vn_rdwr(enum uio_rw rw,
     return (error);
 }
 
+void spl_rele_async(void *arg)
+{
+    struct vnode *vp = (struct vnode *)arg;
+    if (vp) vnode_put(vp);
+}
+
+void vn_rele_async(struct vnode *vp, void *taskq)
+{
+	VERIFY(taskq_dispatch((taskq_t *)taskq,
+						  (task_func_t *)spl_rele_async, vp, TQ_SLEEP) != 0);
+}
 
 
 

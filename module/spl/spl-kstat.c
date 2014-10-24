@@ -36,7 +36,13 @@
 #include <sys/cmn_err.h>
 #include <sys/time.h>
 #include <sys/sysctl.h>
-#include <spl-bmalloc.h>
+
+/*
+ * We need to get dynamically allocated memory from the kernel allocator
+ * (Our needs are small, we wont blow the zone_map).
+ */
+extern void *kalloc(vm_size_t size);
+extern void kfree(void *data, vm_size_t size);
 
 /*
  * Statically declared toplevel OID that all kstats
@@ -54,7 +60,7 @@ SYSCTL_NODE( , OID_AUTO, kstat, CTLFLAG_RW, 0, "kstat tree");
  * location and destruction at shutdown time.
  */
 typedef struct sysctl_tree_node {
-	char					tn_kstat_name[KSTAT_STRLEN+1];
+	char					tn_kstat_name[KSTAT_STRLEN];
 	struct sysctl_oid_list 	tn_children;
 	struct sysctl_oid		tn_oid;
 	struct sysctl_tree_node	*tn_next;
@@ -74,7 +80,7 @@ typedef struct sysctl_tree_node {
  * which contains the data value, and the owning kstat_t.
  *
  * OIDs allow a single void* user argument, so we will
- * use a structure that contains both values and 
+ * use a structure that contains both values and
  * point to that.
  */
 typedef struct sysctl_leaf {
@@ -105,28 +111,28 @@ struct sysctl_oid 			*e_sysctl = 0;
 static void kstat_set_string(char *dst, const char *src)
 {
     bzero(dst, KSTAT_STRLEN);
-    (void) strlcpy(dst, src, KSTAT_STRLEN + 1);
+    (void) strlcpy(dst, src, KSTAT_STRLEN);
 }
 
 static struct sysctl_oid*
 get_oid_with_name(struct sysctl_oid_list* list, char *name)
 {
 	struct sysctl_oid *oidp;
-	
+
 	SLIST_FOREACH(oidp, list, oid_link) {
 		if (strcmp(name, oidp->oid_name) == 0) {
 			return oidp;
 		}
 	}
-	
+
 	return 0;
 }
 
 static void
 init_oid_tree_node(struct sysctl_oid_list* parent, char *name, sysctl_tree_node_t* node)
 {
-	strlcpy(node->tn_kstat_name, name, KSTAT_STRLEN + 1);
-	
+	strlcpy(node->tn_kstat_name, name, KSTAT_STRLEN);
+
 	node->tn_oid.oid_parent = parent;
 	node->tn_oid.oid_link.sle_next = 0;
 	node->tn_oid.oid_number = OID_AUTO;
@@ -139,9 +145,9 @@ init_oid_tree_node(struct sysctl_oid_list* parent, char *name, sysctl_tree_node_
 	node->tn_oid.oid_kind = CTLTYPE_NODE|CTLFLAG_RW|CTLFLAG_OID2;
 	node->tn_oid.oid_fmt = "N";
 	node->tn_oid.oid_arg1 = (void*)(&node->tn_children);
-	
+
 	sysctl_register_oid(&node->tn_oid);
-			
+
 	node->tn_next = tree_nodes;
 	tree_nodes = node;
 }
@@ -153,30 +159,32 @@ get_kstat_parent(struct sysctl_oid_list* root, char *module_name, char* class_na
 	struct sysctl_oid *the_class = 0;
 	sysctl_tree_node_t *new_node = 0;
 	struct sysctl_oid_list *container = root;
-	
+
 	/*
 	 * Locate/create the module
 	 */
 	the_module = get_oid_with_name(root, module_name);
-	
+
 	if (!the_module) {
-		new_node = bzmalloc(sizeof(sysctl_tree_node_t), KM_SLEEP);
+		new_node = kalloc(sizeof(sysctl_tree_node_t));
+        bzero(new_node, sizeof(sysctl_tree_node_t));
 		init_oid_tree_node(root, module_name, new_node);
 		the_module = &new_node->tn_oid;
 	}
-	
+
 	/*
 	 * Locate/create the class
 	 */
 	container = the_module->oid_arg1;
 	the_class = get_oid_with_name(container, class_name);
-	
+
 	if (!the_class) {
-		new_node = bzmalloc(sizeof(sysctl_tree_node_t), KM_SLEEP);
+		new_node = kalloc(sizeof(sysctl_tree_node_t));
+        bzero(new_node, sizeof(sysctl_tree_node_t));
 		init_oid_tree_node(container, class_name, new_node);
 		the_class = &new_node->tn_oid;
 	}
-	
+
 	container = the_class->oid_arg1;
 	return container;
 }
@@ -189,12 +197,12 @@ static int kstat_handle_i64 SYSCTL_HANDLER_ARGS
 	kstat_t *ksp  = params->l_ksp;
 	kmutex_t *lock = ksp->ks_lock;
 	int lock_needs_release = 0;
-    
+
 	if (lock && !MUTEX_NOT_HELD(lock)) {
 		mutex_enter(lock);
 		lock_needs_release = 1;
 	}
-	
+
     if(!error && req->newptr) {
         /*
          * Write request - first read add current values for the kstat
@@ -204,10 +212,10 @@ static int kstat_handle_i64 SYSCTL_HANDLER_ARGS
         if (ksp->ks_update) {
             ksp->ks_update(ksp, KSTAT_READ);
         }
-        
+
         /* Copy the new value from user space */
         named->value.i64 = (*(int64_t*)(req->newptr));
-        
+
         /* and invoke the update operation */
         if (ksp->ks_update) {
             error = ksp->ks_update(ksp, KSTAT_WRITE);
@@ -221,11 +229,11 @@ static int kstat_handle_i64 SYSCTL_HANDLER_ARGS
         }
         error = SYSCTL_OUT(req, &named->value.i64, sizeof(int64_t));
     }
-    
+
 	if (lock_needs_release) {
 		mutex_exit(lock);
 	}
-	
+
     return error;
 }
 
@@ -237,7 +245,7 @@ static int kstat_handle_ui64 SYSCTL_HANDLER_ARGS
 	kstat_t *ksp  = params->l_ksp;
 	kmutex_t *lock = ksp->ks_lock;
 	int lock_needs_release = 0;
-	
+
 	if (lock && !MUTEX_NOT_HELD(lock)) {
 		mutex_enter(lock);
 		lock_needs_release = 1;
@@ -251,10 +259,10 @@ static int kstat_handle_ui64 SYSCTL_HANDLER_ARGS
         if (ksp->ks_update) {
             ksp->ks_update(ksp, KSTAT_READ);
         }
-        
+
         /* Copy the new value from user space */
         named->value.ui64 = (*(uint64_t*)(req->newptr));
-        
+
         /* and invoke the update operation */
         if (ksp->ks_update) {
             error = ksp->ks_update(ksp, KSTAT_WRITE);
@@ -268,11 +276,11 @@ static int kstat_handle_ui64 SYSCTL_HANDLER_ARGS
         }
         error = SYSCTL_OUT(req, &named->value.ui64, sizeof(uint64_t));
     }
-	
+
 	if (lock_needs_release) {
 		mutex_exit(lock);
 	}
-    
+
     return error;
 }
 
@@ -284,12 +292,13 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
     kstat_t *ksp = 0;
     ekstat_t *e = 0;
     size_t size = 0;
-	
+
     /*
      * Allocate memory for the new kstat header.
      */
     size = sizeof (ekstat_t);
-    e = (ekstat_t *)bzmalloc(size, KM_SLEEP);
+    e = (ekstat_t *)kalloc(size);
+    bzero(e, size);
     if (e == NULL) {
         cmn_err(CE_NOTE, "kstat_create('%s', %d, '%s'): "
                 "insufficient kernel memory",
@@ -297,9 +306,9 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
         return (NULL);
     }
     e->e_size = size;
-    
+
     cv_init(&e->e_cv, NULL, CV_DEFAULT, NULL);
-    
+
     /*
      * Initialize as many fields as we can.  The caller may reset
      * ks_lock, ks_update, ks_private, and ks_snapshot as necessary.
@@ -309,7 +318,7 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
      * calling kstat_install().
      */
     ksp = &e->e_ks;
-	
+
     ksp->ks_crtime          = gethrtime();
     kstat_set_string(ksp->ks_module, ks_module);
     ksp->ks_instance        = ks_instance;
@@ -320,12 +329,12 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
     ksp->ks_ndata           = ks_ndata;
     ksp->ks_snaptime        = ksp->ks_crtime;
 	ksp->ks_lock            = 0;
-	
+
 	/*
 	 * Initialise the sysctl that represents this kstat
 	 */
 	e->e_children.slh_first = 0;
-	
+
 	e->e_oid.oid_parent = get_kstat_parent(&sysctl__kstat_children,
 											ksp->ks_module, ksp->ks_class);
 	e->e_oid.oid_link.sle_next = 0;
@@ -339,9 +348,9 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
 	e->e_oid.oid_kind = CTLTYPE_NODE|CTLFLAG_RW|CTLFLAG_OID2;
 	e->e_oid.oid_fmt = "N";
 	e->e_oid.oid_arg1 = (void*)(&e->e_children);
-	
+
 	sysctl_register_oid(&e->e_oid);
-	
+
     return (ksp);
 }
 
@@ -353,32 +362,33 @@ kstat_install(kstat_t *ksp)
 	sysctl_leaf_t *vals_base = 0;
 	sysctl_leaf_t *params = 0;
 	int oid_permissions = CTLFLAG_RD;
-	
+
     if (ksp->ks_type == KSTAT_TYPE_NAMED) {
-        
+
 		if (ksp->ks_flags & KSTAT_FLAG_WRITABLE) {
 			oid_permissions |= CTLFLAG_RW;
 		}
-		
+
 		// Create the leaf node OID objects
-		e->e_vals = (sysctl_leaf_t*)bmalloc(ksp->ks_ndata * sizeof(sysctl_leaf_t), KM_SLEEP);
+		e->e_vals = (sysctl_leaf_t*)kalloc(ksp->ks_ndata * sizeof(sysctl_leaf_t));
+        bzero(e->e_vals, ksp->ks_ndata * sizeof(sysctl_leaf_t));
 		e->e_num_vals = ksp->ks_ndata;
-		
+
         named_base = (kstat_named_t*)(ksp->ks_data);
 		vals_base = e->e_vals;
-		
+
         for (int i=0; i < ksp->ks_ndata; i++) {
-            
+
             int oid_valid = 1;
-            
+
             kstat_named_t *named = &named_base[i];
 			sysctl_leaf_t *val = &vals_base[i];
-			
+
             // Perform basic initialisation of the sysctl.
             //
             // The sysctl will be kstat.<module>.<class>.<name>.<data name>
             snprintf(val->l_name, KSTAT_STRLEN, "%s", named->name);
-            
+
             val->l_oid.oid_parent = &e->e_children;
             val->l_oid.oid_link.sle_next = 0;
             val->l_oid.oid_number = OID_AUTO;
@@ -387,16 +397,16 @@ kstat_install(kstat_t *ksp)
             val->l_oid.oid_descr = "";
             val->l_oid.oid_version = SYSCTL_OID_VERSION;
             val->l_oid.oid_refcnt = 0;
-            
+
             // Based on the kstat type flags, provide location
             // of data item and associated type and handler
             // flags to the sysctl.
             switch (named->data_type) {
                 case KSTAT_DATA_INT64:
-					params = (sysctl_leaf_t*)bmalloc(sizeof(sysctl_leaf_t), KM_SLEEP);
+					params = (sysctl_leaf_t*)kalloc(sizeof(sysctl_leaf_t));
 					params->l_named = named;
 					params->l_ksp = ksp;
-					
+
                     val->l_oid.oid_handler = kstat_handle_i64;
                     val->l_oid.oid_kind = CTLTYPE_QUAD|oid_permissions|CTLFLAG_OID2;
                     val->l_oid.oid_fmt = "Q";
@@ -404,7 +414,7 @@ kstat_install(kstat_t *ksp)
 					params = 0;
                     break;
                 case KSTAT_DATA_UINT64:
-					params = (sysctl_leaf_t*)bmalloc(sizeof(sysctl_leaf_t), KM_SLEEP);
+					params = (sysctl_leaf_t*)kalloc(sizeof(sysctl_leaf_t));
 					params->l_named = named;
 					params->l_ksp = ksp;
 
@@ -443,13 +453,13 @@ kstat_install(kstat_t *ksp)
                     val->l_oid.oid_fmt = "S";
                     val->l_oid.oid_arg1 = &named->value.string;
                     break;
-                    
+
                 case KSTAT_DATA_CHAR:
                 default:
                     oid_valid = 0;
                     break;
             }
-            
+
             // Finally publish the OID, provided that there were no issues initialising it.
             if (oid_valid) {
                 sysctl_register_oid(&val->l_oid);
@@ -459,7 +469,7 @@ kstat_install(kstat_t *ksp)
             }
         }
     }
-    
+
     ksp->ks_flags &= ~KSTAT_FLAG_INVALID;
 }
 
@@ -469,18 +479,18 @@ remove_child_sysctls(ekstat_t *e)
 	kstat_t *ksp = &e->e_ks;
 	kstat_named_t *named_base = (kstat_named_t*)(ksp->ks_data);
 	sysctl_leaf_t *vals_base = e->e_vals;
-	
+
 	for (int i=0; i < ksp->ks_ndata; i++) {
 		if (vals_base[i].l_oid_registered) {
 			sysctl_unregister_oid(&vals_base[i].l_oid);
 			vals_base[i].l_oid_registered = 0;
 		}
-		
+
 		if (named_base[i].data_type == KSTAT_DATA_INT64 ||
 			named_base[i].data_type == KSTAT_DATA_UINT64) {
-			
+
 			sysctl_leaf_t *leaf = (sysctl_leaf_t*)vals_base[i].l_oid.oid_arg1;
-			bfree(leaf, sizeof(sysctl_leaf_t));
+			kfree(leaf, sizeof(sysctl_leaf_t));
 		}
 	}
 }
@@ -491,30 +501,30 @@ kstat_delete(kstat_t *ksp)
     ekstat_t *e = (ekstat_t *)ksp;
 	kmutex_t *lock = ksp->ks_lock;
 	int lock_needs_release = 0;
-	
+
     // destroy the sysctl
     if (ksp->ks_type == KSTAT_TYPE_NAMED) {
-		
+
 		if (lock && MUTEX_NOT_HELD(lock)) {
 			mutex_enter(lock);
 			lock_needs_release = 1;
 		}
-		
+
 		remove_child_sysctls(e);
-		
+
 		if (lock_needs_release) {
 			mutex_exit(lock);
 		}
     }
-    
+
 
 	sysctl_unregister_oid(&e->e_oid);
-	
+
 	if (e->e_vals) {
-		bfree(e->e_vals, sizeof(sysctl_leaf_t) * e->e_num_vals);
+		kfree(e->e_vals, sizeof(sysctl_leaf_t) * e->e_num_vals);
 	}
     cv_destroy(&e->e_cv);
-	bfree(e, e->e_size);
+	kfree(e, e->e_size);
 }
 
 
@@ -564,20 +574,20 @@ spl_kstat_fini()
 	 * Done in two passes, first unregisters all
 	 * of the oids, second releases all the memory.
 	 */
-	
+
 	sysctl_tree_node_t *iter = tree_nodes;
 	while (iter) {
 		sysctl_tree_node_t *tn = iter;
 		iter = tn->tn_next;
 		sysctl_unregister_oid(&tn->tn_oid);
 	}
-	
+
 	while (tree_nodes) {
 		sysctl_tree_node_t *tn = tree_nodes;
 		tree_nodes = tn->tn_next;
-		bfree(tn, sizeof(sysctl_tree_node_t));
+		kfree(tn, sizeof(sysctl_tree_node_t));
 	}
-	
+
     /*
      * Destroy the root oid
      */

@@ -44,15 +44,34 @@ spl_thread_create(
         size_t          len,
         /*struct proc     *pp,*/
         int             state,
+#ifdef SPL_DEBUG_THREAD
+		char *filename,
+		int line,
+#endif
         pri_t           pri)
 {
         kern_return_t   result;
         thread_t        thread;
 
-        result = kernel_thread_start((thread_continue_t)proc, arg, &thread);
+#ifdef SPL_DEBUG_THREAD
+		printf("Start thread pri %d by '%s':%d\n", pri,
+			   filename, line);
+#endif
+        result= kernel_thread_start((thread_continue_t)proc, arg, &thread);
+
         if (result != KERN_SUCCESS)
                 return (NULL);
 
+		/* Improve the priority when asked to do so */
+		if (pri >= PRIBIO) {
+			thread_precedence_policy_data_t policy;
+			policy.importance = INT_MAX;
+
+			thread_policy_set(thread,
+							  THREAD_PRECEDENCE_POLICY,
+							  (thread_policy_t)&policy,
+							  THREAD_PRECEDENCE_POLICY_COUNT);
+		}
         thread_deallocate(thread);
 
         atomic_inc_64(&zfs_threads);
@@ -60,17 +79,16 @@ spl_thread_create(
         return ((kthread_t *)thread);
 }
 
+kthread_t *
+spl_current_thread(void)
+{
+    thread_t cur_thread = current_thread();
+    return ((kthread_t *)cur_thread);
+}
 
 void spl_thread_exit(void)
 {
         atomic_dec_64(&zfs_threads);
 
         (void) thread_terminate(current_thread());
-}
-
-void spl_rele_async(void *arg)
-{
-    struct vnode *vp = (struct vnode *)arg;
-    if (vp) vnode_put(vp);
-    thread_exit();
 }
