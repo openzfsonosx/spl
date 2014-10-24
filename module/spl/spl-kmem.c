@@ -3787,25 +3787,9 @@ struct free_slab {
 static list_t freelist;
 
 
-void fudge(kmem_cache_t *cp)
+void kmem_cache_build_slablist(kmem_cache_t *cp)
 {
 	int cpu_seqid;
-
-	printf("Releasing '%s'\n", cp->cache_name ? cp->cache_name : "(null)");
-
-	// lund
-
-	// release
-
-	// cache_magtype points to one of the array of magtype[], which is
-    // freed separately.
-	// kmem_magtype_t		*cache_magtype;				/* magazine type */
-	//cp->cache_magtype = NULL;
-
-	// kmem_maglist_t		cache_full;					/* full magazines */
-	// kmem_maglist_t		cache_empty;
-	// kmem_cpu_cache_t    cache_cpu[1];				/* per-cpu data */
-
 
     vmem_t *vmp = cp->cache_arena;
     kmem_slab_t *sp;
@@ -3820,7 +3804,7 @@ void fudge(kmem_cache_t *cp)
 		fs->slab = (void *)P2ALIGN((uintptr_t)sp->slab_base, vmp->vm_quantum);
 		list_link_init(&fs->next);
 		list_insert_tail(&freelist, fs);
-		// leaking "sp"
+
     }
 
     for (sp = avl_first(&cp->cache_partial_slabs); sp != NULL;
@@ -3833,7 +3817,6 @@ void fudge(kmem_cache_t *cp)
 		list_link_init(&fs->next);
 		list_insert_tail(&freelist, fs);
 
-		// leaking "sp"
     }
 
 
@@ -3870,25 +3853,11 @@ kmem_cache_fini(int pass, int use_large_pages)
     mutex_enter(&kmem_cache_lock);
 	// lund
 
-#if 0
-	for(cp = list_head(&kmem_caches);
-		cp != NULL;
-		list_next(&kmem_caches, cp)) {
-
-		printf("Purging magazine '%s'\n",
-			   cp->cache_name ? cp->cache_name : "(null)");
-
-		mutex_exit(&kmem_cache_lock);
-		kmem_cache_magazine_purge(cp);
-		mutex_enter(&kmem_cache_lock);
-
-	}
-#endif
 
 	while((cp = list_head(&kmem_caches))) {
 			list_remove(&kmem_caches, cp);
 			mutex_exit(&kmem_cache_lock);
-			fudge(cp);
+			kmem_cache_build_slablist(cp);
 			mutex_enter(&kmem_cache_lock);
 	}
 
@@ -4256,15 +4225,9 @@ spl_kmem_fini(void)
 
 	kmem_cache_fini(2, /*use_large_pages*/ 0);
 
-	printf("A\n");
-
 	vmem_destroy(kmem_oversize_arena);
 
-	printf("B\n");
-
 	segkmem_zio_fini();
-
-	printf("C\n");
 
 	vmem_destroy(kmem_log_arena);
 	vmem_destroy(kmem_hash_arena);
@@ -4272,15 +4235,9 @@ spl_kmem_fini(void)
 	vmem_destroy(kmem_msb_arena);
 	vmem_destroy(kmem_metadata_arena);
 
-	printf("D\n");
-
 	kernelheap_fini();
 
-	printf("E\n");
-
 	list_destroy(&kmem_caches);
-
-	printf("F\n");
 
 	mutex_destroy(&kmem_cache_kstat_lock);
 	mutex_destroy(&kmem_flags_lock);

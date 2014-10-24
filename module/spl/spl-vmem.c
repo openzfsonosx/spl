@@ -1861,13 +1861,53 @@ vmem_init(const char *heap_name,
 void vmem_fini(vmem_t *heap)
 {
 	uint32_t id;
-
+	vmem_t *vmp;
+	vmem_seg_t *seg;
 	/*
 
 	  We also need to release the slabs that vmem_populate() has allocated
 	  in the vmem_seg_arena here.
 
 	 */
+	vmp = vmem_seg_arena;
+	while (vmp->vm_nsegfree > 0)
+		vmem_putseg_global(vmem_getseg(vmp));
+
+	struct free_slab {
+		vmem_t *vmp;
+		size_t slabsize;
+		void *slab;
+		list_node_t next;
+	};
+
+	uint64_t i;
+	list_t freelist;
+	struct free_slab *fs;
+	list_create(&freelist, sizeof (struct free_slab),
+				offsetof(struct free_slab, next));
+
+
+	ssize_t nseg;
+	size_t size;
+	nseg = VMEM_MINFREE + vmem_populators * VMEM_POPULATE_RESERVE;
+	size = P2ROUNDUP(nseg *vmem_seg_size,vmem_seg_arena->vm_quantum);
+
+	while((seg = vmem_getseg_global()) ) {
+		uint64_t align;
+		align = (uint64_t)seg % size;
+		//printf("seg %p: align %u: start %p\n",
+		//	   seg, align , seg->vs_start);
+		if (!align) {
+
+			MALLOC(fs, struct free_slab *, sizeof(struct free_slab), M_TEMP, M_WAITOK);
+			fs->vmp = vmem_seg_arena;
+			fs->slabsize = size;
+			fs->slab = seg;
+			list_link_init(&fs->next);
+			list_insert_tail(&freelist, fs);
+
+		}
+	}
 
 	for (id = 0; id < 5; id++) {// From vmem_init, 5 vmem_create
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
@@ -1878,6 +1918,17 @@ void vmem_fini(vmem_t *heap)
 	vmem_destroy_internal(vmem_seg_arena);
 	vmem_destroy_internal(vmem_metadata_arena);
 	vmem_destroy_internal(heap);
+
+
+	i = 0;
+	while((fs = list_head(&freelist))) {
+		i+=fs->slabsize;
+		list_remove(&freelist, fs);
+		segkmem_free(fs->vmp, fs->slab, fs->slabsize);
+		FREE(fs, M_TEMP);
+	}
+	printf("Released %llu bytes from vmem_seg_arena\n", i);
+	list_destroy(&freelist);
 
 	mutex_destroy(&vmem_panic_lock);
 	mutex_destroy(&vmem_pushpage_lock);
