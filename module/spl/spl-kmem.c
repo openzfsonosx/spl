@@ -2878,12 +2878,38 @@ kmem_update_timeout(void *dummy)
     (void) bsd_timeout(kmem_update, dummy, &kmem_reap_interval);
 }
 
+
+struct bufstats {
+         long    bufs_incore;            /* found incore */
+         long    bufs_busyincore;        /* found incore. was busy */
+         long    bufs_vmhits;            /* not incore. found in VM */
+         long    bufs_miss;                      /* not incore. not in VM */
+         long    bufs_sleeps;            /* buffer starvation */
+         long    bufs_eblk;                      /* Calls to geteblk */
+         long    bufs_iobufmax;          /* Max. number of IO buffers used */
+         long    bufs_iobufinuse;        /* number of IO buffers in use */
+         long    bufs_iobufsleeps;       /* IO buffer starvation */
+ };
+
+extern struct bufstats bufstats;
+
 static void
 kmem_update(void *dummy)
 {
     kmem_cache_applyall(kmem_cache_update, NULL, TQ_NOSLEEP);
 
 	kmem_reap();
+
+	printf("buf: incore %d busyincore %d vmhits %d miss %d sleeps %d eblk %d iobufmax %d iobufinuse %d iobufsleeps %d\n",
+		   bufstats.bufs_incore,
+		   bufstats.bufs_busyincore,
+		   bufstats.bufs_vmhits,
+		   bufstats.bufs_miss,
+		   bufstats.bufs_sleeps,
+		   bufstats.bufs_eblk,
+		   bufstats.bufs_iobufmax,
+		   bufstats.bufs_iobufinuse,
+		   bufstats.bufs_iobufsleeps);
     /*
      * We use taskq_dispatch() to reschedule the timeout so that
      * kmem_update() becomes self-throttling: it won't schedule

@@ -19,3 +19,4 @@ _panicstr
 _system_inshutdown
 _cache_purgevfs
 _vfs_context_kernel
+_bufstats
