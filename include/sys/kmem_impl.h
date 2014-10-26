@@ -391,7 +391,6 @@ extern "C" {
 		 * Slab layer
 		 */
 		kmutex_t			cache_lock;					/* protects slab layer */
-		slice_allocator_t   cache_slices;               /* bmallocs slice allocator */
 
 		// basically not used yet below
 		size_t				cache_chunksize;			/* buf + alignment [+ debug] */
