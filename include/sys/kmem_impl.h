@@ -392,7 +392,6 @@ extern "C" {
 		 */
 		kmutex_t			cache_lock;					/* protects slab layer */
 
-		// basically not used yet below
 		size_t				cache_chunksize;			/* buf + alignment [+ debug] */
 		size_t				cache_slabsize;				/* size of a slab */
 		size_t				cache_maxchunks;			/* max buffers per slab */
@@ -412,8 +411,6 @@ extern "C" {
 		kmem_cache_t		*cache_bufctl_cache;		/* source of bufctls */
 		kmem_bufctl_t		**cache_hash_table;			/* hash table base */
 		kmem_defrag_t		*cache_defrag;				/* slab consolidator fields */
-
-		// end not used
 
 		/*
 		 * Depot layer
