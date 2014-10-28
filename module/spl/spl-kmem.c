@@ -3894,6 +3894,7 @@ static void memory_monitor_thread()
 
 	while (!shutting_down) {
 
+		delay(hz);
 		kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
 									  &pages_reclaimed, &os_num_pages_wanted);
 
