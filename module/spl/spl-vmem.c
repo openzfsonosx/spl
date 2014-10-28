@@ -1915,10 +1915,12 @@ void vmem_fini(vmem_t *heap)
 	printf("Released %llu bytes from vmem_seg_arena\n", total);
 	list_destroy(&freelist);
 
+#if 0 // Don't release, panics
 	mutex_destroy(&vmem_panic_lock);
 	mutex_destroy(&vmem_pushpage_lock);
 	mutex_destroy(&vmem_nosleep_lock);
 	mutex_destroy(&vmem_sleep_lock);
 	mutex_destroy(&vmem_segfree_lock);
 	mutex_destroy(&vmem_list_lock);
+#endif
 }

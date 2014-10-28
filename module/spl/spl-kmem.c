@@ -4238,10 +4238,12 @@ spl_kmem_fini(void)
 	kernelheap_fini();
 
 	list_destroy(&kmem_caches);
-
+#if 0
 	mutex_destroy(&kmem_cache_kstat_lock);
 	mutex_destroy(&kmem_flags_lock);
 	mutex_destroy(&kmem_cache_lock);
+#endif
+
 
 	printf("spl_kmem_fini() complete.\n");
 }
