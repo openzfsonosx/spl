@@ -2502,6 +2502,9 @@ static void
 kmem_cache_reap(kmem_cache_t *cp)
 {
     ASSERT(taskq_member(kmem_taskq, curthread));
+
+	return;
+
     cp->cache_reap++;
 
     /*
@@ -2592,6 +2595,7 @@ kmem_reap_common(void *flag_arg)
 {
     uint32_t *flag = (uint32_t *)flag_arg;
 
+
     if (MUTEX_HELD(&kmem_cache_lock) || kmem_taskq == NULL ||
         atomic_cas_32(flag, 0, 1) != 0)
         return;
@@ -2613,7 +2617,7 @@ kmem_reap_common(void *flag_arg)
 void
 kmem_reap(void)
 {
-    kmem_reap_common(&kmem_reaping);
+    //kmem_reap_common(&kmem_reaping);
 }
 
 /*
@@ -2625,7 +2629,7 @@ kmem_reap(void)
 void
 kmem_reap_idspace(void)
 {
-    kmem_reap_common(&kmem_reaping_idspace);
+    //kmem_reap_common(&kmem_reaping_idspace);
 }
 
 /*
@@ -2722,6 +2726,7 @@ kmem_cache_reap_now(kmem_cache_t *cp)
 {
     ASSERT(list_link_active(&cp->cache_link));
 
+	return;
     kmem_depot_ws_update(cp);
     kmem_depot_ws_update(cp);
 
@@ -2883,7 +2888,6 @@ kmem_update(void *dummy)
 {
     kmem_cache_applyall(kmem_cache_update, NULL, TQ_NOSLEEP);
 
-	kmem_reap();
     /*
      * We use taskq_dispatch() to reschedule the timeout so that
      * kmem_update() becomes self-throttling: it won't schedule
@@ -3939,6 +3943,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		if (ks->spl_simulate_pressure.value.ui64) {
 			pressure_bytes_target = kmem_used() -
 				(ks->spl_simulate_pressure.value.ui64 * 1024 * 1024);
+			kmem_reap();
 		}
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
