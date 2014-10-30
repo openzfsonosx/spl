@@ -112,7 +112,7 @@ extern uint64_t		zfs_active_rwlock;
 // will get cleared once we are under it.
 uint64_t            pressure_bytes_target = 0;
 
-#define MULT 16
+#define MULT 1
 
 //===============================================================
 // Illumos Variables
@@ -1527,6 +1527,9 @@ kmem_magazine_destroy(kmem_cache_t *cp, kmem_magazine_t *mp, int nrounds)
     }
     ASSERT(KMEM_MAGAZINE_VALID(cp, mp));
     kmem_cache_free(cp->cache_magtype->mt_cache, mp);
+
+	kpreempt(KPREEMPT_SYNC);
+
 }
 
 /*
@@ -2503,7 +2506,7 @@ kmem_cache_reap(kmem_cache_t *cp)
 {
     ASSERT(taskq_member(kmem_taskq, curthread));
 
-	return;
+	//return;
 
     cp->cache_reap++;
 
@@ -2617,7 +2620,7 @@ kmem_reap_common(void *flag_arg)
 void
 kmem_reap(void)
 {
-    //kmem_reap_common(&kmem_reaping);
+    kmem_reap_common(&kmem_reaping);
 }
 
 /*
@@ -2629,7 +2632,7 @@ kmem_reap(void)
 void
 kmem_reap_idspace(void)
 {
-    //kmem_reap_common(&kmem_reaping_idspace);
+    kmem_reap_common(&kmem_reaping_idspace);
 }
 
 /*
@@ -3895,6 +3898,7 @@ static void memory_monitor_thread()
 	unsigned int nsecs_monitored = 1000000000 / 4;
 	unsigned int pages_reclaimed = 0;
 	unsigned int os_num_pages_wanted = 0;
+	uint64_t last_reap = zfs_lbolt();
 
 	while (!shutting_down) {
 
@@ -3914,7 +3918,6 @@ static void memory_monitor_thread()
             // So we will let that mechanism work as I suspect its part of
             // kmems locking strategy.
 			uint64_t newtarget;
-
 			newtarget = kmem_used() -
 				(os_num_pages_wanted * PAGESIZE * MULT);
 
@@ -3922,6 +3925,27 @@ static void memory_monitor_thread()
 				pressure_bytes_target = newtarget;
 				//printf("pressure: new target %llu\n", newtarget);
 			}
+
+			// Figure out if we should reap as well
+			if (zfs_lbolt() - last_reap >= (hz * 60)) {
+				last_reap = zfs_lbolt();
+
+				// Get the current pressure level
+				uint32_t level;
+				size_t len = sizeof(level);
+				sysctlbyname("kern.memorystatus_vm_pressure_level",
+							 &level, &len, NULL, 0);
+
+				if (level == 2) {
+					printf("Reaping as well\n");
+					kmem_reap();
+					kpreempt(KPREEMPT_SYNC);
+					kmem_reap_idspace();
+					printf("Reaping completed.\n");
+
+				}
+			}
+
 
 		} else {
 			delay(hz/10);
@@ -3944,6 +3968,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 			pressure_bytes_target = kmem_used() -
 				(ks->spl_simulate_pressure.value.ui64 * 1024 * 1024);
 			kmem_reap();
+			kmem_reap_idspace();
 		}
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
