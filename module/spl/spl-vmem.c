@@ -1857,6 +1857,9 @@ vmem_init(const char *heap_name,
 									   1, 0, 0, &vmem0[id], &vmem0[id + 1],
 										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
 	}
+
+	vmem_update(NULL);
+
 	return (heap);
 }
 
@@ -1889,6 +1892,8 @@ void vmem_fini(vmem_t *heap)
 	uint32_t id;
 	struct free_slab *fs;
 	uint64_t total;
+
+	bsd_untimeout(vmem_update, NULL);
 
 	/* Create a list of slabs to free by walking the list of allocs */
 	list_create(&freelist, sizeof (struct free_slab),
