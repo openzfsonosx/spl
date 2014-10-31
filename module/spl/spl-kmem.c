@@ -1070,6 +1070,7 @@ kmem_slab_destroy(kmem_cache_t *cp, kmem_slab_t *sp)
         }
         kmem_cache_free(kmem_slab_cache, sp);
     }
+	kpreempt(KPREEMPT_SYNC);
     vmem_free(vmp, slab, cp->cache_slabsize);
 }
 
@@ -1524,11 +1525,12 @@ kmem_magazine_destroy(kmem_cache_t *cp, kmem_magazine_t *mp, int nrounds)
         }
 
         kmem_slab_free(cp, buf);
+
+		kpreempt(KPREEMPT_SYNC);
+
     }
     ASSERT(KMEM_MAGAZINE_VALID(cp, mp));
     kmem_cache_free(cp->cache_magtype->mt_cache, mp);
-
-	kpreempt(KPREEMPT_SYNC);
 
 }
 
@@ -2205,6 +2207,7 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
         }
     }
     mutex_exit(&ccp->cc_lock);
+	kpreempt(KPREEMPT_SYNC);
     kmem_slab_free_constructed(cp, buf, B_TRUE);
 }
 
@@ -2729,7 +2732,6 @@ kmem_cache_reap_now(kmem_cache_t *cp)
 {
     ASSERT(list_link_active(&cp->cache_link));
 
-	return;
     kmem_depot_ws_update(cp);
     kmem_depot_ws_update(cp);
 
@@ -3891,7 +3893,6 @@ kmem_cache_fini(int pass, int use_large_pages)
 	printf("Done.\n");
 }
 
-
 static void memory_monitor_thread()
 {
 	kern_return_t kr;
@@ -3923,25 +3924,23 @@ static void memory_monitor_thread()
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
-				//printf("pressure: new target %llu\n", newtarget);
+				printf("pressure: new target %llu\n", newtarget);
 			}
 
 			// Figure out if we should reap as well
 			if (zfs_lbolt() - last_reap >= (hz * 60)) {
 				last_reap = zfs_lbolt();
 
-				// Get the current pressure level
-				uint32_t level;
-				size_t len = sizeof(level);
-				sysctlbyname("kern.memorystatus_vm_pressure_level",
-							 &level, &len, NULL, 0);
+				extern unsigned int memorystatus_level;
+				printf("memorystatus_level %u\n", memorystatus_level);
 
-				if (level == 2) {
-					printf("Reaping as well\n");
+
+				if (memorystatus_level < 30) {
+					printf("SPL: memorystatus_level low, reaping\n");
 					kmem_reap();
 					kpreempt(KPREEMPT_SYNC);
 					kmem_reap_idspace();
-					printf("Reaping completed.\n");
+					printf("SPL: reaping complete.\n");
 
 				}
 			}
@@ -5419,7 +5418,7 @@ int spl_vm_pool_low(void)
 			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
-			//printf("pool low: new target %llu\n", newtarget);
+			printf("pool low: new target %llu\n", newtarget);
 		}
 		return 1;
 	}

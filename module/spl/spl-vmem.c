@@ -1909,7 +1909,7 @@ void vmem_fini(vmem_t *heap)
 
 	vmem_destroy_internal(vmem_vmem_arena);
 	vmem_destroy_internal(vmem_hash_arena);
-	vmem_destroy_internal(vmem_seg_arena);
+	//vmem_destroy_internal(vmem_seg_arena);
 	vmem_destroy_internal(vmem_metadata_arena);
 	vmem_destroy_internal(heap);
 
