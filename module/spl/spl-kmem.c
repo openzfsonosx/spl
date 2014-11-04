@@ -3929,7 +3929,7 @@ static void memory_monitor_thread()
 			// Figure out if we should reap as well
 			if (zfs_lbolt() - last_reap >= (hz * 60)) {
 				last_reap = zfs_lbolt();
-
+#if 0
 				extern unsigned int memorystatus_level;
 				printf("memorystatus_level %u\n", memorystatus_level);
 
@@ -3942,6 +3942,7 @@ static void memory_monitor_thread()
 					printf("SPL: reaping complete.\n");
 
 				}
+#endif
 			}
 
 
