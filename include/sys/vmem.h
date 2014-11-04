@@ -33,6 +33,11 @@ extern "C" {
 #endif
 
 
+
+#define KMEM_QUANTUM (PAGESIZE<<7) // 512KB
+
+
+
 	/*
 	 * Per-allocation flags
 	 */

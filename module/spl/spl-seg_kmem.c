@@ -55,6 +55,7 @@
 #include <sys/panic.h>
 #endif
 
+
 /*
  * seg_kmem is the primary kernel memory segment driver.  It
  * maps the kernel heap [kernelheap, ekernelheap), module text,
@@ -246,7 +247,7 @@ osif_malloc(uint64_t size)
     void *tr;
     kern_return_t kr;
 
-    kr = kernel_memory_allocate(kernel_map, &tr, size, 0, 0);
+    kr = kernel_memory_allocate(kernel_map, &tr, size, KMEM_QUANTUM-1, 0);
 
     if (kr == KERN_SUCCESS) {
         atomic_add_64(&segkmem_total_mem_allocated, size);
@@ -326,7 +327,7 @@ kernelheap_init(
 //#endif
 //
 	heap_size = (uintptr_t)ekernelheap - (uintptr_t)kernelheap;
-	heap_arena = vmem_init("heap", kernelheap, heap_size, PAGESIZE,
+	heap_arena = vmem_init("heap", kernelheap, heap_size, KMEM_QUANTUM,
 						   segkmem_alloc, segkmem_free);
 //
 //	if (core_size > 0) {
@@ -1597,9 +1598,9 @@ segkmem_zio_init(void *zio_mem_base, void *zio_mem_end)
 	 */
 	heap_size = (uintptr_t)zio_mem_end - (uintptr_t)zio_mem_base;
 	zio_arena = vmem_create("zfs_file_data", zio_mem_base, heap_size,
-							PAGESIZE, NULL, NULL, NULL, 32 * 1024, VM_SLEEP);
+							KMEM_QUANTUM, NULL, NULL, NULL, 32 * 1024, VM_SLEEP);
 
-	zio_alloc_arena = vmem_create("zfs_file_data_buf", NULL, 0, PAGESIZE,
+	zio_alloc_arena = vmem_create("zfs_file_data_buf", NULL, 0, KMEM_QUANTUM,
 								  segkmem_zio_alloc, segkmem_zio_free, zio_arena, 0, VM_SLEEP);
 
 	ASSERT(zio_arena != NULL);

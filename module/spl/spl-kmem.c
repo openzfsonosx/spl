@@ -41,7 +41,6 @@
 #include <sys/kmem_impl.h>
 #include <sys/vmem_impl.h>
 #include <kern/sched_prim.h>
-
 //===============================================================
 // Options
 //===============================================================
@@ -276,7 +275,7 @@ int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 pgcnt_t kmem_reapahead = 0;	/* start reaping N pages before pageout */
 int kmem_panic = 1;		/* whether to panic on error */
 //int kmem_panic = 0;		/* whether to panic on error */
-int kmem_logging = 1;		/* kmem_log_enter() override */
+int kmem_logging = 0;		/* kmem_log_enter() override */
 uint32_t kmem_mtbf = 0;		/* mean time between failures [default: off] */
 size_t kmem_transaction_log_size; /* transaction log size [2% of memory] */
 size_t kmem_content_log_size;	/* content log size [2% of memory] */
@@ -824,7 +823,7 @@ kmem_log_init(size_t logsize)
 
     mutex_init(&lhp->lh_lock, NULL, MUTEX_DEFAULT, NULL);
     lhp->lh_nchunks = nchunks;
-    lhp->lh_chunksize = P2ROUNDUP(logsize / nchunks + 1, PAGESIZE);
+    lhp->lh_chunksize = P2ROUNDUP(logsize / nchunks + 1, KMEM_QUANTUM);
     lhp->lh_base = vmem_alloc(kmem_log_arena,
                               lhp->lh_chunksize * nchunks, VM_SLEEP);
     lhp->lh_free = vmem_alloc(kmem_log_arena,
@@ -3718,9 +3717,9 @@ kmem_cache_init(int pass, int use_large_pages)
 
     if (pass == 2) {
         kmem_va_arena = vmem_create("kmem_va",
-                                    NULL, 0, PAGESIZE,
+                                    NULL, 0, KMEM_QUANTUM,
                                     vmem_alloc, vmem_free, heap_arena,
-                                    8 * PAGESIZE, VM_SLEEP);
+                                    8 * KMEM_QUANTUM, VM_SLEEP);
 
 //        if (use_large_pages) {
 //            kmem_default_arena = vmem_xcreate("kmem_default",
@@ -3729,7 +3728,7 @@ kmem_cache_init(int pass, int use_large_pages)
 //                                              0, VMC_DUMPSAFE | VM_SLEEP);
 //        } else {
             kmem_default_arena = vmem_create("kmem_default",
-                                             NULL, 0, PAGESIZE,
+                                             NULL, 0, KMEM_QUANTUM,
                                              segkmem_alloc, segkmem_free, kmem_va_arena,
                                              0, VMC_DUMPSAFE | VM_SLEEP);
 //        }
@@ -4020,14 +4019,16 @@ spl_kmem_init(uint64_t total_memory)
                 offsetof(kmem_cache_t, cache_link));
 
 	// Initialise seg_kmem, only the first two parameters are valid for us.
-	kernelheap_init((void*)virtual_space_start, (void*)virtual_space_end, 0, 0, 0);
+	kernelheap_init((void*)((virtual_space_start + KMEM_QUANTUM)&~(KMEM_QUANTUM-1)),
+					(void*)((virtual_space_end - KMEM_QUANTUM)&~(KMEM_QUANTUM-1)),
+					0, 0, 0);
 
-    kmem_metadata_arena = vmem_create("kmem_metadata", NULL, 0, PAGESIZE,
-                                      vmem_alloc, vmem_free, heap_arena, 8 * PAGESIZE,
+    kmem_metadata_arena = vmem_create("kmem_metadata", NULL, 0, KMEM_QUANTUM,
+                                      vmem_alloc, vmem_free, heap_arena, 8 * KMEM_QUANTUM,
                                       VM_SLEEP | VMC_NO_QCACHE);
 
     kmem_msb_arena = vmem_create("kmem_msb", NULL, 0,
-                                 PAGESIZE, segkmem_alloc, segkmem_free, kmem_metadata_arena, 0,
+                                 KMEM_QUANTUM, segkmem_alloc, segkmem_free, kmem_metadata_arena, 0,
                                  VMC_DUMPSAFE | VM_SLEEP);
 
     kmem_cache_arena = vmem_create("kmem_cache", NULL, 0, KMEM_ALIGN,
@@ -4039,7 +4040,8 @@ spl_kmem_init(uint64_t total_memory)
     kmem_log_arena = vmem_create("kmem_log", NULL, 0, KMEM_ALIGN,
                                  segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
 
-	segkmem_zio_init((void *)virtual_space_start, (void *)virtual_space_end);
+	segkmem_zio_init((void*)((virtual_space_start + KMEM_QUANTUM)&~(KMEM_QUANTUM-1)),
+					 (void*)((virtual_space_end - KMEM_QUANTUM)&~(KMEM_QUANTUM-1)));
 
 #ifndef APPLE
 //    kmem_firewall_va_arena = vmem_create("kmem_firewall_va",
@@ -4053,7 +4055,7 @@ spl_kmem_init(uint64_t total_memory)
 #endif
 
     /* temporary oversize arena for mod_read_system_file */
-    kmem_oversize_arena = vmem_create("kmem_oversize", NULL, 0, PAGESIZE,
+    kmem_oversize_arena = vmem_create("kmem_oversize", NULL, 0, KMEM_QUANTUM,
                                       segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
 
     // statically declared above kmem_reap_interval = 15 * hz;
@@ -4122,7 +4124,7 @@ spl_kmem_init(uint64_t total_memory)
 //    } else {
 #if 0
         kmem_oversize_arena = vmem_create("kmem_oversize",
-                                          NULL, 0, PAGESIZE,
+                                          NULL, 0, KMEM_QUANTUM,
                                           segkmem_alloc, segkmem_free,
 //										  kmem_minfirewall < ULONG_MAX?
 //                                          kmem_firewall_va_arena : heap_arena,
