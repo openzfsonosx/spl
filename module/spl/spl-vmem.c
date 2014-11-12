@@ -1921,7 +1921,7 @@ void vmem_fini(vmem_t *heap)
 		segkmem_free(fs->vmp, fs->slab, fs->slabsize);
 		FREE(fs, M_TEMP);
 	}
-	printf("Released %llu bytes from vmem_seg_arena\n", total);
+	printf("SPL: Released %llu bytes from vmem_seg_arena\n", total);
 	list_destroy(&freelist);
 
 #if 0 // Don't release, panics

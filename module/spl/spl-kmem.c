@@ -3852,9 +3852,6 @@ kmem_cache_fini(int pass, int use_large_pages)
 	int i;
 	struct free_slab *fs;
 
-	printf("kmem_cache_fini\n");
-
-
 	list_create(&freelist, sizeof (struct free_slab),
 				offsetof(struct free_slab, next));
 
@@ -3872,7 +3869,7 @@ kmem_cache_fini(int pass, int use_large_pages)
 	mutex_exit(&kmem_cache_lock);
 
 
-	printf("Releasing slabs\n");
+	//printf("Releasing slabs\n");
 	i = 0;
 	while((fs = list_head(&freelist))) {
 		i++;
@@ -3881,15 +3878,13 @@ kmem_cache_fini(int pass, int use_large_pages)
 		FREE(fs, M_TEMP);
 
 	}
-	printf("Released %u slabs\n", i);
+	printf("SPL: Released %u slabs\n", i);
 	list_destroy(&freelist);
 
 	if (pass == 2) {
 		vmem_destroy(kmem_default_arena);
 		vmem_destroy(kmem_va_arena);
 	}
-
-	printf("Done.\n");
 }
 
 static void memory_monitor_thread()
@@ -3923,7 +3918,7 @@ static void memory_monitor_thread()
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
-				printf("pressure: new target %llu\n", newtarget);
+				//printf("pressure: new target %llu\n", newtarget);
 			}
 
 			// Figure out if we should reap as well
@@ -3951,7 +3946,6 @@ static void memory_monitor_thread()
 		}
 	}
 
-	printf("memory_monitor_thread exit\n");
 	shutting_down = 2;
 	thread_exit();
 }
@@ -3989,7 +3983,6 @@ spl_kmem_init(uint64_t total_memory)
     size_t maxverify, minfirewall;
 
     printf("SPL: Total memory %llu\n", total_memory);
-	printf("SPL: sizeof size_t=%lu\n", sizeof(size_t));
 
 	// Initialise the kstat lock
 	mutex_init(&kmem_cache_lock, "kmem_cache_lock", MUTEX_DEFAULT, NULL); // XNU
@@ -4277,8 +4270,6 @@ spl_kmem_fini(void)
 	mutex_destroy(&kmem_cache_lock);
 #endif
 
-
-	printf("spl_kmem_fini() complete.\n");
 }
 
 static void
@@ -5421,7 +5412,7 @@ int spl_vm_pool_low(void)
 			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
-			printf("pool low: new target %llu\n", newtarget);
+			//printf("pool low: new target %llu\n", newtarget);
 		}
 		return 1;
 	}

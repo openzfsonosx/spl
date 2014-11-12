@@ -74,10 +74,6 @@ int spl_mutex_subsystem_init(void)
     zfs_group_attr = lck_grp_attr_alloc_init();
     zfs_mutex_group  = lck_grp_alloc_init("zfs-mutex", zfs_group_attr);
 
-	printf("SPL: direct mutex allocations enabled\n");
-
-
-
 
 #ifdef SPL_DEBUG_MUTEX
 		{
