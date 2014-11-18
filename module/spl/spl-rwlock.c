@@ -37,6 +37,7 @@ static lck_grp_t  *zfs_rwlock_group = NULL;
 
 uint64_t zfs_active_rwlock = 0;
 
+#define DEBUG
 
 
 void
@@ -65,12 +66,18 @@ rw_destroy(krwlock_t *rwlp)
 	atomic_dec_64(&zfs_active_rwlock);
 }
 
+
+unsigned int rwlock_detect_problem = 0;
+
 void
 rw_enter(krwlock_t *rwlp, krw_t rw)
 {
 #ifdef DEBUG
-	if (rwlp->rw_pad != 0x012345678)
-		panic("rwlock %p not initialised\n", rwlp);
+	if (rwlp->rw_pad != 0x012345678) {
+		//panic("rwlock %p not initialised\n", rwlp);
+		rwlock_detect_problem = 1;
+		return;
+	}
 #endif
 
     if (rw == RW_READER) {
