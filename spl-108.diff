@@ -1,0 +1,31 @@
+diff --git a/module/spl/Info.plist b/module/spl/Info.plist
+index 216642e..35e6daa 100644
+--- a/module/spl/Info.plist
++++ b/module/spl/Info.plist
+@@ -17,11 +17,11 @@
+ 	<key>CFBundlePackageType</key>
+ 	<string>KEXT</string>
+ 	<key>CFBundleShortVersionString</key>
+-	<string>1.0</string>
++	<string>1.3.0</string>
+ 	<key>CFBundleSignature</key>
+ 	<string>????</string>
+ 	<key>CFBundleVersion</key>
+-	<string>1.0.0</string>
++	<string>1.3.0</string>
+ 	<key>DTCompiler</key>
+ 	<string>com.apple.compilers.llvmgcc42</string>
+ 	<key>DTPlatformBuild</key>
+diff --git a/module/spl/spl-osx.c b/module/spl/spl-osx.c
+index 9b962e7..0584116 100644
+--- a/module/spl/spl-osx.c
++++ b/module/spl/spl-osx.c
+@@ -193,7 +193,7 @@ extern kern_return_t _stop(kmod_info_t *ki, void *data);
+ __private_extern__ kern_return_t spl_start(kmod_info_t *ki, void *data);
+ __private_extern__ kern_return_t spl_stop(kmod_info_t *ki, void *data);
+ 
+-__attribute__((visibility("default"))) KMOD_EXPLICIT_DECL(net.lundman.spl, "1.0.0", _start, _stop)
++__attribute__((visibility("default"))) KMOD_EXPLICIT_DECL(net.lundman.spl, "3.0.8", _start, _stop)
+ __private_extern__ kmod_start_func_t *_realmain = spl_start;
+ __private_extern__ kmod_stop_func_t *_antimain = spl_stop;
+ __private_extern__ int _kext_apple_cc = __APPLE_CC__ ;
