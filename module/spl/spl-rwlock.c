@@ -85,8 +85,11 @@ rw_enter(krwlock_t *rwlp, krw_t rw)
         atomic_inc_32((volatile uint32_t *)&rwlp->rw_readers);
         ASSERT(rwlp->rw_owner == 0);
     } else {
-        if (rwlp->rw_owner == current_thread())
-            panic("rw_enter: locking against myself!");
+        if (rwlp->rw_owner == current_thread()) {
+            //panic("rw_enter: locking against myself!");
+			rwlock_detect_problem = 1;
+			return;
+		}
         lck_rw_lock_exclusive((lck_rw_t *)&rwlp->rw_lock[0]);
         ASSERT(rwlp->rw_owner == 0);
         ASSERT(rwlp->rw_readers == 0);
