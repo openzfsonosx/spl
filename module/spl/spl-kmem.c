@@ -1734,7 +1734,7 @@ kmem_dump_init(size_t size)
 void
 kmem_dump_begin(void)
 {
-    ASSERT(panicstr != NULL);
+    //ASSERT(panicstr != NULL);
     if (kmem_dump_start != NULL) {
         kmem_cache_t *cp;
 
@@ -2225,7 +2225,7 @@ kmem_slab_prefill(kmem_cache_t *cp, kmem_slab_t *sp)
      * magazines must be returned to the slab.
      */
     ASSERT(MUTEX_HELD(&cp->cache_lock));
-    ASSERT((cache_flags & (KMF_PREFILL|KMF_BUFTAG)) == KMF_PREFILL);
+    //ASSERT((cache_flags & (KMF_PREFILL|KMF_BUFTAG)) == KMF_PREFILL);
     ASSERT(cp->cache_constructor == NULL);
     ASSERT(sp->slab_cache == cp);
     ASSERT(sp->slab_refcnt == 1);
