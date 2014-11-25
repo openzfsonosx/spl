@@ -1589,7 +1589,7 @@ segkmem_zio_init(void *zio_mem_base, void *zio_mem_end)
 	size_t heap_size;
 
 	ASSERT(zio_mem_base != NULL);
-	ASSERT(zio_mem_size != 0);
+	ASSERT(zio_mem_end  != NULL);
 
 	/*
 	 * To reduce VA space fragmentation, we set up quantum caches for the
