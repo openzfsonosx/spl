@@ -40,6 +40,10 @@ install-data-local:
 	done
 endif
 
+dist-hook:
+	sed -i 's/Release:[[:print:]]*/Release:      $(RELEASE)/' \
+		$(distdir)/META
+
 ctags:
 	$(RM) $(top_srcdir)/tags
 	find $(top_srcdir) -name .git -prune -o -name '*.[hc]' | xargs ctags
