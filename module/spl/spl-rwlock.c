@@ -37,6 +37,17 @@ static lck_grp_t  *zfs_rwlock_group = NULL;
 
 uint64_t zfs_active_rwlock = 0;
 
+#define DEBUG
+
+
+#ifdef DEBUG
+int rw_isinit(krwlock_t *rwlp)
+{
+	if (rwlp->rw_pad != 0x012345678)
+		return 0;
+	return 1;
+}
+#endif
 
 
 void
