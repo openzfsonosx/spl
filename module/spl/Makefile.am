@@ -71,16 +71,21 @@ spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	@echo ""
 	@mkdir -p spl.kext/Contents/Resources/English.lproj spl.kext/Contents/MacOS
 	@cp -f $(INFO_PLIST) spl.kext/Contents/
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(SPL_META_VERSION)" spl.kext/Contents/Info.plist
+	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(SPL_META_VERSION)" spl.kext/Contents/Info.plist
+	/usr/libexec/PlistBuddy -c "Delete :OSBundleLibraries:net.lundman.kernel.dependencies" spl.kext/Contents/Info.plist
+	/usr/libexec/PlistBuddy -c "Add :OSBundleLibraries:net.lundman.kernel.dependencies.$(SPL_META_VERSION) string 12.5.0" spl.kext/Contents/Info.plist
 	@cp -f $(PLIST_STRING) spl.kext/Contents/Resources/English.lproj/
 	@cp -f spl spl.kext/Contents/MacOS/
 	@mkdir -p spl.kext/Contents/PlugIns/KernelExports.kext/
 	@cd KernelExports && $(MAKE)
 	@cp -f KernelExports/KernelExports spl.kext/Contents/PlugIns/KernelExports.kext/
 	cp -f KernelExports/Info.plist spl.kext/Contents/PlugIns/KernelExports.kext/
+	/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier net.lundman.kernel.dependencies.$(SPL_META_VERSION)" spl.kext/Contents/PlugIns/KernelExports.kext/Info.plist
 	cp -f KernelExports/version.plist spl.kext/Contents/PlugIns/KernelExports.kext/
-	mkdir -p KernelExports.kext/Contents/MacOS
-	cp -f KernelExports/KernelExports KernelExports.kext/Contents/MacOS/
-	cp -f KernelExports/Info.plist KernelExports.kext/Contents/
+	mkdir -p KernelExports.kext
+	cp -f spl.kext/Contents/PlugIns/KernelExports.kext/KernelExports KernelExports.kext/
+	cp -f spl.kext/Contents/PlugIns/KernelExports.kext/Info.plist  KernelExports.kext/
 	@kextlibs -undef-symbols -xml spl.kext/ || echo "Ignoring errors.."
 
 install-exec-local: spl.kext
