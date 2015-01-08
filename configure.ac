@@ -28,8 +28,8 @@ AC_INIT(m4_esyscmd([awk '/^Name:/ {print $2}' META | tr -d '\n']),
 	m4_esyscmd([awk '/^Version:/ {print $2}' META | tr -d '\n']))
 AC_LANG(C)
 SPL_AC_META
-SPL_AC_CONFIG
 AC_CONFIG_AUX_DIR([config])
+SPL_AC_CONFIG
 AC_CANONICAL_SYSTEM
 AM_MAINTAINER_MODE
 AM_SILENT_RULES
