@@ -284,6 +284,55 @@ static int kstat_handle_ui64 SYSCTL_HANDLER_ARGS
     return error;
 }
 
+static int kstat_handle_string SYSCTL_HANDLER_ARGS
+{
+	int error = 0;
+	sysctl_leaf_t *params = (sysctl_leaf_t*)(arg1);
+	kstat_named_t *named = params->l_named;
+	kstat_t *ksp  = params->l_ksp;
+	kmutex_t *lock = ksp->ks_lock;
+	int lock_needs_release = 0;
+
+	if (lock && !MUTEX_NOT_HELD(lock)) {
+		mutex_enter(lock);
+		lock_needs_release = 1;
+	}
+    if(!error && req->newptr) {
+        /*
+         * Write request - first read add current values for the kstat
+         * (remember that is sysctl is likely only one of many
+         *  values that make up the kstat).
+         */
+        if (ksp->ks_update) {
+            ksp->ks_update(ksp, KSTAT_READ);
+        }
+
+        /* Copy the new value from user space */
+        named->value.string.addr.ptr = (char *)(req->newptr);
+		named->value.string.len = strlen((char *)(req->newptr))+1;
+
+        /* and invoke the update operation */
+        if (ksp->ks_update) {
+            error = ksp->ks_update(ksp, KSTAT_WRITE);
+        }
+    } else {
+        /*
+         * Read request
+         */
+        if (ksp->ks_update) {
+            ksp->ks_update(ksp, KSTAT_READ);
+        }
+        error = SYSCTL_OUT(req, named->value.string.addr.ptr,
+						   named->value.string.len);
+    }
+
+	if (lock_needs_release) {
+		mutex_exit(lock);
+	}
+
+    return error;
+}
+
 kstat_t *
 kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
              uchar_t ks_type,
@@ -448,10 +497,13 @@ kstat_install(kstat_t *ksp)
                     val->l_oid.oid_arg1 = &named->value.ul;
                     break;
                 case KSTAT_DATA_STRING:
-                    val->l_oid.oid_handler = sysctl_handle_string;
+					params = (sysctl_leaf_t*)kalloc(sizeof(sysctl_leaf_t));
+					params->l_named = named;
+					params->l_ksp = ksp;
+                    val->l_oid.oid_handler = kstat_handle_string;
                     val->l_oid.oid_kind = CTLTYPE_STRING|oid_permissions|CTLFLAG_OID2;
                     val->l_oid.oid_fmt = "S";
-                    val->l_oid.oid_arg1 = &named->value.string;
+                    val->l_oid.oid_arg1 = (void*)params;
                     break;
 
                 case KSTAT_DATA_CHAR:
@@ -487,7 +539,8 @@ remove_child_sysctls(ekstat_t *e)
 		}
 
 		if (named_base[i].data_type == KSTAT_DATA_INT64 ||
-			named_base[i].data_type == KSTAT_DATA_UINT64) {
+			named_base[i].data_type == KSTAT_DATA_UINT64 ||
+			named_base[i].data_type == KSTAT_DATA_STRING) {
 
 			sysctl_leaf_t *leaf = (sysctl_leaf_t*)vals_base[i].l_oid.oid_arg1;
 			kfree(leaf, sizeof(sysctl_leaf_t));

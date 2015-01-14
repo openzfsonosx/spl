@@ -113,6 +113,11 @@ uint64_t            pressure_bytes_target = 0;
 
 #define MULT 1
 
+//#define KEXT_VERSION #SPL_META_VERSION " " #SPL_META_RELEASE #SPL_DEBUG_STR
+
+static char *kext_version = SPL_META_VERSION "-" SPL_META_RELEASE SPL_DEBUG_STR;
+
+
 //===============================================================
 // Illumos Variables
 //===============================================================
@@ -466,6 +471,7 @@ typedef struct spl_stats {
     kstat_named_t spl_active_rwlock;
     kstat_named_t spl_monitor_thread_wake_count;
     kstat_named_t spl_simulate_pressure;
+	kstat_named_t spl_kext_version;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -475,6 +481,7 @@ static spl_stats_t spl_stats = {
     {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
     {"simulate_pressure", KSTAT_DATA_UINT64},
+    {"kext_version", KSTAT_DATA_STRING},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -3969,6 +3976,9 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_active_mutex.value.ui64 = zfs_active_mutex;
 		ks->spl_active_rwlock.value.ui64 = zfs_active_rwlock;
 		ks->spl_simulate_pressure.value.ui64 = 0;
+		ks->spl_kext_version.value.string.addr.ptr = kext_version;
+		ks->spl_kext_version.value.string.len = strlen(kext_version)+1;
+
 	}
 
 	return (0);
@@ -3990,6 +4000,7 @@ spl_kmem_init(uint64_t total_memory)
 	mutex_init(&kmem_cache_kstat_lock, "kmem_kstat_lock", MUTEX_DEFAULT, NULL); // XNU
 
     spl_kstat_init();
+
 
     /*
      * Small-memory systems (< 24 MB) can't handle kmem_flags overhead.
