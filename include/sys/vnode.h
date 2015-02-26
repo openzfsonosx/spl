@@ -146,20 +146,6 @@ extern int  zfs_vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base,
 
 extern int vn_remove(char *fnamep, enum uio_seg seg, enum rm dirflag);
 extern int vn_rename(char *from, char *to, enum uio_seg seg);
-extern int secpolicy_vnode_create_gid(const cred_t *cred);
-extern int secpolicy_vnode_setid_retain(struct vnode *vp, const cred_t *cred, boolean_t issuidroot);
-extern int secpolicy_vnode_remove(struct vnode *vp, const cred_t *cr);
-extern int secpolicy_vnode_setids_setgids(struct vnode *vp, const cred_t *cr,
-                                          gid_t gid);
-extern int secpolicy_vnode_setdac(struct vnode *vp, const cred_t *cr, uid_t u);
-extern int secpolicy_vnode_chown( struct vnode *vp, const cred_t *cr, uid_t u);
-extern int secpolicy_xvattr(struct vnode *dvp, vattr_t *vap,
-                            uid_t, const cred_t *cr, enum vtype);
-extern int secpolicy_setid_clear(vattr_t *vap, struct vnode *vp,
-                                 const cred_t *cr);
-extern int secpolicy_basic_link(struct vnode *svp, const cred_t *cr);
-extern int secpolicy_fs_mount_clearopts(const cred_t *cr, struct mount *);
-extern int secpolicy_fs_mount(const cred_t *cr, struct vnode *,struct mount *);
 
 #define LK_RETRY  0
 #define LK_SHARED 0
