@@ -41,7 +41,7 @@ secpolicy_sys_config(cred_t *cr, int checkonly __unused)
 {
 	return (priv_check_cred(cr, PRIV_ZFS_POOL_CONFIG, 0));
 }
-#elif defined(__OPPLE__)
+#elif defined(__APPLE__)
 int
 secpolicy_sys_config(const cred_t *cr, boolean_t checkonly)
 {
