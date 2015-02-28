@@ -113,9 +113,14 @@ uint64_t            pressure_bytes_target = 0;
 
 #define MULT 1
 
-//#define KEXT_VERSION #SPL_META_VERSION " " #SPL_META_RELEASE #SPL_DEBUG_STR
+static char kext_version[64] = SPL_META_VERSION "-" SPL_META_RELEASE SPL_DEBUG_STR;
 
-static char *kext_version = SPL_META_VERSION "-" SPL_META_RELEASE SPL_DEBUG_STR;
+struct sysctl_oid_list sysctl__spl_children;
+SYSCTL_DECL(_spl);
+SYSCTL_NODE( , OID_AUTO, spl, CTLFLAG_RD, 0, "");
+SYSCTL_STRING(_spl, OID_AUTO, kext_version,
+    CTLFLAG_RD | CTLFLAG_LOCKED,
+    kext_version, 0, "SPL KEXT Version");
 
 
 //===============================================================
@@ -471,7 +476,6 @@ typedef struct spl_stats {
     kstat_named_t spl_active_rwlock;
     kstat_named_t spl_monitor_thread_wake_count;
     kstat_named_t spl_simulate_pressure;
-	kstat_named_t spl_kext_version;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -481,7 +485,6 @@ static spl_stats_t spl_stats = {
     {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
     {"simulate_pressure", KSTAT_DATA_UINT64},
-    {"kext_version", KSTAT_DATA_STRING},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -3976,9 +3979,6 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_active_mutex.value.ui64 = zfs_active_mutex;
 		ks->spl_active_rwlock.value.ui64 = zfs_active_rwlock;
 		ks->spl_simulate_pressure.value.ui64 = 0;
-		ks->spl_kext_version.value.string.addr.ptr = kext_version;
-		ks->spl_kext_version.value.string.len = strlen(kext_version)+1;
-
 	}
 
 	return (0);
@@ -3993,6 +3993,9 @@ spl_kmem_init(uint64_t total_memory)
     size_t maxverify, minfirewall;
 
     printf("SPL: Total memory %llu\n", total_memory);
+
+	sysctl_register_oid(&sysctl__spl);
+	sysctl_register_oid(&sysctl__spl_kext_version);
 
 	// Initialise the kstat lock
 	mutex_init(&kmem_cache_lock, "kmem_cache_lock", MUTEX_DEFAULT, NULL); // XNU
@@ -4241,6 +4244,9 @@ spl_kmem_init(uint64_t total_memory)
 void
 spl_kmem_fini(void)
 {
+	sysctl_unregister_oid(&sysctl__spl_kext_version);
+	sysctl_unregister_oid(&sysctl__spl);
+
     kmem_cache_applyall(kmem_cache_magazine_disable, NULL, TQ_SLEEP);
 
 	kstat_delete(spl_ksp);
