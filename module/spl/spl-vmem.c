@@ -483,8 +483,6 @@ vmem_hash_insert(vmem_t *vmp, vmem_seg_t *vsp)
 //											VMEM_STACK_DEPTH);
 //		vsp->vs_thread = curthread;
 
-#warning - check what these do.
-
 		vsp->vs_depth = 0;
 		vsp->vs_thread = 0;
 		vsp->vs_timestamp = gethrtime();
