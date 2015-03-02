@@ -60,6 +60,7 @@ extern  void  rw_downgrade(krwlock_t *);
 extern  int   rw_tryupgrade(krwlock_t *);
 extern  int   rw_write_held(krwlock_t *);
 extern  int   rw_lock_held(krwlock_t *);
+extern  int   rw_isinit(krwlock_t *);
 
 int  spl_rwlock_init(void);
 void spl_rwlock_fini(void);
