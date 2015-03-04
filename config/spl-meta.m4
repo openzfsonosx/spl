@@ -10,6 +10,7 @@
 ###############################################################################
 
 AC_DEFUN([SPL_AC_META], [
+	AC_PROG_AWK
 	AC_MSG_CHECKING([metadata])
 
 	META="$srcdir/META"
