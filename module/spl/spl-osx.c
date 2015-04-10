@@ -114,17 +114,19 @@ int spl_system_inshutdown(void)
 int
 ddi_copyin(const void *from, void *to, size_t len, int flags)
 {
-	int ret;
-    /* Fake ioctl() issued by kernel, 'from' is a kernel address */
-    if (flags & FKIOCTL) {
-        memcpy(to, from, len);
-        return 0;
-    }
+	int ret = 0;
+
 	/* stac/clac defined from 10.10, but only enforced from 10.10.3 */
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
 	if (spl_cpufeature_smap) stac();
 #endif
-    ret = copyin((user_addr_t)from, (void *)to, len);
+
+    /* Fake ioctl() issued by kernel, 'from' is a kernel address */
+    if (flags & FKIOCTL)
+		bcopy(from, to, len);
+	else
+		ret = copyin((user_addr_t)from, (void *)to, len);
+
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
 	if (spl_cpufeature_smap) clac();
 #endif
@@ -134,17 +136,18 @@ ddi_copyin(const void *from, void *to, size_t len, int flags)
 int
 ddi_copyout(const void *from, void *to, size_t len, int flags)
 {
-	int ret;
-    /* Fake ioctl() issued by kernel, 'from' is a kernel address */
-    if (flags & FKIOCTL) {
-        memcpy(to, from, len);
-        return 0;
-    }
+	int ret = 0;
 
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
 	if (spl_cpufeature_smap) stac();
 #endif
-    ret = copyout(from, (user_addr_t)to, len);
+
+    /* Fake ioctl() issued by kernel, 'from' is a kernel address */
+    if (flags & FKIOCTL)
+		bcopy(from, to, len);
+	else
+		ret = copyout(from, (user_addr_t)to, len);
+
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
 	if (spl_cpufeature_smap) clac();
 #endif
