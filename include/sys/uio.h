@@ -143,6 +143,7 @@ static inline int uiocopy(const char *p, size_t n, enum uio_rw rw, struct uio *u
     struct uio *nuio = uio_duplicate(uio);                              \
     unsigned long long x = uio_resid(uio);                              \
     if (!nuio) return ENOMEM;                                           \
+	uio_setrw(nuio, rw);												\
     result = uiomove(p,n,nuio);                                         \
     *cbytes = x-uio_resid(nuio);                                        \
     uio_free(nuio);                                                     \
