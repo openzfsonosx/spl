@@ -258,8 +258,8 @@ ddi_soft_state_fini(void **state_p)
 	static char msg[] = "ddi_soft_state_fini:";
 
 	if (state_p == NULL || (ss = *state_p) == NULL) {
-		cmn_err(CE_WARN, "%s null handle",
-		    msg);
+		//cmn_err(CE_WARN, "%s null handle",
+		//  msg);
 		return;
 	}
 
@@ -356,4 +356,3 @@ ddi_remove_minor_node(dev_info_t *dip, char *name)
         dip->devb = NULL;
     }
 }
-

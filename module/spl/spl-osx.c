@@ -143,10 +143,11 @@ ddi_copyout(const void *from, void *to, size_t len, int flags)
 #endif
 
     /* Fake ioctl() issued by kernel, 'from' is a kernel address */
-    if (flags & FKIOCTL)
+    if (flags & FKIOCTL) {
 		bcopy(from, to, len);
-	else
+	} else {
 		ret = copyout(from, (user_addr_t)to, len);
+	}
 
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
 	if (spl_cpufeature_smap) clac();

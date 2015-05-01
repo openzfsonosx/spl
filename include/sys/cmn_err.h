@@ -44,17 +44,8 @@
 
 #ifdef _KERNEL
 
-void kprintf(const char *fmt, ...);
-
-# define cmn_err(ce, fmt, args...)       \
-        do {                                 \
-                if (ce == CE_PANIC)              \
-                        panic(fmt, ##args);          \
-                else                             \
-                        kprintf(fmt, ##args);        \
-        } while(0)
-
 extern void vcmn_err(int, const char *, __va_list);
+extern void cmn_err(int, const char *, ...);
 
 #endif /* _KERNEL */
 

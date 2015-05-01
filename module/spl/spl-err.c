@@ -29,42 +29,38 @@
 #include <sys/cmn_err.h>
 #include <spl-debug.h>
 
-#ifdef SS_DEBUG_SUBSYS
-#undef SS_DEBUG_SUBSYS
-#endif
-
-#define SS_DEBUG_SUBSYS SS_GENERIC
-
-#ifdef DEBUG_LOG
-static char ce_prefix[CE_IGNORE][10] = { "", "NOTICE: ", "WARNING: ", "" };
-static char ce_suffix[CE_IGNORE][2] = { "", "\n", "\n", "" };
-#endif
-
-void
-vpanic(const char *fmt, va_list ap)
-{
-	char msg[MAXMSGLEN];
-
-	vsnprintf(msg, MAXMSGLEN - 1, fmt, ap);
-	PANIC("%s", msg);
-} /* vpanic() */
 
 void
 vcmn_err(int ce, const char *fmt, va_list ap)
 {
 	char msg[MAXMSGLEN];
 
-	if (ce == CE_PANIC)
-		vpanic(fmt, ap);
+	vsnprintf(msg, MAXMSGLEN - 1, fmt, ap);
 
-	if (ce != CE_NOTE) {
-		vsnprintf(msg, MAXMSGLEN - 1, fmt, ap);
-
-		if (fmt[0] == '!')
-			SDEBUG(SD_INFO, "%s%s%s",
-			       ce_prefix[ce], msg, ce_suffix[ce]);
-		else
-			SERROR("%s%s%s", ce_prefix[ce], msg, ce_suffix[ce]);
+	switch (ce) {
+		case CE_IGNORE:
+			break;
+        case CE_CONT:
+			printf("%s", msg);
+			break;
+        case CE_NOTE:
+			printf("SPL: Notice: %s\n", msg);
+			break;
+        case CE_WARN:
+			printf("SPL: Warning: %s\n", msg);
+			break;
+        case CE_PANIC:
+			PANIC("%s", msg);
+			break;
 	}
 } /* vcmn_err() */
 
+void
+cmn_err(int ce, const char *fmt, ...)
+{
+        va_list ap;
+
+        va_start(ap, fmt);
+        vcmn_err(ce, fmt, ap);
+        va_end(ap);
+} /* cmn_err() */
