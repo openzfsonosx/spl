@@ -107,9 +107,8 @@ do {									\
 
 #define PANIC(fmt, a...)						\
 do {									\
-	spl_debug_msg(NULL, 0, 0,					\
-	     __FILE__, __FUNCTION__, __LINE__,	fmt, ## a);		\
-	spl_debug_bug(__FILE__, __FUNCTION__, __LINE__, 0);		\
+	printf(NULL, 0, 0,					\
+		   __FILE__, __FUNCTION__, __LINE__,	fmt, ## a); \
 } while (0)
 
 
