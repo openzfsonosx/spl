@@ -73,9 +73,16 @@ enum vcexcl	{ NONEXCL, EXCL };
 #define ATTR_XVATTR	VNODE_ATTR_va_dataprotect_class  /* (1 << 31)*/
 #define AT_XVATTR	ATTR_XVATTR
 
-#define SPL_MASK_VAP(X) do {											\
+#define SPL_MASK_VAP(X) int _spl_va_dataprotect_class=0;				\
+	if (VATTR_IS_ACTIVE((X), va_dataprotect_class)) {					\
+		_spl_va_dataprotect_class = 1;									\
 		VATTR_CLEAR_ACTIVE((X), va_dataprotect_class); /* ATTR_XVATTR */ \
-	} while(0)
+	}
+
+#define SPL_RESTORE_VAP(X) if (_spl_va_dataprotect_class) { \
+		VATTR_SET_ACTIVE((X), va_dataprotect_class);		\
+	}
+
 
 
 #define B_INVAL		0x01
