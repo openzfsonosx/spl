@@ -4,7 +4,7 @@ This is spl.kext, the Solaris Portability Layer (SPL).
 
 ** spl.kext is a dependency of zfs.kext, so start with this repository.
 
-It is tested primarily on Mac OS X Mavericks.
+It is tested primarily on Mac OS X Yosemite.
 
 See http://openzfsonosx.org/ for more information.
 
