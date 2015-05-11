@@ -60,8 +60,23 @@ typedef int vcexcl_t;
 enum vcexcl	{ NONEXCL, EXCL };
 
 
-#define ATTR_XVATTR	(1 << 31)
+/*
+ * Missing vop mappings between ZFS and OSX are listed here. To ensure we
+ * do not accidentally act on a misinterpreted bit, we mask out any collisions
+ * when given a vop from VFS. We initially defined it as first free VFS bit
+ * but Apple brought in new features causing trouble. So now we take known
+ * bits we know we will never (need to) support.
+ * We will never set SUPPORTED so VFS will not act on the reply.
+ * O3X does not use XVATTR, as VFS defines separate vnop calls for XATTRs, this
+ * is mostly to avoid littering #ifdef around ZFS.
+ */
+#define ATTR_XVATTR	VNODE_ATTR_va_dataprotect_class  /* (1 << 31)*/
 #define AT_XVATTR	ATTR_XVATTR
+
+#define SPL_MASK_VAP(X) do {											\
+		VATTR_CLEAR_ACTIVE((X), va_dataprotect_class); /* ATTR_XVATTR */ \
+	} while(0)
+
 
 #define B_INVAL		0x01
 #define B_TRUNC		0x02
