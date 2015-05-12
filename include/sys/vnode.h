@@ -61,29 +61,12 @@ enum vcexcl	{ NONEXCL, EXCL };
 
 
 /*
- * Missing vop mappings between ZFS and OSX are listed here. To ensure we
- * do not accidentally act on a misinterpreted bit, we mask out any collisions
- * when given a vop from VFS. We initially defined it as first free VFS bit
- * but Apple brought in new features causing trouble. So now we take known
- * bits we know we will never (need to) support.
- * We will never set SUPPORTED so VFS will not act on the reply.
- * O3X does not use XVATTR, as VFS defines separate vnop calls for XATTRs, this
- * is mostly to avoid littering #ifdef around ZFS.
+ * OSX uses separate vnop getxattr and setxattr to deal with XATTRs, so
+ * we never get vop&XVATTR set from VFS. All internal checks for it in
+ * ZFS is not required.
  */
-#define ATTR_XVATTR	VNODE_ATTR_va_dataprotect_class  /* (1 << 31)*/
+#define ATTR_XVATTR	0
 #define AT_XVATTR	ATTR_XVATTR
-
-#define SPL_MASK_VAP(X) int _spl_va_dataprotect_class=0;				\
-	if (VATTR_IS_ACTIVE((X), va_dataprotect_class)) {					\
-		_spl_va_dataprotect_class = 1;									\
-		VATTR_CLEAR_ACTIVE((X), va_dataprotect_class); /* ATTR_XVATTR */ \
-	}
-
-#define SPL_RESTORE_VAP(X) if (_spl_va_dataprotect_class) { \
-		VATTR_SET_ACTIVE((X), va_dataprotect_class);		\
-	}
-
-
 
 #define B_INVAL		0x01
 #define B_TRUNC		0x02
