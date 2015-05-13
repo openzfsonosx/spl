@@ -169,8 +169,20 @@ extern int      taskq_member(taskq_t *, kthread_t *);
 	    (taskq_create(a, b, c, d, e, f))
 #define	taskq_create_sysdc(a, b, d, e, p, dc, f) \
 	    (taskq_create(a, b, maxclsyspri, d, e, f))
+
+#if 0
 extern void	taskq_dispatch_ent(taskq_t *, task_func_t, void *, uint_t,
     taskq_ent_t *);
+#else
+	static inline void taskq_dispatch_ent(taskq_t *tq, task_func_t func,
+										  void *arg, uint_t flags,
+										  taskq_ent_t *tqe) {
+		taskq_ent_t *xtqe;
+		xtqe = (taskq_ent_t *)taskq_dispatch(tq, func, arg, flags);
+		memcpy(tqe, xtqe, sizeof(*xtqe));
+	}
+
+#endif
 extern int	taskq_empty_ent(taskq_ent_t *);
 extern void	taskq_init_ent(taskq_ent_t *);
 

@@ -972,12 +972,14 @@ taskq_init_ent(taskq_ent_t *t)
  *
  */
 void
-taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
+taskq_dispatch_entXXX(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
    taskq_ent_t *tqe)
 {
     //#ifdef NOTYET /* copied and pasted from taskq_dispatch */
 	taskq_bucket_t *bucket = NULL;	/* Which bucket needs extension */
 	taskq_ent_t *tqe1;
+
+	panic("SPL: Broken taskq_dispatch_ent called\n");
 
 	ASSERT(tq != NULL);
 	ASSERT(func != NULL);
