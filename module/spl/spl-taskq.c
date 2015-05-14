@@ -597,18 +597,40 @@ uint_t taskq_smtbf = UINT_MAX;    /* mean time between injected failures */
 }
 
 /*
+ * Prepend 'tqe' to the beginning of l
+ */
+#define TQ_PREPEND(l, tqe) {                                    \
+        tqe->tqent_next = l.tqent_next;                         \
+        tqe->tqent_prev = &l;                                   \
+        tqe->tqent_next->tqent_prev = tqe;                      \
+        tqe->tqent_prev->tqent_next = tqe;                      \
+	}
+
+
+/*
  * Schedule a task specified by func and arg into the task queue entry tqe.
  */
-#define	TQ_ENQUEUE(tq, tqe, func, arg) {			\
-	TQ_APPEND(tq->tq_task, tqe);				\
-	tqe->tqent_func = (func);				\
-	tqe->tqent_arg = (arg);					\
-	tq->tq_tasks++;						\
-	if (tq->tq_tasks - tq->tq_executed > tq->tq_maxtasks)	\
-		tq->tq_maxtasks = tq->tq_tasks - tq->tq_executed;	\
-	cv_signal(&tq->tq_dispatch_cv);				\
-	DTRACE_PROBE2(taskq__enqueue, taskq_t *, tq, taskq_ent_t *, tqe); \
-}
+#define TQ_DO_ENQUEUE(tq, tqe, func, arg, front) {                      \
+        ASSERT(MUTEX_HELD(&tq->tq_lock));                               \
+		if (front) {                                                    \
+			TQ_PREPEND(tq->tq_task, tqe);								\
+		} else {                                                        \
+			TQ_APPEND(tq->tq_task, tqe);								\
+		}                                                               \
+        tqe->tqent_func = (func);                                       \
+        tqe->tqent_arg = (arg);                                         \
+        tq->tq_tasks++;                                                 \
+        if (tq->tq_tasks - tq->tq_executed > tq->tq_maxtasks)           \
+			tq->tq_maxtasks = tq->tq_tasks - tq->tq_executed;			\
+        cv_signal(&tq->tq_dispatch_cv);                                 \
+        DTRACE_PROBE2(taskq__enqueue, taskq_t *, tq, taskq_ent_t *, tqe); \
+	}
+
+#define TQ_ENQUEUE(tq, tqe, func, arg)			\
+	TQ_DO_ENQUEUE(tq, tqe, func, arg, 0)
+
+#define TQ_ENQUEUE_FRONT(tq, tqe, func, arg)	\
+	TQ_DO_ENQUEUE(tq, tqe, func, arg, 1)
 
 /*
  * Do-nothing task which may be used to prepopulate thread caches.
@@ -871,7 +893,14 @@ taskq_dispatch(taskq_t *tq, task_func_t func, void *arg, uint_t flags)
 			mutex_exit(&tq->tq_lock);
 			return ((uintptr_t)NULL);
 		}
-		TQ_ENQUEUE(tq, tqe, func, arg);
+		/* Make sure we start without any flags */
+		tqe->tqent_flags = 0;
+
+		if (flags & TQ_FRONT) {
+			TQ_ENQUEUE_FRONT(tq, tqe, func, arg);
+		} else {
+			TQ_ENQUEUE(tq, tqe, func, arg);
+		}
 		mutex_exit(&tq->tq_lock);
 		return ((taskqid_t)tqe);
 	}
@@ -967,101 +996,32 @@ taskq_init_ent(taskq_ent_t *t)
 
 /*
  *
- * This function is broken, and is currently what fails when we
- * try to create a pool
  *
  */
 void
-taskq_dispatch_entXXX(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
+taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
    taskq_ent_t *tqe)
 {
-    //#ifdef NOTYET /* copied and pasted from taskq_dispatch */
-	taskq_bucket_t *bucket = NULL;	/* Which bucket needs extension */
-	taskq_ent_t *tqe1;
-
-	panic("SPL: Broken taskq_dispatch_ent called\n");
-
 	ASSERT(tq != NULL);
 	ASSERT(func != NULL);
-
-	if (!(tq->tq_flags & TASKQ_DYNAMIC)) {
-		/*
-		 * TQ_NOQUEUE flag can't be used with non-dynamic task queues.
-		 */
-		ASSERT(! (flags & TQ_NOQUEUE));
-		/*
-		 * Enqueue the task to the underlying queue.
-		 */
-		mutex_enter(&tq->tq_lock);
-
-		TASKQ_S_RANDOM_DISPATCH_FAILURE(tq, flags);
-
-		TQ_ENQUEUE(tq, tqe, func, arg);
-		mutex_exit(&tq->tq_lock);
-		return;
-	}
+	ASSERT(!(tq->tq_flags & TASKQ_DYNAMIC));
 
 	/*
-	 * Dynamic taskq dispatching.
+	 * Mark it as a prealloc'd task.  This is important
+	 * to ensure that we don't free it later.
 	 */
-	ASSERT(!(flags & TQ_NOALLOC));
-	TASKQ_D_RANDOM_DISPATCH_FAILURE(tq, flags);
-
-	if ((tqe = taskq_bucket_dispatch(tq->tq_buckets, func, arg)) != NULL)
-		return;	/* Fastpath */
-	bucket = tq->tq_buckets;
-
+	tqe->tqent_flags |= TQENT_FLAG_PREALLOC;
 	/*
-	 * At this point we either scheduled a task and (tqe != NULL) or failed
-	 * (tqe == NULL). Try to recover from fails.
-	 */
-
-	/*
-	 * For KM_SLEEP dispatches, try to extend the bucket and retry dispatch.
-	 */
-	if ((tqe == NULL) && !(flags & TQ_NOSLEEP)) {
-		/*
-		 * taskq_bucket_extend() may fail to do anything, but this is
-		 * fine - we deal with it later. If the bucket was successfully
-		 * extended, there is a good chance that taskq_bucket_dispatch()
-		 * will get this new entry, unless someone is racing with us and
-		 * stealing the new entry from under our nose.
-		 * taskq_bucket_extend() may sleep.
-		 */
-		taskq_bucket_extend(bucket);
-		TQ_STAT(bucket, tqs_disptcreates);
-		if ((tqe = taskq_bucket_dispatch(bucket, func, arg)) != NULL)
-			return;
-	}
-
-	ASSERT(bucket != NULL);
-	/*
-	 * Since there are not enough free entries in the bucket, extend it
-	 * in the background using backing queue.
+	 * Enqueue the task to the underlying queue.
 	 */
 	mutex_enter(&tq->tq_lock);
-	if ((tqe1 = taskq_ent_alloc(tq, TQ_NOSLEEP)) != NULL) {
-		TQ_ENQUEUE(tq, tqe1, taskq_bucket_extend,
-		    bucket);
-	} else {
-		TQ_STAT(bucket, tqs_nomem);
-	}
 
-	/*
-	 * Dispatch failed and we can't find an entry to schedule a task.
-	 * Revert to the backing queue unless TQ_NOQUEUE was asked.
-	 */
-	if ((tqe == NULL) && !(flags & TQ_NOQUEUE)) {
-		if ((tqe = taskq_ent_alloc(tq, flags)) != NULL) {
-			TQ_ENQUEUE(tq, tqe, func, arg);
-		} else {
-			TQ_STAT(bucket, tqs_nomem);
-		}
+	if (flags & TQ_FRONT) {
+		TQ_ENQUEUE_FRONT(tq, tqe, func, arg);
+	} else {
+		TQ_ENQUEUE(tq, tqe, func, arg);
 	}
 	mutex_exit(&tq->tq_lock);
-
-	return;
-    //#endif
 }
 
 
@@ -1186,6 +1146,8 @@ taskq_thread(void *arg)
 	taskq_ent_t *tqe;
 	callb_cpr_t cprinfo;
 	hrtime_t start, end;
+	boolean_t freeit;
+
 	CALLB_CPR_INIT(&cprinfo, &tq->tq_lock, callb_generic_cpr,  tq->tq_name);
 	mutex_enter(&tq->tq_lock);
 	while (tq->tq_flags & TASKQ_ACTIVE) {
@@ -1202,6 +1164,23 @@ taskq_thread(void *arg)
 		tqe->tqent_next->tqent_prev = tqe->tqent_prev;
 		mutex_exit(&tq->tq_lock);
 
+		/*
+		 * For prealloc'd tasks, we don't free anything.  We
+		 * have to check this now, because once we call the
+		 * function for a prealloc'd taskq, we can't touch the
+		 * tqent any longer (calling the function returns the
+		 * ownershp of the tqent back to caller of
+		 * taskq_dispatch.)
+		 */
+		if ((!(tq->tq_flags & TASKQ_DYNAMIC)) &&
+			(tqe->tqent_flags & TQENT_FLAG_PREALLOC)) {
+			/* clear pointers to assist assertion checks */
+			tqe->tqent_next = tqe->tqent_prev = NULL;
+			freeit = B_FALSE;
+		} else {
+			freeit = B_TRUE;
+		}
+
 		rw_enter(&tq->tq_threadlock, RW_READER);
 		start = gethrtime();
 		DTRACE_PROBE2(taskq__exec__start, taskq_t *, tq,
@@ -1216,7 +1195,8 @@ taskq_thread(void *arg)
 		tq->tq_totaltime += end - start;
 		tq->tq_executed++;
 
-		taskq_ent_free(tq, tqe);
+		if (freeit)
+			taskq_ent_free(tq, tqe);
 	}
 	tq->tq_nthreads--;
 	cv_broadcast(&tq->tq_wait_cv);
