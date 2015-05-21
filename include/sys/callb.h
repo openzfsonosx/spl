@@ -59,4 +59,3 @@ typedef struct callb_cpr {
 
 
 #endif  /* _SPL_CALLB_H */
-

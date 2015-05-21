@@ -78,7 +78,8 @@
 #define curproc             (struct proc *)current_proc()
 //#define max_ncpus			num_possible_cpus()
 //#define CPU_SEQID			smp_processor_id()
-#define CPU_SEQID       (0)
+extern int cpu_number(void);
+#define CPU_SEQID       (cpu_number())
 #define _NOTE(x)
 #define is_system_labeled()		0
 

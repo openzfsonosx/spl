@@ -160,6 +160,26 @@ do {									\
 #endif /* NDEBUG */
 
 /*
+ * IMPLY and EQUIV are assertions of the form:
+ *
+ *      if (a) then (b)
+ * and
+ *      if (a) then (b) *AND* if (b) then (a)
+ */
+#if DEBAG
+#define IMPLY(A, B) \
+        ((void)(((!(A)) || (B)) || \
+            panic("(" #A ") implies (" #B ")", __FILE__, __LINE__)))
+#define EQUIV(A, B) \
+        ((void)((!!(A) == !!(B)) || \
+            panic("(" #A ") is equivalent to (" #B ")", __FILE__, __LINE__)))
+#else
+#define IMPLY(A, B) ((void)0)
+#define EQUIV(A, B) ((void)0)
+#endif
+
+
+/*
  * Compile-time assertion. The condition 'x' must be constant.
  */
 #define	CTASSERT_GLOBAL(x)		_CTASSERT(x, __LINE__)
