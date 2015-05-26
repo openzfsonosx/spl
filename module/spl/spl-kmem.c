@@ -2920,8 +2920,6 @@ kmem_cache_kstat_update(kstat_t *ksp, int rw)
     int cpu_seqid;
     long reap;
 
-    ASSERT(MUTEX_HELD(&kmem_cache_kstat_lock));
-
     if (rw == KSTAT_WRITE)
         return (EACCES);
 
