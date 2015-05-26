@@ -2839,8 +2839,6 @@ kmem_cache_update(kmem_cache_t *cp)
     int need_hash_rescale = 0;
     int need_magazine_resize = 0;
 
-    ASSERT(MUTEX_HELD(&kmem_cache_lock));
-
     /*
      * If the cache has become much larger or smaller than its hash table,
      * fire off a request to rescale the hash table.

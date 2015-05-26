@@ -2412,9 +2412,9 @@ taskq_kstat_update(kstat_t *ksp, int rw)
 		return (EACCES);
 
 #ifdef __APPLE__
-	tqsp->tq_pid.value.ui64 = proc_pid(tq->tq_proc);
+	tqsp->tq_pid.value.ui64 = 0; /* kernel_task'd pid is 0 */
 #else
-	tqsp->tq_pid.value.ui64 = proc_pid(tq->tq_proc->p_pid;
+	tqsp->tq_pid.value.ui64 = proc_pid(tq->tq_proc->p_pid);
 #endif
 	tqsp->tq_tasks.value.ui64 = tq->tq_tasks;
 	tqsp->tq_executed.value.ui64 = tq->tq_executed;
