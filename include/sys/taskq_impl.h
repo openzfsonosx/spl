@@ -142,7 +142,7 @@ struct taskq {
 	}		tq_thr;
 
 	list_node_t	tq_cpupct_link;	/* linkage for taskq_cpupct_list */
-	struct proc	*tq_proc;	/* process for taskq threads */
+	proc_t	*tq_proc;	/* process for taskq threads */
 	int		tq_cpupart;	/* cpupart id bound to */
 	uint_t		tq_DC;		/* duty cycle for SDC */
 

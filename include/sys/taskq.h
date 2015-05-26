@@ -76,9 +76,9 @@ extern taskq_t	*taskq_create(const char *, int, pri_t, int, int, uint_t);
 extern taskq_t	*taskq_create_instance(const char *, int, int, pri_t, int,
     int, uint_t);
 extern taskq_t	*taskq_create_proc(const char *, int, pri_t, int, int,
-    struct proc *, uint_t);
+    proc_t *, uint_t);
 extern taskq_t	*taskq_create_sysdc(const char *, int, int, int,
-    struct proc *, uint_t, uint_t);
+    proc_t *, uint_t, uint_t);
 extern taskqid_t taskq_dispatch(taskq_t *, task_func_t, void *, uint_t);
 extern void	nulltask(void *);
 extern void	taskq_destroy(taskq_t *);

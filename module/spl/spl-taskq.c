@@ -579,7 +579,7 @@ int taskq_search_depth = TASKQ_SEARCH_DEPTH;
  * Static functions.
  */
 static taskq_t	*taskq_create_common(const char *, int, int, pri_t, int,
-    int, struct proc *, uint_t, uint_t);
+    int, proc_t *, uint_t, uint_t);
 static void taskq_thread(void *);
 static void taskq_d_thread(taskq_ent_t *);
 static void taskq_bucket_extend(void *);
@@ -1647,9 +1647,9 @@ taskq_thread(void *arg)
 	VERIFY3S(thread_id, <=, tq->tq_nthreads_max);
 
 	if (tq->tq_nthreads_max == 1)
-		tq->tq_thread = curthread;
+		tq->tq_thread = (kthread_t *)curthread;
 	else
-		tq->tq_threadlist[thread_id - 1] = curthread;
+		tq->tq_threadlist[thread_id - 1] = (kthread_t *)curthread;
 
 	/* Allow taskq_create_common()'s taskq_thread_create() to return. */
 	if (tq->tq_nthreads == TASKQ_CREATE_ACTIVE_THREADS)
@@ -1969,7 +1969,7 @@ taskq_create_instance(const char *name, int instance, int nthreads, pri_t pri,
 
 taskq_t *
 taskq_create_proc(const char *name, int nthreads, pri_t pri, int minalloc,
-    int maxalloc, struct proc *proc, uint_t flags)
+    int maxalloc, proc_t *proc, uint_t flags)
 {
 	ASSERT((flags & ~TASKQ_INTERFACE_FLAGS) == 0);
 #ifndef __APPLE__
@@ -1981,7 +1981,7 @@ taskq_create_proc(const char *name, int nthreads, pri_t pri, int minalloc,
 
 taskq_t *
 taskq_create_sysdc(const char *name, int nthreads, int minalloc,
-    int maxalloc, struct proc *proc, uint_t dc, uint_t flags)
+    int maxalloc, proc_t *proc, uint_t dc, uint_t flags)
 {
 	ASSERT((flags & ~TASKQ_INTERFACE_FLAGS) == 0);
 #ifndef __APPLE__
@@ -1993,7 +1993,7 @@ taskq_create_sysdc(const char *name, int nthreads, int minalloc,
 
 static taskq_t *
 taskq_create_common(const char *name, int instance, int nthreads, pri_t pri,
-    int minalloc, int maxalloc, struct proc *proc, uint_t dc, uint_t flags)
+    int minalloc, int maxalloc, proc_t *proc, uint_t dc, uint_t flags)
 {
 	taskq_t *tq = kmem_cache_alloc(taskq_cache, KM_SLEEP);
 #ifdef __APPLE__
