@@ -60,12 +60,12 @@ spl_thread_create(
         result= kernel_thread_start((thread_continue_t)proc, arg, &thread);
 
         if (result != KERN_SUCCESS)
-                return (NULL);
+			return (NULL);
 
 		/* Improve the priority when asked to do so */
-		if (pri >= PRIBIO) {
+		if (pri > minclsyspri) {
 			thread_precedence_policy_data_t policy;
-			policy.importance = INT_MAX;
+			policy.importance = pri - minclsyspri;
 
 			thread_policy_set(thread,
 							  THREAD_PRECEDENCE_POLICY,

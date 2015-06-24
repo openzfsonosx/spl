@@ -4323,7 +4323,7 @@ spl_kmem_thread_init(void)
     kmem_move_init();
     kmem_taskq = taskq_create("kmem_taskq", 1, minclsyspri,
                                        300, INT_MAX, TASKQ_PREPOPULATE);
-	(void)thread_create(NULL, 0, memory_monitor_thread, 0, 0, 0, 0, 0);
+	(void)thread_create(NULL, 0, memory_monitor_thread, 0, 0, 0, 0, 92);
 }
 
 void
