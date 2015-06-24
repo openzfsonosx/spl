@@ -1169,17 +1169,18 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 			break;
 		mutex_exit(&vmp->vm_lock);
 #if 1
-		printf("vmem reaping\n");
+		//printf("vmem reaping\n");
 		if (vmp->vm_cflags & VMC_IDENTIFIER)
 			kmem_reap_idspace();
 		else
 			kmem_reap();
-		printf("vmem reaping done\n");
+		//printf("vmem reaping done\n");
 #endif
 		mutex_enter(&vmp->vm_lock);
 		if (vmflag & VM_NOSLEEP)
 			break;
 		vmp->vm_kstat.vk_wait.value.ui64++;
+		printf("vmem waiting for %llu sized alloc\n", size);
 		cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 	}
 	if (vbest != NULL) {
