@@ -88,6 +88,8 @@ extern int	taskq_suspended(taskq_t *);
 extern void	taskq_resume(taskq_t *);
 extern int	taskq_member(taskq_t *, kthread_t *);
 
+#define taskq_wait_outstanding(T, D) taskq_wait((T))
+
 extern void system_taskq_init(void);
 extern void system_taskq_fini(void);
 

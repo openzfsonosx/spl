@@ -55,6 +55,13 @@ clock_t cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp,
 #define cv_timedwait_interruptible(cvp, mp, tim)  \
 	spl_cv_timedwait((cvp), (mp), (tim), PRIBIO|PCATCH, #cvp)
 
+/* cv_wait_sig is the correct name for cv_wait_interruptible */
+#define cv_wait_sig(cvp, mp)        \
+	spl_cv_wait((cvp), (mp), PRIBIO|PCATCH, #cvp)
+
+#define cv_timedwait_sig(cvp, mp, tim)  \
+	spl_cv_timedwait((cvp), (mp), (tim), PRIBIO|PCATCH, #cvp)
+
 
 #define TICK_TO_NSEC(tick)              ((hrtime_t)(tick) * 1000000000 / hz)
 #define cv_reltimedwait(cvp, mp, tim, type) \
