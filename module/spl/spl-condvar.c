@@ -130,9 +130,13 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
 	*/
 
     ts.tv_sec = 0;
-    ts.tv_nsec = tim * NSEC_PER_USEC;
-    if (ts.tv_nsec < 1)
-        ts.tv_nsec = 100;
+    ts.tv_nsec = tim;
+
+    if (ts.tv_nsec <= 100) {
+		printf("cv_timedwait_hires: warning, sleep is less that 100nsec %lds\n",
+			   ts.tv_nsec);
+        ts.tv_nsec = 1000; // At least one millisec
+	}
 
     if (ts.tv_nsec > 400 * NSEC_PER_SEC) {
         printf("cv_timedwait_hires: will wait %llds -> forced to 5s\n",ts.tv_nsec/NSEC_PER_SEC);
