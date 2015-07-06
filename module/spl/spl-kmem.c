@@ -47,7 +47,7 @@
 //#define PRINT_CACHE_STATS 1
 
 // Uncomment to turn on kmems' debug features.
-//#define DEBUG 1
+#define DEBUG 1
 
 //===============================================================
 // OS Interface
@@ -5383,15 +5383,20 @@ kmem_cache_scan(kmem_cache_t *cp)
             uint16_t debug_rand;
 
             (void) random_get_bytes((uint8_t *)&debug_rand, 2);
+	    printf("SPL: debug_rand = %u, kmem_mtb_reap = %u, kmem_mtb_move = %u, mod1 %u, mod2 %u\n",
+		   debug_rand, kmem_mtb_reap, kmem_mtb_move, (debug_rand % kmem_mtb_reap), (debug_rand % kmem_mtb_move));
             if (!kmem_move_noreap &&
                 ((debug_rand % kmem_mtb_reap) == 0)) {
                 mutex_exit(&cp->cache_lock);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_reaps);
+		printf("SPL: random debug reap %llu\n", kmem_move_stats.kms_debug_reaps);
                 kmem_cache_reap(cp);
                 return;
             } else if ((debug_rand % kmem_mtb_move) == 0) {
                 KMEM_STAT_ADD(kmem_move_stats.kms_scans);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_scans);
+		printf("SPL: random debug move scans=%llu debug_scans=%llu\n",
+		       kmem_move_stats.kms_scans, kmem_move_stats.kms_debug_scans);
                 kmd->kmd_scans++;
                 (void) kmem_move_buffers(cp,
                                          kmem_reclaim_scan_range, 1, KMM_DEBUG);

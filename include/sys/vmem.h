@@ -34,7 +34,7 @@ extern "C" {
 
 
 
-#define KMEM_QUANTUM (PAGESIZE<<7) // 512KB
+#define KMEM_QUANTUM (PAGESIZE<<5) // 512KB - smd -> experiment with 4k again, remove the "<<7" - also <<1,2
 
 
 
