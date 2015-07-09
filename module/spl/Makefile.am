@@ -7,7 +7,7 @@ SUBDIRS = KernelExports
 AUTOMAKE_OPTIONS = subdir-objects
 
 CFLAGS_KMOD = \
-	${AM_CFLAGS} \
+	$(AM_CFLAGS) \
 	-Wall \
 	-nostdinc \
 	-mkernel \
@@ -81,6 +81,7 @@ spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(SPL_META_VERSION)" spl.kext/Contents/Info.plist
 	/usr/libexec/PlistBuddy -c "Delete :OSBundleLibraries:net.lundman.kernel.dependencies" spl.kext/Contents/Info.plist
 	/usr/libexec/PlistBuddy -c "Add :OSBundleLibraries:net.lundman.kernel.dependencies.$(SPL_KERNEL_DEPENDENCIES) string 12.5.0" spl.kext/Contents/Info.plist
+	if [ "0$(SPL_BOOT)" -eq 1 ]; then /usr/libexec/PlistBuddy -c "Add :OSBundleRequired string Root" spl.kext/Contents/Info.plist; fi
 	@cp -f $(PLIST_STRING) spl.kext/Contents/Resources/English.lproj/
 	@cp -f spl spl.kext/Contents/MacOS/
 	@mkdir -p spl.kext/Contents/PlugIns/KernelExports.kext/
