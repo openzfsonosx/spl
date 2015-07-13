@@ -58,10 +58,10 @@
 // We are using wake indications on this event as a
 // indication of paging activity, and therefore as a
 // proxy to the machine experiencing memory pressure.
-extern unsigned int vm_page_free_wanted;
-extern unsigned int vm_page_free_min;
-extern unsigned int vm_page_free_count;
-extern unsigned int vm_page_speculative_count;
+extern unsigned int vm_page_free_wanted; // 0 by default smd
+extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min
+extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
+extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
 
 // Start and end address of kernel memory
 //http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L135
@@ -363,12 +363,12 @@ size_t kmem_frag_denom = KMEM_VOID_FRACTION; /* buffers (denominator) */
  * Maximum number of slabs from which to move buffers during a single
  * maintenance interval while the system is not low on memory.
  */
-size_t kmem_reclaim_max_slabs = 1;
+size_t kmem_reclaim_max_slabs = 4; // smd 1
 /*
  * Number of slabs to scan backwards from the end of the partial slab list
  * when searching for buffers to relocate.
  */
-size_t kmem_reclaim_scan_range = 12;
+size_t kmem_reclaim_scan_range = 48; // smd 12
 
 #ifdef	KMEM_STATS
 static struct {
@@ -424,8 +424,11 @@ static boolean_t kmem_move_any_partial;
  * caches are not fragmented (they may never be). These intervals are mean time
  * in cache maintenance intervals (kmem_cache_update).
  */
-uint32_t kmem_mtb_move = 60;	/* defrag 1 slab (~15min) */
-uint32_t kmem_mtb_reap = 1800;	/* defrag all slabs (~7.5hrs) */
+//uint32_t kmem_mtb_move = 60;	/* defrag 1 slab (~15min) */
+//uint32_t kmem_mtb_reap = 1800;	/* defrag all slabs (~7.5hrs) */
+uint32_t kmem_mtb_move = 20;	/* defrag 1 slab (~15min) */ // smd: 60=15m, 20=5min
+uint32_t kmem_mtb_reap = 240;	/* defrag all slabs (~7.5hrs) */ // 1800=7.5h, 720=3h, 240=1h
+uint32_t kmem_mtb_reap_count = 0; // how many times have we done an mtb reap?
 #endif	/* DEBUG */
 
 static kmem_cache_t	*kmem_defrag_cache;
@@ -2887,9 +2890,27 @@ kmem_cache_update(kmem_cache_t *cp)
         (void) taskq_dispatch(kmem_taskq,
                               (task_func_t *)kmem_cache_magazine_resize, cp, TQ_NOSLEEP);
 
+    // smd : the following if is only true for the dnode cache
     if (cp->cache_defrag != NULL)
         (void) taskq_dispatch(kmem_taskq,
                               (task_func_t *)kmem_cache_scan, cp, TQ_NOSLEEP);
+
+#ifdef DEBUG
+    else { // for every other cache, duplicate some of the logic from kmem_cache_scan() below
+      // run reap occasionally even if there is plenty of memory
+      uint16_t debug_rand;
+
+      (void) random_get_bytes((uint8_t *)&debug_rand, 2);
+      //printf("SPL: kmem_cache_update debug_rand %u, kmem_mtb_reap %u, mod %u, for %s\n",
+      //	     debug_rand, kmem_mtb_reap, (debug_rand % kmem_mtb_reap), cp->cache_name);
+      if(!kmem_move_noreap &&
+	 ((debug_rand % kmem_mtb_reap) == 0)) {
+	// no mutex above, so no need to give it up as in kmem_cache_scan()
+	printf("SPL: kmem_cache_update random debug reap %u, doing %s\n", ++kmem_mtb_reap_count, cp->cache_name);
+	kmem_cache_reap(cp);
+      }
+    }
+#endif	
 
 }
 
@@ -3073,7 +3094,9 @@ kmem_avail(void)
 //    return ((size_t)ptob(MIN(MAX(MIN(rmem, fmem), 0),
 //                             1 << (30 - PAGESHIFT))));
 #endif
-    return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+  //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+  // smd - spike the vm_page_speculative_count, that can be hundreds of MB or small numbers of MB
+  return (vm_page_free_count) * PAGE_SIZE;
 }
 
 /*
@@ -5382,20 +5405,29 @@ kmem_cache_scan(kmem_cache_t *cp)
              */
             uint16_t debug_rand;
 
+	    // smd: note that this only gets called for the dnode cache
+	    //      because only the dnode cache has kmem_cache_set_move() applied to it
+	    //	    brendon says move is voluntary and "tricky"
+	    //      the reason this is not called is because the source is
+	    //	    kmem_cache_update(), that only calls this function (kmem_cache_scan())
+	    //	    if there is a move/defrag (same thing) associated with it
+	    // so hoist some of this code up to to kmem_cache_update
+
             (void) random_get_bytes((uint8_t *)&debug_rand, 2);
-	    printf("SPL: debug_rand = %u, kmem_mtb_reap = %u, kmem_mtb_move = %u, mod1 %u, mod2 %u\n",
-		   debug_rand, kmem_mtb_reap, kmem_mtb_move, (debug_rand % kmem_mtb_reap), (debug_rand % kmem_mtb_move));
+	    //printf("SPL: kmem_cache_scan debug_rand = %u, kmem_mtb_reap = %u, kmem_mtb_move = %u, mod1 %u, mod2 %u\n",
+	    //		   debug_rand, kmem_mtb_reap, kmem_mtb_move, (debug_rand % kmem_mtb_reap), (debug_rand % kmem_mtb_move));
             if (!kmem_move_noreap &&
                 ((debug_rand % kmem_mtb_reap) == 0)) {
                 mutex_exit(&cp->cache_lock);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_reaps);
-		printf("SPL: random debug reap %llu\n", kmem_move_stats.kms_debug_reaps);
+		kmem_mtb_reap_count++;
+		printf("SPL: kmem_cache_scan random debug reap %llu\n", kmem_move_stats.kms_debug_reaps);
                 kmem_cache_reap(cp);
                 return;
             } else if ((debug_rand % kmem_mtb_move) == 0) {
                 KMEM_STAT_ADD(kmem_move_stats.kms_scans);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_scans);
-		printf("SPL: random debug move scans=%llu debug_scans=%llu\n",
+		printf("SPL: kmem_cache_scan random debug move scans=%llu debug_scans=%llu\n",
 		       kmem_move_stats.kms_scans, kmem_move_stats.kms_debug_scans);
                 kmd->kmd_scans++;
                 (void) kmem_move_buffers(cp,
