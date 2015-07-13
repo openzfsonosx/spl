@@ -47,7 +47,7 @@
 //#define PRINT_CACHE_STATS 1
 
 // Uncomment to turn on kmems' debug features.
-//#define DEBUG 1
+#define DEBUG 1
 
 //===============================================================
 // OS Interface
