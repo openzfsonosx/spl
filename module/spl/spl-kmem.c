@@ -427,7 +427,7 @@ static boolean_t kmem_move_any_partial;
 //uint32_t kmem_mtb_move = 60;	/* defrag 1 slab (~15min) */
 //uint32_t kmem_mtb_reap = 1800;	/* defrag all slabs (~7.5hrs) */
 uint32_t kmem_mtb_move = 20;	/* defrag 1 slab (~15min) */ // smd: 60=15m, 20=5min
-uint32_t kmem_mtb_reap = 720;	/* defrag all slabs (~7.5hrs) */ // 1800=7.5h, 720=3h
+uint32_t kmem_mtb_reap = 240;	/* defrag all slabs (~7.5hrs) */ // 1800=7.5h, 720=3h, 240=1h
 #endif	/* DEBUG */
 
 static kmem_cache_t	*kmem_defrag_cache;
