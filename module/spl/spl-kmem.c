@@ -363,12 +363,12 @@ size_t kmem_frag_denom = KMEM_VOID_FRACTION; /* buffers (denominator) */
  * Maximum number of slabs from which to move buffers during a single
  * maintenance interval while the system is not low on memory.
  */
-size_t kmem_reclaim_max_slabs = 1;
+size_t kmem_reclaim_max_slabs = 4; // smd 1
 /*
  * Number of slabs to scan backwards from the end of the partial slab list
  * when searching for buffers to relocate.
  */
-size_t kmem_reclaim_scan_range = 12;
+size_t kmem_reclaim_scan_range = 48; // smd 12
 
 #ifdef	KMEM_STATS
 static struct {
