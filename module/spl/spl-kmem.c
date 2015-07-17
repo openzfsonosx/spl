@@ -428,6 +428,10 @@ static boolean_t kmem_move_any_partial;
 //uint32_t kmem_mtb_reap = 1800;	/* defrag all slabs (~7.5hrs) */
 uint32_t kmem_mtb_move = 20;	/* defrag 1 slab (~15min) */ // smd: 60=15m, 20=5min
 uint32_t kmem_mtb_reap = 240;	/* defrag all slabs (~7.5hrs) */ // 1800=7.5h, 720=3h, 240=1h
+uint32_t kmem_mtb_kmem_reap = 720; // every three hours do kmem_reap() - smd
+uint32_t kmem_mtb_kmem_idreap = 960; // every 4 hours do kmem_idreap() - smd
+uint32_t kmem_mtb_kmem_reap_num = 0; // counter
+uint32_t kmem_mtb_kmem_idreap_num = 0; // counter
 #endif	/* DEBUG */
 
 static kmem_cache_t	*kmem_defrag_cache;
@@ -5387,9 +5391,16 @@ kmem_cache_scan(kmem_cache_t *cp)
                 ((debug_rand % kmem_mtb_reap) == 0)) {
                 mutex_exit(&cp->cache_lock);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_reaps);
-		printf("SPL: random debug reap %llu\n", kmem_move_stats.kms_debug_reaps);
+		printf("SPL: random debug kmem_cache_reap %llu\n", kmem_move_stats.kms_debug_reaps);
                 kmem_cache_reap(cp);
-                return;
+                if ((debug_rand % kmem_mtb_kmem_idreap)==0) {
+		  printf("SPL: random debug kmem_idreap() number %u\n", ++kmem_mtb_kmem_idreap_num);
+		  kmem_idreap();
+		} else if((debug_rand % kmem_mtb_kmem_reap)==0) {
+		  printf("SPL: random debug kmem_reap() number %u\n", ++kmem_mtb_kmem_reap_num);
+		  kmem_reap();
+		}
+		return;	
             } else if ((debug_rand % kmem_mtb_move) == 0) {
                 KMEM_STAT_ADD(kmem_move_stats.kms_scans);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_scans);
