@@ -2901,8 +2901,8 @@ kmem_cache_update(kmem_cache_t *cp)
       uint16_t debug_rand;
 
       (void) random_get_bytes((uint8_t *)&debug_rand, 2);
-      printf("SPL: kmem_cache_update debug_rand %u, kmem_mtb_reap %u, mod %u, for %s\n",
-	     debug_rand, kmem_mtb_reap, (debug_rand % kmem_mtb_reap), cp->cache_name);
+      //printf("SPL: kmem_cache_update debug_rand %u, kmem_mtb_reap %u, mod %u, for %s\n",
+      //	     debug_rand, kmem_mtb_reap, (debug_rand % kmem_mtb_reap), cp->cache_name);
       if(!kmem_move_noreap &&
 	 ((debug_rand % kmem_mtb_reap) == 0)) {
 	// no mutex above, so no need to give it up as in kmem_cache_scan()
@@ -5408,8 +5408,8 @@ kmem_cache_scan(kmem_cache_t *cp)
 	    // so hoist some of this code up to to kmem_cache_update
 
             (void) random_get_bytes((uint8_t *)&debug_rand, 2);
-	    printf("SPL: kmem_cache_scan debug_rand = %u, kmem_mtb_reap = %u, kmem_mtb_move = %u, mod1 %u, mod2 %u\n",
-		   debug_rand, kmem_mtb_reap, kmem_mtb_move, (debug_rand % kmem_mtb_reap), (debug_rand % kmem_mtb_move));
+	    //printf("SPL: kmem_cache_scan debug_rand = %u, kmem_mtb_reap = %u, kmem_mtb_move = %u, mod1 %u, mod2 %u\n",
+	    //		   debug_rand, kmem_mtb_reap, kmem_mtb_move, (debug_rand % kmem_mtb_reap), (debug_rand % kmem_mtb_move));
             if (!kmem_move_noreap &&
                 ((debug_rand % kmem_mtb_reap) == 0)) {
                 mutex_exit(&cp->cache_lock);
