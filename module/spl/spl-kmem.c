@@ -428,10 +428,7 @@ static boolean_t kmem_move_any_partial;
 //uint32_t kmem_mtb_reap = 1800;	/* defrag all slabs (~7.5hrs) */
 uint32_t kmem_mtb_move = 20;	/* defrag 1 slab (~15min) */ // smd: 60=15m, 20=5min
 uint32_t kmem_mtb_reap = 240;	/* defrag all slabs (~7.5hrs) */ // 1800=7.5h, 720=3h, 240=1h
-uint32_t kmem_mtb_kmem_reap = 720; // every three hours do kmem_reap() - smd
-uint32_t kmem_mtb_kmem_idreap = 960; // every 4 hours do kmem_idreap() - smd
-uint32_t kmem_mtb_kmem_reap_num = 0; // counter
-uint32_t kmem_mtb_kmem_idreap_num = 0; // counter
+uint32_t kmem_mtb_reap_count = 0; // how many times have we done an mtb reap?
 #endif	/* DEBUG */
 
 static kmem_cache_t	*kmem_defrag_cache;
@@ -2893,9 +2890,27 @@ kmem_cache_update(kmem_cache_t *cp)
         (void) taskq_dispatch(kmem_taskq,
                               (task_func_t *)kmem_cache_magazine_resize, cp, TQ_NOSLEEP);
 
+    // smd : the following if is only true for the dnode cache
     if (cp->cache_defrag != NULL)
         (void) taskq_dispatch(kmem_taskq,
                               (task_func_t *)kmem_cache_scan, cp, TQ_NOSLEEP);
+
+#ifdef DEBUG
+    else { // for every other cache, duplicate some of the logic from kmem_cache_scan() below
+      // run reap occasionally even if there is plenty of memory
+      uint16_t debug_rand;
+
+      (void) random_get_bytes((uint8_t *)&debug_rand, 2);
+      printf("SPL: kmem_cache_update debug_rand %u, kmem_mtb_reap %u, mod %u, for %s\n",
+	     debug_rand, kmem_mtb_reap, (debug_rand % kmem_mtb_reap), cp->cache_name);
+      if(!kmem_move_noreap &&
+	 ((debug_rand % kmem_mtb_reap) == 0)) {
+	// no mutex above, so no need to give it up as in kmem_cache_scan()
+	printf("SPL: kmem_cache_update random debug reap %u, doing %s\n", ++kmem_mtb_reap_count, cp->cache_name);
+	kmem_cache_reap(cp);
+      }
+    }
+#endif	
 
 }
 
@@ -5384,27 +5399,29 @@ kmem_cache_scan(kmem_cache_t *cp)
              */
             uint16_t debug_rand;
 
+	    // smd: note that this only gets called for the dnode cache
+	    //      because only the dnode cache has kmem_cache_set_move() applied to it
+	    //	    brendon says move is voluntary and "tricky"
+	    //      the reason this is not called is because the source is
+	    //	    kmem_cache_update(), that only calls this function (kmem_cache_scan())
+	    //	    if there is a move/defrag (same thing) associated with it
+	    // so hoist some of this code up to to kmem_cache_update
+
             (void) random_get_bytes((uint8_t *)&debug_rand, 2);
-	    printf("SPL: debug_rand = %u, kmem_mtb_reap = %u, kmem_mtb_move = %u, mod1 %u, mod2 %u\n",
+	    printf("SPL: kmem_cache_scan debug_rand = %u, kmem_mtb_reap = %u, kmem_mtb_move = %u, mod1 %u, mod2 %u\n",
 		   debug_rand, kmem_mtb_reap, kmem_mtb_move, (debug_rand % kmem_mtb_reap), (debug_rand % kmem_mtb_move));
             if (!kmem_move_noreap &&
                 ((debug_rand % kmem_mtb_reap) == 0)) {
                 mutex_exit(&cp->cache_lock);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_reaps);
-		printf("SPL: random debug kmem_cache_reap %llu\n", kmem_move_stats.kms_debug_reaps);
+		kmem_mtb_reap_count++;
+		printf("SPL: kmem_cache_scan random debug reap %llu\n", kmem_move_stats.kms_debug_reaps);
                 kmem_cache_reap(cp);
-                if ((debug_rand % kmem_mtb_kmem_idreap)==0) {
-		  printf("SPL: random debug kmem_idreap() number %u\n", ++kmem_mtb_kmem_idreap_num);
-		  kmem_idreap();
-		} else if((debug_rand % kmem_mtb_kmem_reap)==0) {
-		  printf("SPL: random debug kmem_reap() number %u\n", ++kmem_mtb_kmem_reap_num);
-		  kmem_reap();
-		}
-		return;	
+                return;
             } else if ((debug_rand % kmem_mtb_move) == 0) {
                 KMEM_STAT_ADD(kmem_move_stats.kms_scans);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_scans);
-		printf("SPL: random debug move scans=%llu debug_scans=%llu\n",
+		printf("SPL: kmem_cache_scan random debug move scans=%llu debug_scans=%llu\n",
 		       kmem_move_stats.kms_scans, kmem_move_stats.kms_debug_scans);
                 kmd->kmd_scans++;
                 (void) kmem_move_buffers(cp,
