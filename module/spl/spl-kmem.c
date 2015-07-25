@@ -1722,7 +1722,7 @@ kmem_dump_init(size_t size)
         kmem_dump_log = (kmem_dump_log_t *)zfs_kmem_zalloc(KMEM_DUMP_LOGS *
                                                        sizeof (kmem_dump_log_t), KM_SLEEP);
 
-    kmem_dump_start = zfs_kmem_alloc(size, KM_SLEEP);
+    kmem_dump_start = kmem_alloc(size, KM_SLEEP);
 
     if (kmem_dump_start != NULL) {
         kmem_dump_size = size;
@@ -2336,7 +2336,7 @@ zfs_kmem_zalloc(size_t size, int kmflag)
             bzero(buf, size);
         }
     } else {
-        buf = zfs_kmem_alloc(size, kmflag);
+        buf = kmem_alloc(size, kmflag);
         if (buf != NULL)
             bzero(buf, size);
     }
@@ -2344,7 +2344,7 @@ zfs_kmem_zalloc(size_t size, int kmflag)
 }
 
 void *
-zfs_kmem_alloc(size_t size, int kmflag)
+zfs_kmem_alloc(size_t size, int kmflag, char *file, int line)
 {
     size_t index;
     kmem_cache_t *cp;
@@ -2387,6 +2387,10 @@ zfs_kmem_alloc(size_t size, int kmflag)
             KMEM_BUFTAG_LITE_ENTER(btp, kmem_lite_count, caller());
         }
     }
+
+	if (cp->cache_bufsize == 640)
+		printf("spl: 640 alloc %s:%u\n", file, line);
+
     return (buf);
 }
 
@@ -2507,7 +2511,7 @@ kmem_alloc_tryhard(size_t size, size_t *asize, int kmflag)
     } while (*asize <= PAGESIZE);
 
     *asize = P2ROUNDUP(size, KMEM_ALIGN);
-    return (zfs_kmem_alloc(*asize, kmflag));
+    return (kmem_alloc(*asize, kmflag));
 }
 
 /*
@@ -5201,7 +5205,7 @@ kmem_cache_move_notify(kmem_cache_t *cp, void *buf)
     kmem_move_notify_args_t *args;
 
     KMEM_STAT_ADD(kmem_move_stats.kms_notify);
-    args = zfs_kmem_alloc(sizeof (kmem_move_notify_args_t), KM_NOSLEEP);
+    args = kmem_alloc(sizeof (kmem_move_notify_args_t), KM_NOSLEEP);
     if (args != NULL) {
         args->kmna_cache = cp;
         args->kmna_buf = buf;
@@ -5454,7 +5458,7 @@ char *kvasprintf(const char *fmt, va_list ap)
     va_copy(aq, ap);
     len = vsnprintf(NULL, 0, fmt, aq);
     va_end(aq);
-    p = zfs_kmem_alloc(len+1, KM_SLEEP);
+    p = kmem_alloc(len+1, KM_SLEEP);
     if (!p)
         return NULL;
 
