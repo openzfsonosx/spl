@@ -241,6 +241,9 @@ extern void          dnlc_remove     ( struct vnode *vp, char *name );
 extern void          dnlc_update     ( struct vnode *vp, char *name,
                                        struct vnode *tp);
 
+#define build_path(A, B, C, D, E, F) spl_build_path(A,B,C,D,E,F)
+extern int spl_build_path(struct vnode *vp, char *buff, int buflen, int *outlen,
+						  int flags, vfs_context_t ctx);
 
 
 

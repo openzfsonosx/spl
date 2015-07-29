@@ -433,6 +433,18 @@ void *getf(int fd)
     return sfp;
 }
 
+struct vnode *getf_vnode(void *fp)
+{
+	struct spl_fileproc *sfp = (struct spl_fileproc *) fp;
+	struct vnode *vp = NULL;
+	uint32_t vid;
+
+	if (!file_vnode_withvid(sfp->f_fd, &vp, &vid)) {
+		file_drop(sfp->f_fd);
+	}
+
+	return vp;
+}
 
 void releasef(int fd)
 {
@@ -537,4 +549,10 @@ void vn_rele_async(struct vnode *vp, void *taskq)
 vfs_context_t spl_vfs_context_kernel(void)
 {
 	return vfs_context_kernel();
+}
+
+int spl_build_path(struct vnode *vp, char *buff, int buflen, int *outlen,
+				   int flags, vfs_context_t ctx)
+{
+	return build_path(vp, buff, buflen, outlen, flags, ctx);
 }
