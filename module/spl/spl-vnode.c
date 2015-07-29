@@ -419,7 +419,9 @@ void *getf(int fd)
 
 	/* Also grab vnode, so we can fish out the minor, for onexit */
 	if (!file_vnode_withvid(fd, &vp, &vid)) {
-		sfp->f_file = minor(vnode_specrdev(vp));
+		if (vnode_vtype(vp) != VDIR) {
+			sfp->f_file = minor(vnode_specrdev(vp));
+		}
 		file_drop(fd);
 	}
 
