@@ -553,6 +553,10 @@ vfs_context_t spl_vfs_context_kernel(void)
 	return vfs_context_kernel();
 }
 
+#undef build_path
+extern int build_path(struct vnode *vp, char *buff, int buflen, int *outlen,
+					  int flags, vfs_context_t ctx);
+
 int spl_build_path(struct vnode *vp, char *buff, int buflen, int *outlen,
 				   int flags, vfs_context_t ctx)
 {
