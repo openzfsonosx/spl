@@ -58,10 +58,10 @@
 // We are using wake indications on this event as a
 // indication of paging activity, and therefore as a
 // proxy to the machine experiencing memory pressure.
-extern unsigned int vm_page_free_wanted;
-extern unsigned int vm_page_free_min;
-extern unsigned int vm_page_free_count;
-extern unsigned int vm_page_speculative_count;
+extern unsigned int vm_page_free_wanted; // 0 by default smd
+extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min
+extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
+extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
 
 // Start and end address of kernel memory
 //http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L135
@@ -3094,7 +3094,9 @@ kmem_avail(void)
 //    return ((size_t)ptob(MIN(MAX(MIN(rmem, fmem), 0),
 //                             1 << (30 - PAGESHIFT))));
 #endif
-    return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+  //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+  // smd - spike the vm_page_speculative_count, that can be hundreds of MB or small numbers of MB
+  return (vm_page_free_count) * PAGE_SIZE;
 }
 
 /*
