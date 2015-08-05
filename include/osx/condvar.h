@@ -12,8 +12,7 @@ typedef enum {
 
 
 struct cv {
-    uint32_t   pad;
-    uint32_t   pad2;
+	uint64_t   pad;
 };
 
 typedef struct cv  kcondvar_t;
