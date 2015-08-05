@@ -42,6 +42,7 @@ spl_cv_init(kcondvar_t *cvp, char *name, kcv_type_t type, void *arg)
 void
 spl_cv_destroy(kcondvar_t *cvp)
 {
+  spl_cv_broadcast(cvp);
 }
 
 void
