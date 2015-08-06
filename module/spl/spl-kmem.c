@@ -5469,7 +5469,15 @@ kmem_size(void)
 size_t
 kmem_used(void)
 {
-    return kmem_size() - kmem_avail();
+  //return kmem_size() - kmem_avail();
+  // smd - need to subtract the speculative piece too
+  // if size == 16000 and free == 2000 and spec == 1000
+  // then [prev] kmem_used is 16000-2000==14000
+  // and [now] kmem_used is 16000-2000-1000==13000
+  // probably important because we use it in calculating spl_vm_pool_low
+  // 
+  
+  return (kmem_size() - kmem_avail()) - (vm_page_speculative_count * PAGE_SIZE); 
 }
 
 
@@ -5485,7 +5493,9 @@ int spl_vm_pool_low(void)
 			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
-			//printf("pool low: new target %llu\n", newtarget);
+			printf("SPL pool low: new target %llu (smd: reaping)\n", newtarget);
+			kmem_reap();
+			kmem_reap_idspace();
 		}
 		return 1;
 	}
