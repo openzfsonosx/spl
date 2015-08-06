@@ -5491,7 +5491,7 @@ int spl_vm_pool_low(void)
 			pressure_bytes_target = newtarget;
 			printf("SPL pool low: new target %llu (smd: reaping)\n", newtarget);
 			kmem_reap();
-			kmem_id_reap();
+			kmem_reap_idspace();
 		}
 		return 1;
 	}
