@@ -234,12 +234,7 @@ void spl_mutex_enter(kmutex_t *mp)
 
 #ifdef DEBUG
 	if (*((uint64_t *)mp) == 0xdeadbeefdeadbeef) {
-		printf("SPL: mutex_enter(%p) on freed mutex! %p %p %p %p\n",
-			   mp,
-			   __builtin_return_address(1),
-			   __builtin_return_address(2),
-			   __builtin_return_address(3),
-			   __builtin_return_address(4));
+		spl_backtrace("SPL: mutex_enter");
 	}
 #endif
     lck_mtx_lock((lck_mtx_t *)&mp->m_lock);
@@ -250,12 +245,7 @@ void spl_mutex_exit(kmutex_t *mp)
 {
 #ifdef DEBUG
 	if (*((uint64_t *)mp) == 0xdeadbeefdeadbeef) {
-		printf("SPL: mutex_exit(%p) on freed mutex! %p %p %p %p\n",
-			   mp,
-			   __builtin_return_address(1),
-			   __builtin_return_address(2),
-			   __builtin_return_address(3),
-			   __builtin_return_address(4));
+		spl_backtrace("SPL: mutex_exit");
 	}
 #endif
     mp->m_owner = NULL;

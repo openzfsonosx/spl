@@ -20,3 +20,6 @@ _system_inshutdown
 _cache_purgevfs
 _vfs_context_kernel
 _build_path
+_kvtophys
+__mh_execute_header
+_gLoadedKextSummaries

@@ -49,6 +49,6 @@
 #include <kern/debug.h>
 #include <sys/debug.h>
 
-
+void spl_backtrace(char *thesignal);
 
 #endif /* SPL_DEBUG_INTERNAL_H */
