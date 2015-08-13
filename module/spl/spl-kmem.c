@@ -3988,6 +3988,10 @@ spl_kstat_update(kstat_t *ksp, int rw)
 				(ks->spl_simulate_pressure.value.ui64 * 1024 * 1024);
 			kmem_reap();
 			kmem_reap_idspace();
+			if (ks->spl_simulate_pressure.value.ui64 == 666) {
+			  printf("SPL: simulate pressure 666, dumping stack\n");
+			  spl_backtrace("SPL: simulate_pressure 666");
+			}
 		}
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;

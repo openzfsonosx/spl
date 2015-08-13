@@ -26,6 +26,8 @@
  *
  */
 
+#define DEBUG 1 /* smd */
+
 #include <sys/mutex.h>
 
 
