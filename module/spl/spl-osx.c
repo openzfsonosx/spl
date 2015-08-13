@@ -25,6 +25,7 @@
  *
  */
 
+#define DEBUG 1 /* smd - for panic backtrace */
 
 #include <spl-debug.h>
 #include <sys/kmem.h>
