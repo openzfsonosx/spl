@@ -284,7 +284,6 @@ static struct timespec	kmem_reap_interval	= {15, 0};
 int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 pgcnt_t kmem_reapahead = 0;	/* start reaping N pages before pageout */
 int kmem_panic = 1;		/* whether to panic on error */
-//int kmem_panic = 0;		/* whether to panic on error */
 int kmem_logging = 0;		/* kmem_log_enter() override */
 uint32_t kmem_mtbf = 0;		/* mean time between failures [default: off] */
 size_t kmem_transaction_log_size; /* transaction log size [2% of memory] */
@@ -721,7 +720,7 @@ kmem_error(int error, kmem_cache_t *cparg, void *bufarg)
     kmem_panic_info.kmp_slab = sp;
     kmem_panic_info.kmp_bufctl = bcp;
 
-    printf("kernel memory allocator: ");
+    printf("SPL: kernel memory allocator: ");
 
     switch (error) {
 
@@ -730,7 +729,7 @@ kmem_error(int error, kmem_cache_t *cparg, void *bufarg)
             off = verify_pattern(KMEM_FREE_PATTERN, buf, cp->cache_verify);
             if (off == NULL)	/* shouldn't happen */
                 off = buf;
-            printf("modification occurred at offset 0x%lx "
+            printf("SPL: modification occurred at offset 0x%lx "
                    "(0x%llx replaced by 0x%llx)\n",
                    (uintptr_t)off - (uintptr_t)buf,
                    (longlong_t)KMEM_FREE_PATTERN, (longlong_t)*off);
@@ -750,7 +749,7 @@ kmem_error(int error, kmem_cache_t *cparg, void *bufarg)
 
         case KMERR_BADBUFTAG:
             printf("boundary tag corrupted\n");
-            printf("bcp ^ bxstat = %lx, should be %lx\n",
+            printf("SPL: bcp ^ bxstat = %lx, should be %lx\n",
                    (intptr_t)btp->bt_bufctl ^ btp->bt_bxstat,
                    KMEM_BUFTAG_FREE);
             break;
@@ -761,8 +760,8 @@ kmem_error(int error, kmem_cache_t *cparg, void *bufarg)
 
         case KMERR_BADCACHE:
             printf("buffer freed to wrong cache\n");
-            printf("buffer was allocated from %s,\n", cp->cache_name);
-            printf("caller attempting free to %s.\n", cparg->cache_name);
+            printf("SPL: buffer was allocated from %s,\n", cp->cache_name);
+            printf("SPL: caller attempting free to %s.\n", cparg->cache_name);
             break;
 
         case KMERR_BADSIZE:
@@ -777,28 +776,30 @@ kmem_error(int error, kmem_cache_t *cparg, void *bufarg)
             break;
     }
 
-    printf("buffer=%p  bufctl=%p  cache: %s\n",
+    printf("SPL: buffer=%p  bufctl=%p  cache: %s\n",
            bufarg, (void *)bcp, cparg->cache_name);
 
-#ifndef APPLE
-//   if (bcp != NULL && (cp->cache_flags & KMF_AUDIT) &&
-//       error != KMERR_BADBUFCTL) {
-//       int d;
-//       timestruc_t ts;
-//       kmem_bufctl_audit_t *bcap = (kmem_bufctl_audit_t *)bcp;
-//
-//     hrt2ts(kmem_panic_info.kmp_timestamp - bcap->bc_timestamp, &ts);
-//        printf("previous transaction on buffer %p:\n", buf);
-//        printf("thread=%p  time=T-%ld.%09ld  slab=%p  cache: %s\n",
-//               (void *)bcap->bc_thread, ts.tv_sec, ts.tv_nsec,
-//               (void *)sp, cp->cache_name);
-//        for (d = 0; d < MIN(bcap->bc_depth, KMEM_STACK_DEPTH); d++) {
-//            ulong_t off;
-//            char *sym = kobj_getsymname(bcap->bc_stack[d], &off);
-//            printf("%s+%lx\n", sym ? sym : "?", off);
-//        }
-//    }
+   if (bcp != NULL && (cp->cache_flags & KMF_AUDIT) &&
+       error != KMERR_BADBUFCTL) {
+       int d;
+       timestruc_t ts = {0, 0};
+       kmem_bufctl_audit_t *bcap = (kmem_bufctl_audit_t *)bcp;
+
+       hrt2ts(kmem_panic_info.kmp_timestamp - bcap->bc_timestamp, &ts);
+       printf("SPL: previous transaction on buffer %p:\n", buf);
+       printf("SPL: thread=%p  time=T-%ld.%09ld  slab=%p  cache: %s\n",
+               (void *)bcap->bc_thread, ts.tv_sec, ts.tv_nsec,
+               (void *)sp, cp->cache_name);
+       for (d = 0; d < MIN(bcap->bc_depth, KMEM_STACK_DEPTH); d++) {
+#ifdef APPLE
+           print_symbol(bcap->bc_stack[d]);
+#else
+            ulong_t off;
+            char *sym = kobj_getsymname(bcap->bc_stack[d], &off);
+            printf("%s+%lx\n", sym ? sym : "?", off);
 #endif
+        }
+    }
 
     if (kmem_panic > 0) {
         delay(hz);
@@ -922,15 +923,13 @@ kmem_log_enter(kmem_log_header_t *lhp, void *data, size_t size)
     return (logspace);
 }
 
-// _bcp->bc_depth = getpcstack(_bcp->bc_stack, KMEM_STACK_DEPTH);
-// checked
 //_bcp->bc_thread = cpu_number();
 #define	KMEM_AUDIT(lp, cp, bcp)										\
 {																	\
     kmem_bufctl_audit_t *_bcp = (kmem_bufctl_audit_t *)(bcp);		\
     _bcp->bc_timestamp = gethrtime();								\
-    _bcp->bc_thread = 0;                                            \
-    _bcp->bc_depth = 0;												\
+    _bcp->bc_thread = spl_current_thread();                         \
+    _bcp->bc_depth = getpcstack(_bcp->bc_stack, KMEM_STACK_DEPTH);  \
     _bcp->bc_lastlog = kmem_log_enter((lp), _bcp, sizeof (*_bcp));	\
 }
 

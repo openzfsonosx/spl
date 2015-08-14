@@ -109,3 +109,28 @@ gethrestime_sec(void)
     return (tv.tv_sec);
 }
 
+void
+hrt2ts(hrtime_t hrt, struct timespec *tsp)
+{
+    uint32_t sec, nsec, tmp;
+    
+    tmp = (uint32_t)(hrt >> 30);
+    sec = tmp - (tmp >> 2);
+    sec = tmp - (sec >> 5);
+    sec = tmp + (sec >> 1);
+    sec = tmp - (sec >> 6) + 7;
+    sec = tmp - (sec >> 3);
+    sec = tmp + (sec >> 1);
+    sec = tmp + (sec >> 3);
+    sec = tmp + (sec >> 4);
+    tmp = (sec << 7) - sec - sec - sec;
+    tmp = (tmp << 7) - tmp - tmp - tmp;
+    tmp = (tmp << 7) - tmp - tmp - tmp;
+    nsec = (uint32_t)hrt - (tmp << 9);
+    while (nsec >= NANOSEC) {
+        nsec -= NANOSEC;
+        sec++;
+    }
+    tsp->tv_sec = (time_t)sec;
+    tsp->tv_nsec = nsec;
+}

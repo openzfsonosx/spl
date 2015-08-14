@@ -42,6 +42,8 @@
 
 #include <kern/processor.h>
 
+//#define DEBUG 1
+
 struct utsname utsname = { { 0 } };
 
 //extern struct machine_info      machine_info;
@@ -306,7 +308,54 @@ void spl_backtrace(char *thesignal)
 
 }
 
+int
+getpcstack(uintptr_t *pcstack, int pcstack_limit)
+{
+#ifdef DEBUG
+    
+    int  depth = 0;
+    void *stackptr;
+    
+#if defined (__i386__)
+    __asm__ volatile("movl %%ebp, %0" : "=m" (stackptr));
+#elif defined (__x86_64__)
+    __asm__ volatile("movq %%rbp, %0" : "=m" (stackptr));
+#endif
+    
+    int frame_index;
+    int nframes = pcstack_limit;
+    cframe_t *frame = (cframe_t *)stackptr;
+    
+    for (frame_index = 0; frame_index < nframes; frame_index++) {
+        vm_offset_t curframep = (vm_offset_t) frame;
+        if (!curframep)
+            break;
+        if (curframep & 0x3) {
+            break;
+        }
+        if (!kvtophys(curframep) ||
+            !kvtophys(curframep + sizeof(cframe_t) - 1)) {
+            break;
+        }
+        pcstack[depth++] = frame->caller;
+        frame = frame->prev;
+    }
+    
+    return depth;
+#else
+    return 0;
+#endif
+}
 
+void
+print_symbol(uintptr_t symbol)
+{
+#ifdef DEBUG
+    printf("SPL: ");
+    panic_print_symbol_name((vm_address_t)(symbol));
+    printf("\n");
+#endif
+}
 
 int
 ddi_copyin(const void *from, void *to, size_t len, int flags)
@@ -420,7 +469,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
           SPL_META_VERSION, SPL_META_RELEASE, SPL_DEBUG_STR,
 		max_ncpus, total_memory, physmem,
 		spl_cpufeature_smap ? "SMAP" : "");
-
+    
 	return KERN_SUCCESS;
 }
 

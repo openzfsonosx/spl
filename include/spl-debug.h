@@ -50,5 +50,7 @@
 #include <sys/debug.h>
 
 void spl_backtrace(char *thesignal);
+int getpcstack(uintptr_t *pcstack, int pcstack_limit);
+void print_symbol(uintptr_t symbol);
 
 #endif /* SPL_DEBUG_INTERNAL_H */

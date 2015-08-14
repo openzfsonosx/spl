@@ -80,6 +80,7 @@ typedef long long	hrtime_t;
 extern hrtime_t gethrtime(void);
 extern void gethrestime(struct timespec *);
 extern time_t gethrestime_sec(void);
+extern void hrt2ts(hrtime_t hrt, struct timespec *tsp);
 
 #define     MSEC2NSEC(m)    ((hrtime_t)(m) * (NANOSEC / MILLISEC))
 #define  NSEC2MSEC(n)    ((n) / (NANOSEC / MILLISEC))
