@@ -234,7 +234,7 @@ void spl_mutex_enter(kmutex_t *mp)
 
 #ifdef DEBUG
 	if (*((uint64_t *)mp) == 0xdeadbeefdeadbeef) {
-		spl_backtrace("SPL: mutex_enter");
+		panic("SPL: mutex_enter");
 	}
 #endif
     lck_mtx_lock((lck_mtx_t *)&mp->m_lock);
@@ -245,7 +245,7 @@ void spl_mutex_exit(kmutex_t *mp)
 {
 #ifdef DEBUG
 	if (*((uint64_t *)mp) == 0xdeadbeefdeadbeef) {
-		spl_backtrace("SPL: mutex_exit");
+		panic("SPL: mutex_exit");
 	}
 #endif
     mp->m_owner = NULL;
