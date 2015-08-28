@@ -15,14 +15,16 @@ noinst_HEADERS += $(top_srcdir)/include/util/*.h
 noinst_HEADERS += $(top_srcdir)/include/vm/*.h
 
 install-data-local:
-	release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \
-	instdest=$(DESTDIR)/usr/src/spl-$$release/$(KERNEL_VERSION); \
-	instfiles=`find . -name '*.h'`; \
-	for instfile in $$instfiles; do \
-		parentdir=`dirname $$instdest/$$instfile`; \
-		mkdir -p $$parentdir; \
-		$(INSTALL) $$instfile $$instdest/$$instfile; \
-	done
+
+# O3X - installation of these is not required.
+#    release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \
+#	instdest=$(DESTDIR)/usr/src/spl-$$release/$(KERNEL_VERSION); \
+#	instfiles=`find . -name '*.h'`; \
+#	for instfile in $$instfiles; do \
+#		parentdir=`dirname $$instdest/$$instfile`; \
+#		mkdir -p $$parentdir; \
+#		$(INSTALL) $$instfile $$instdest/$$instfile; \
+#	done
 
 uninstall-local:
 	release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \

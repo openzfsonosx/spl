@@ -34,13 +34,16 @@ distclean-local::
 
 if CONFIG_KERNEL
 install-data-local:
-	release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \
-	instdest=$(DESTDIR)/usr/src/spl-$$release/$(KERNEL_VERSION); \
-	for instfile in $(noinst_HEADERS); do \
-		parentdir=`dirname $$instdest/$$instfile`; \
-		mkdir -p $$parentdir; \
-		$(INSTALL) $$instfile $$instdest/$$instfile; \
-	done
+
+# O3X - installation of these is not desirable
+#    release=$(SPL_META_VERSION)-$(SPL_META_RELEASE); \
+#	instdest=$(DESTDIR)/usr/src/spl-$$release/$(KERNEL_VERSION); \
+#	for instfile in $(noinst_HEADERS); do \
+#		parentdir=`dirname $$instdest/$$instfile`; \
+#		mkdir -p $$parentdir; \
+#		$(INSTALL) $$instfile $$instdest/$$instfile; \
+#	done
+
 endif
 
 dist-hook:
