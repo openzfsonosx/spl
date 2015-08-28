@@ -90,8 +90,9 @@ inline static void spl_wdlist_check(void *ignored)
 		for (mp = list_head(&mutex_list);
 			 mp;
 			 mp = list_next(&mutex_list, mp)) {
-			if ((mp->wdlist_locktime > 0) &&
-				noe - mp->wdlist_locktime >= SPL_MUTEX_WATCHDOG_TIMEOUT) {
+			uint64_t locktime = mp->wdlist_locktime;
+			if ((locktime > 0) && (noe > locktime) &&
+				noe - locktime >= SPL_MUTEX_WATCHDOG_TIMEOUT) {
 				printf("SPL: mutex (%p) held for %llus by '%s':%llu\n",
 					   mp, noe - mp->wdlist_locktime, mp->wdlist_file, mp->wdlist_line);
 			} // if old
