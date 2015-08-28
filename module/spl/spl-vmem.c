@@ -1180,7 +1180,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		if (vmflag & VM_NOSLEEP)
 			break;
 		vmp->vm_kstat.vk_wait.value.ui64++;
-		printf("vmem waiting for %llu sized alloc\n", size);
+		printf("vmem waiting for %lu sized alloc\n", size);
 		cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 	}
 	if (vbest != NULL) {

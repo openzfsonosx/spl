@@ -30,6 +30,9 @@
 #include <sys/errno.h>
 #include <sys/callb.h>
 
+#ifdef SPL_DEBUG_MUTEX
+void spl_wdlist_settime(void *mpleak, uint64_t value);
+#endif
 
 void
 spl_cv_init(kcondvar_t *cvp, char *name, kcv_type_t type, void *arg)
@@ -64,9 +67,15 @@ spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, int flags, const char *msg)
     if (msg != NULL && msg[0] == '&')
         ++msg;  /* skip over '&' prefixes */
 
-    mp->m_owner = NULL;
+#ifdef SPL_DEBUG_MUTEX
+	spl_wdlist_settime(mp->leak, 0);
+#endif
+	mp->m_owner = NULL;
     (void) msleep(cvp, (lck_mtx_t *)&mp->m_lock, flags, msg, 0);
     mp->m_owner = current_thread();
+#ifdef SPL_DEBUG_MUTEX
+	spl_wdlist_settime(mp->leak, gethrestime_sec());
+#endif
 }
 
 /*
@@ -96,10 +105,15 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, int flags,
         printf("cv_timedwait: will wait %lds\n", ts.tv_sec);
 		ts.tv_sec = 5;
 	}
+#ifdef SPL_DEBUG_MUTEX
+	spl_wdlist_settime(mp->leak, 0);
+#endif
     mp->m_owner = NULL;
     result = msleep(cvp, (lck_mtx_t *)&mp->m_lock, flags, msg, &ts);
     mp->m_owner = current_thread();
-
+#ifdef SPL_DEBUG_MUTEX
+	spl_wdlist_settime(mp->leak, gethrestime_sec());
+#endif
     return (result == EWOULDBLOCK ? -1 : 0);
 
 }
@@ -143,9 +157,15 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
 		ts.tv_nsec = 5 * NSEC_PER_SEC;
 	}
 
+#ifdef SPL_DEBUG_MUTEX
+	spl_wdlist_settime(mp->leak, 0);
+#endif
     mp->m_owner = NULL;
     result = msleep(cvp, (lck_mtx_t *)&mp->m_lock, PRIBIO, "cv_timedwait_hires", &ts);
     mp->m_owner = current_thread();
+#ifdef SPL_DEBUG_MUTEX
+	spl_wdlist_settime(mp->leak, gethrestime_sec());
+#endif
 
     return (result == EWOULDBLOCK ? -1 : 0);
 

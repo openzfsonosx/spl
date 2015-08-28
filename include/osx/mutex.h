@@ -27,6 +27,16 @@ typedef struct {
         uint32_t  opaque[4];
 } mutex_t;
 
+/* To enable watchdog to keep an eye on mutex being held for too long
+ * define this debug variable.
+ */
+//#define SPL_DEBUG_MUTEX
+
+#ifdef SPL_DEBUG_MUTEX
+#define SPL_MUTEX_WATCHDOG_SLEEP   10 /* How long to sleep between checking */
+#define SPL_MUTEX_WATCHDOG_TIMEOUT 60 /* When is a mutex held too long? */
+#endif
+
 /*
  * Solaris kmutex defined.
  *
@@ -65,16 +75,21 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc);
 
 #endif
 
+#ifdef SPL_DEBUG_MUTEX
+#define mutex_enter(X) spl_mutex_enter((X), __FILE__, __LINE__)
+void spl_mutex_enter(kmutex_t *mp, char *file, int line);
+#else
+#define mutex_enter spl_mutex_enter
+void spl_mutex_enter(kmutex_t *mp);
+#endif
 
 #define	mutex_destroy spl_mutex_destroy
-#define mutex_enter spl_mutex_enter
 #define	mutex_exit spl_mutex_exit
 #define	mutex_tryenter spl_mutex_tryenter
 #define	mutex_owned spl_mutex_owned
 #define	mutex_owner spl_mutex_owner
 
 void spl_mutex_destroy(kmutex_t *mp);
-void spl_mutex_enter(kmutex_t *mp);
 void spl_mutex_exit(kmutex_t *mp);
 int  spl_mutex_tryenter(kmutex_t *mp);
 int  spl_mutex_owned(kmutex_t *mp);
