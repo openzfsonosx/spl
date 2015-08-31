@@ -303,8 +303,13 @@ size_t	kmem_max_cached = KMEM_BIG_MAXBUF;	/* maximum kmem_alloc cache */
 //size_t	kmem_max_cached = KMEM_BIG_MAXBUF_32BIT; /* maximum kmem_alloc cache */
 //#endif
 
+/*
+ * Be aware that KMF_AUDIT does not release memory, and you will eventually
+ * grind to a halt. But it is useful to enable if you can trigger a memory
+ * fault, and wish to see the calling stack.
+ */
 #ifdef DEBUG
-int kmem_flags = KMF_AUDIT | KMF_DEADBEEF | KMF_REDZONE | KMF_CONTENTS;
+int kmem_flags = /*KMF_AUDIT |*/ KMF_DEADBEEF | KMF_REDZONE | KMF_CONTENTS;
 #else
 int kmem_flags = 0;
 #endif
