@@ -319,6 +319,14 @@ void spl_mutex_exit(kmutex_t *mp)
 #ifdef SPL_DEBUG_MUTEX
 	if (mp->leak) {
 		struct leak *leak = (struct leak *)mp->leak;
+		uint64_t locktime = leak->wdlist_locktime;
+		uint64_t noe = gethrestime_sec();
+		if ((locktime > 0) && (noe > locktime) &&
+			noe - locktime >= SPL_MUTEX_WATCHDOG_TIMEOUT) {
+			printf("SPL: mutex (%p) finally released after %llus by '%s':%llu\n",
+				   leak, noe - leak->wdlist_locktime, leak->wdlist_file,
+				   leak->wdlist_line);
+		}
 		leak->wdlist_locktime = 0;
 		leak->wdlist_file[0] = 0;
 		leak->wdlist_line = 0;
