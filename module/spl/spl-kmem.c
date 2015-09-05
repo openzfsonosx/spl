@@ -5496,6 +5496,7 @@ int spl_vm_pool_low(void)
 			printf("SPL pool low: new target %llu (smd: reaping)\n", newtarget);
 			kmem_reap();
 			kmem_reap_idspace();
+			return 0; // because this probably freeded up some memory (smd 5 sep)
 		}
 		return 1;
 	}
