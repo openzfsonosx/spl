@@ -5489,7 +5489,7 @@ int spl_vm_pool_low(void)
   unsigned int vm_page_free_min_scaled = vm_page_free_min * smd_scaler;
 
   if (vm_page_free_wanted > 0) {
-    return 1;  // we're paging, so we're low
+    return 1;  // we're paging, so we're low -- this will throttle arc
   }
 
   if (vm_page_free_count < vm_page_free_min_scaled) { // less than say 1.3GiB but not paging
