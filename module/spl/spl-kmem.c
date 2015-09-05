@@ -5492,10 +5492,10 @@ int spl_vm_pool_low(void)
   }
 
   if (vm_page_free_count < eight_percent) { // less than say 1.3GiB but not paging
-    printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
+    //printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
     kmem_reap();
     kmem_reap_idspace();
-    return (vm_page_free_count < (eight_percent / 4)); // if under 2%, throttle
+    return 0; // don't throttle arc, it is too aggressive at this point
   }
 
   //otherwise, fallthrough below
