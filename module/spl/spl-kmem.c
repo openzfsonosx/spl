@@ -3953,7 +3953,7 @@ static void memory_monitor_thread()
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
-				//printf("pressure: new target %llu\n", newtarget);
+				printf("SPL: memory_monitory_thread pressure: new target %llu\n", newtarget);
 			}
 
 			// Figure out if we should reap as well
@@ -5483,17 +5483,37 @@ kmem_used(void)
 
 int spl_vm_pool_low(void)
 {
+
+  // 3500 is normal vm_page_free_min, which is 13MiB; we would be good with 1.3GiB
+  unsigned int smd_scaler = 100;
+  unsigned int vm_page_free_min_scaled = vm_page_free_min * smd_scaler;
+
+  if (vm_page_free_wanted > 0) {
+    return 1;  // we're paging, so we're low
+  }
+
+  if (vm_page_free_count < vm_page_free_min_scaled) { // less than say 1.3GiB but not paging
+    printf("SPL: pool low: vm_page_free_count=%u vm_page_free_min_scaled=%u\n (reaping)", vm_page_free_count, vm_page_free_min_scaled);
+    kmem_reap();
+    kmem_reap_idspace();
+    return (vm_page_free_count < vm_page_free_min_scaled); // throttle if we haven't freed up memory
+  }
+
+  //otherwise, fallthrough below
+
+#if 0 // smd
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return 1;
 	}
 
-	if ( vm_page_free_count < vm_page_free_min ) {
+
+	if ( vm_page_free_count < vm_page_free_min_scaled ) {
 		uint64_t newtarget;
 		newtarget = kmem_used() -
 			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
-			printf("SPL pool low: new target %llu (smd: reaping)\n", newtarget);
+			printf("SPL pool low: new target %llu (smd: reaping) vm_page_free_wanted = %u\n", newtarget, vm_page_free_wanted);
 			kmem_reap();
 			kmem_reap_idspace();
 			return 0; // because this probably freeded up some memory (smd 5 sep)
