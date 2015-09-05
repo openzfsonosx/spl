@@ -5485,14 +5485,14 @@ int spl_vm_pool_low(void)
 {
 
   // 3500 is normal vm_page_free_min, which is 13MiB; we would be good with 1.3GiB
-  size_t eight_percent = (physmem / 12); // physmem  is in pages
+  unsigned int eight_percent = (physmem / 12); // physmem  is in pages
 
   if (vm_page_free_wanted > 0) {
     return 1;  // we're paging, so we're low -- this will throttle arc
   }
 
   if (vm_page_free_count < eight_percent) { // less than say 1.3GiB but not paging
-    printf("SPL: pool low: vm_page_free_count=%u eight_percent=%zu\n (reaping)", vm_page_free_count, eight_percent);
+    printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
     kmem_reap();
     kmem_reap_idspace();
     return (vm_page_free_count < eight_percent); // throttle if we haven't freed up memory
