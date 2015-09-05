@@ -51,7 +51,7 @@ struct utsname utsname = { { 0 } };
 
 unsigned int max_ncpus = 0;
 uint64_t  total_memory = 0;
-
+uint64_t  real_total_memory = 0;
 
 #include <sys/types.h>
 #include <sys/sysctl.h>
@@ -443,7 +443,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 	 * not in charge of all memory and we need to leave some room for
 	 * the OS X allocator. We internally add pressure if we step over it
 	 */
-
+    real_total_memory = total_memory;
 	total_memory = total_memory * 80ULL / 100ULL;
     physmem = total_memory / PAGE_SIZE;
 
