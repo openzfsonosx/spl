@@ -5495,7 +5495,7 @@ int spl_vm_pool_low(void)
     printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
     kmem_reap();
     kmem_reap_idspace();
-    return (vm_page_free_count < eight_percent); // throttle if we haven't freed up memory
+    return (vm_page_free_count < (eight_percent / 4)); // if under 2%, throttle
   }
 
   //otherwise, fallthrough below
