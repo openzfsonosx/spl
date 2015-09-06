@@ -5535,7 +5535,7 @@ int spl_vm_pool_low(void)
     if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
       kmem_reap();	
       kmem_reap_idspace();
-      return (spl_random(eight_percent / 4) > vm_page_free_count);
+      return (spl_random(vm_page_free_min * 4) > vm_page_free_count);
     } else {
       return 0;
     }
