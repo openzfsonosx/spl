@@ -41,6 +41,7 @@
 #include <sys/kmem_impl.h>
 #include <sys/vmem_impl.h>
 #include <kern/sched_prim.h>
+
 //===============================================================
 // Options
 //===============================================================
@@ -5480,7 +5481,37 @@ kmem_used(void)
   return (kmem_size() - kmem_avail()) - (vm_page_speculative_count * PAGE_SIZE); 
 }
 
+static inline unsigned int
+my_log2(unsigned int n)
+{
+  unsigned int i = n;
+  unsigned int j = 0;
 
+  while(i >>= 1) ++j;
+  return j;
+}
+
+static inline int
+am_i_reap_or_not(unsigned int free, unsigned int minmem, unsigned int maxmem)
+{
+  unsigned int rnd = 0;
+  unsigned int range = 0;
+  unsigned int i = 0;
+
+  if (free < minmem) {
+    return FALSE;
+  } else if (free >= maxmem) {
+    return TRUE;
+  } else {
+    // reap with probability integer_log2 (free-minmem)/256 expt -1
+    i = (free - minmem) >> 8;
+    if(i == 0) return TRUE;
+    range = my_log2(maxmem - minmem);
+    random_get_bytes((uint8_t *) &rnd, sizeof(unsigned int));
+    return ((rnd % range) > my_log2(i));
+  }
+}
+  
 int spl_vm_pool_low(void)
 {
 
@@ -5493,9 +5524,14 @@ int spl_vm_pool_low(void)
 
   if (vm_page_free_count < eight_percent) { // less than say 1.3GiB but not paging
     //printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
-    kmem_reap();
-    kmem_reap_idspace();
-    return (vm_page_free_count < (4 * vm_page_free_min)); // if we are approaching only 14000 pages free (54MiB), throttle
+    if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
+      kmem_reap();	
+      kmem_reap_idspace();
+      return 1;
+    } else {
+      return 0;
+    }
+
   }
 
   //otherwise, fallthrough below
