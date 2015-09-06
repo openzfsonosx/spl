@@ -5491,10 +5491,19 @@ my_log2(unsigned int n)
   return j;
 }
 
+static inline unsigned int
+spl_random(unsigned int range)
+{
+  unsigned int r;
+
+  (void) random_get_bytes((void *)&r, sizeof (unsigned int));
+
+  return (r % range);
+}
+
 static inline int
 am_i_reap_or_not(unsigned int free, unsigned int minmem, unsigned int maxmem)
 {
-  unsigned int rnd = 0;
   unsigned int range = 0;
   unsigned int i = 0;
 
@@ -5507,8 +5516,7 @@ am_i_reap_or_not(unsigned int free, unsigned int minmem, unsigned int maxmem)
     i = (free - minmem) >> 8;
     if(i == 0) return TRUE;
     range = my_log2(maxmem - minmem);
-    random_get_bytes((uint8_t *) &rnd, sizeof(unsigned int));
-    return ((rnd % range) > my_log2(i));
+    return (spl_random(range) > my_log2(i));
   }
 }
   
@@ -5527,7 +5535,7 @@ int spl_vm_pool_low(void)
     if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
       kmem_reap();	
       kmem_reap_idspace();
-      return 1;
+      return (spl_random(eight_percent) > vm_page_free_count);
     } else {
       return 0;
     }
