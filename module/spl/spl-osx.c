@@ -25,7 +25,6 @@
  *
  */
 
-
 #include <spl-debug.h>
 #include <sys/kmem.h>
 
@@ -49,8 +48,8 @@ struct utsname utsname = { { 0 } };
 //extern struct machine_info      machine_info;
 
 unsigned int max_ncpus = 0;
-static uint64_t  total_memory = 0;
-
+uint64_t  total_memory = 0;
+uint64_t  real_total_memory = 0;
 
 #include <sys/types.h>
 #include <sys/sysctl.h>
@@ -437,6 +436,13 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     len = sizeof(total_memory);
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
 
+	/*
+	 * Setting the total memory to physmem * 80% here, since kmem is
+	 * not in charge of all memory and we need to leave some room for
+	 * the OS X allocator. We internally add pressure if we step over it
+	 */
+    real_total_memory = total_memory;
+	total_memory = total_memory * 80ULL / 100ULL;
     physmem = total_memory / PAGE_SIZE;
 
     len = sizeof(utsname.sysname);

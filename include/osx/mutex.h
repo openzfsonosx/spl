@@ -30,7 +30,7 @@ typedef struct {
 /* To enable watchdog to keep an eye on mutex being held for too long
  * define this debug variable.
  */
-//#define SPL_DEBUG_MUTEX
+//#define SPL_DEBUG_MUTEX // smd - uncomment for lundman testing
 
 #ifdef SPL_DEBUG_MUTEX
 #define SPL_MUTEX_WATCHDOG_SLEEP   10 /* How long to sleep between checking */

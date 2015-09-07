@@ -1,0 +1,151 @@
+[Current status: 2015 11 08]
+
+Much of the spl memory mechanism has been removed
+(e.g., kmem_avail(), kmem_num_pages_wanted()) or is radically
+changed.
+
+This new system starts with the premise that xnu's
+variables vm_page_free_wanted, vm_page_free_count,
+vm_page_speculative_count and vm_page_free_min are
+sufficient to determine how much memory arc should be told
+is available.  It also retains and acts on the 80%
+deflation of total_mem that originated with Lundman in the
+hybrid branch.
+
+An spl_free variable is exposed to the zfs layer by a
+wrapper function.  This variable is meant to approximate
+Illumos's (freemem - lotsfree - needfree - desfree).
+
+spl_free is SIGNED, and will be negative when arc should
+give back memory.
+
+A further variable, spl_free_manual_pressure, is also
+exposed to arc.c, to allow a sysctl to force an arc shrink
+by arc_reclaim_thread(); a further wrapper allows
+arc_reclaim_thread() to reset the pressure when that
+thread has acted on it.  When spl_free_manual_pressure is
+positive, arc will quickly give back memory.
+
+Writes to these two variables are mutexed.
+
+spl_minimal_physmem_p() is used to determine when memory
+is really low.  it wraps spl_minimal_physmem_p_logic() for
+reasons which existed in previous incarnations.
+
+A trio of low-frequency threads, structured like
+arc_reclaim_thread() and similar threads in arc, each do a
+share of the main work.  They can be low frequency even on
+a busy system with lots of changes in non-zfs memory
+usage, mainly because ARC itself, by design, suppresses
+small and high-frequency memory availability information
+(e.g., Illumos's freemem variable).
+
+(The threads each use a shutdown variable, a mutex for the
+shutdown variable, and a condvar for controlling the while
+loop and acting as a callback target).
+
+spl_free_thread() manipulates the spl_free variable.  It
+sets spl_free to free memory + half of speculative mem,
+and then mostly decreases spl_free from there, for example
+when segkmem_total_mem_allocated is above thresholds, or
+spl_free is nearing 90% of real_total_memory.  ARC will
+grow to arc_max (or a large fraction thereof when DEBUG is
+enabled) but will not trigger OOM or glitching.
+Additionally, ARC will compete gently with the xnu UBC
+cache; heavy HFS use will cause ARC to shrink back for a
+while, whereas heavy ZFS use will cause UBC to shrink if
+there is only very light use of other filesystems.
+
+There is no non-negligible advantage in practice even on a
+heavy system with highly variable memory to running
+spl_free_thread more frequently, nor being more precise
+about actual memory availability even on a
+restricted-memory system.   ARC itself damps out such things.
+
+However, the VM_PAGE_FREE_MIN macro incorporates a pair of
+sysctl tunables that can vary the aggressiveness of spl
+with respect to other system memory users.   Discussed below.
+
+reap_thread() calls kmem_reap() and kmem_reap_idspace()
+periodically.  It will also call them when
+segkmem_total_mem_allocated has grown above 90% of the
+(deflated to 80% of physmem) total_memory, and when
+signalled to do so by another thread or by sysctl (both
+via the mutexed reap_now boolean variable), provided that
+calling kmem_reap* is likely to actually release memory.
+
+spl_mach_pressure_monitor_thread() calls
+mach_vm_pressure_monitor().  This call can block for
+minutes or even hours on lightly loaded systems, so it is
+sequestered into its own thread.  When a system is in
+tight memory, the call returns much more quickly.  This
+thread may adjust spl_mem, and may cause spl_mem to go
+negative, thus causing ARC to give back memory.  In
+previous incarnations, this thread did more (it represents
+the residue of the core of the memory_monitor_thread in
+hybrid and master).
+
+memory_monitor_thread() currently holds policy that
+affects reap_thread()'s behaviour.  Mostly it does work
+during the "background 80% real memory check".  In
+previous incarnations it did MUCH more.
+
+Differences from hybrid branch:
+
+	* KMEM_QUANTUM is 128k rather than 512k
+
+	* spl_cv_destroy() was noop, now it calls spl_cv_broadcast() defensively
+
+Debugging:
+
+	SPL_DEBUG_MUTEX is on, DEBUG is enabled in spl-mutex.c
+	dprintf() is a macro in spl-kmem.c
+	DEBUG is enabled in spl-kmem.c
+	DEBUG is enabled in spl-osx.c to enable stack backtrace
+
+	* when DEBUG is true in spl-kmem.c, randomly reap all the kmem caches
+		(and more often than Illumos kemem DEBUG does)
+
+	bunches of printfs and dprintfs in spl-kmem.c
+
+Tunables:
+
+	* vm_page_free_min_multiplier
+	* vm_page_free_min_min
+
+	(used for determining how much free memory
+	overhead to leave compared to vm_page_free_min
+	which comes from xnu)
+
+	Adjusting them printfs a "headroom" message.
+
+	When headroom goes up, non-ZFS consumers of memory see less pressure.
+	When headroom goes down, system memory pressure increases.
+	Small numbers of pages worth of difference can have an enormous impact 
+	      on system performance on a busy, tight-memory system.
+	xnu likes being in the region where  vm_page_free_count is between
+		vm_page_free_min and vm_page_free_target, which on all systems
+		of all memory sizes I've seen 3500 and 4000 pages, respecitvely.
+        By default, spl has "incursions" into that region, otherwise ARC melts away
+	   to nothingness.   However, it's only small incursions, otherwise
+	   system performance tanks (glitches, OOMs, etc.)
+
+	* several tunables and kstats related to the operation of the three work threads
+
+	* several tunables related to the new manual pressure mechanism
+		(in paricular, spl_spl_free_manual_pressure kstat stays nonzero until arc deals
+		with the manual pressure input)
+
+	* [temporarily, probably DEBUG only eventually] an exponential moving average of the
+	  amount of policy-based adjustment of memory from "actual free memory" to the
+	  spl_free variable
+
+CAVEAT:
+
+	I don't unload the spl kext much.  Right at this moment kextunload might not work.
+
+OTHER CHANGES from master not in hybrid:
+
+      Bring back VNOP_LOOKUP (lundman)
+      Display SPL version on module unload (lundman)
+      
