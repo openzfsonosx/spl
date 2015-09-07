@@ -111,6 +111,8 @@ extern uint64_t		zfs_active_rwlock;
 // will get cleared once we are under it.
 uint64_t            pressure_bytes_target = 0;
 
+extern uint64_t            total_memory;
+
 #define MULT 1
 
 static char kext_version[64] = SPL_META_VERSION "-" SPL_META_RELEASE SPL_DEBUG_STR;
@@ -5430,6 +5432,16 @@ int spl_vm_pool_low(void)
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
 			//printf("pool low: new target %llu\n", newtarget);
+		}
+		return 1;
+	}
+
+	if (segkmem_total_mem_allocated >= total_memory) {
+		pressure_bytes_target = segkmem_total_mem_allocated-total_memory;
+		static int warn =1;
+		if (warn) {
+			warn = 0;
+			printf("SPL: at 80%% target, pressure starting\n");
 		}
 		return 1;
 	}

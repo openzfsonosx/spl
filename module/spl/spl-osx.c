@@ -49,7 +49,7 @@ struct utsname utsname = { { 0 } };
 //extern struct machine_info      machine_info;
 
 unsigned int max_ncpus = 0;
-static uint64_t  total_memory = 0;
+uint64_t  total_memory = 0;
 
 
 #include <sys/types.h>
@@ -312,20 +312,20 @@ int
 getpcstack(uintptr_t *pcstack, int pcstack_limit)
 {
 #ifdef DEBUG
-    
+
     int  depth = 0;
     void *stackptr;
-    
+
 #if defined (__i386__)
     __asm__ volatile("movl %%ebp, %0" : "=m" (stackptr));
 #elif defined (__x86_64__)
     __asm__ volatile("movq %%rbp, %0" : "=m" (stackptr));
 #endif
-    
+
     int frame_index;
     int nframes = pcstack_limit;
     cframe_t *frame = (cframe_t *)stackptr;
-    
+
     for (frame_index = 0; frame_index < nframes; frame_index++) {
         vm_offset_t curframep = (vm_offset_t) frame;
         if (!curframep)
@@ -340,7 +340,7 @@ getpcstack(uintptr_t *pcstack, int pcstack_limit)
         pcstack[depth++] = frame->caller;
         frame = frame->prev;
     }
-    
+
     return depth;
 #else
     return 0;
@@ -437,6 +437,13 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     len = sizeof(total_memory);
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
 
+	/*
+	 * Setting the total memory to physmem * 80% here, since kmem is
+	 * not in charge of all memory and we need to leave some room for
+	 * the OS X allocator. We internally add pressure if we step over it
+	 */
+
+	total_memory = total_memory * 80ULL / 100ULL;
     physmem = total_memory / PAGE_SIZE;
 
     len = sizeof(utsname.sysname);
@@ -469,7 +476,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
           SPL_META_VERSION, SPL_META_RELEASE, SPL_DEBUG_STR,
 		max_ncpus, total_memory, physmem,
 		spl_cpufeature_smap ? "SMAP" : "");
-    
+
 	return KERN_SUCCESS;
 }
 
