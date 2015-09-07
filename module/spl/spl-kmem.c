@@ -41,7 +41,6 @@
 #include <sys/kmem_impl.h>
 #include <sys/vmem_impl.h>
 #include <kern/sched_prim.h>
-
 //===============================================================
 // Options
 //===============================================================
@@ -2907,7 +2906,7 @@ kmem_cache_update(kmem_cache_t *cp)
       if(!kmem_move_noreap &&
 	 ((debug_rand % kmem_mtb_reap) == 0)) {
 	// no mutex above, so no need to give it up as in kmem_cache_scan()
-	printf("SPL: kmem_cache_update random debug reap %u, doing %s\n", ++kmem_mtb_reap_count, cp->cache_name);
+	//printf("SPL: kmem_cache_update random debug reap %u, doing %s\n", ++kmem_mtb_reap_count, cp->cache_name);
 	kmem_cache_reap(cp);
       }
     }
@@ -5422,14 +5421,14 @@ kmem_cache_scan(kmem_cache_t *cp)
                 mutex_exit(&cp->cache_lock);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_reaps);
 		kmem_mtb_reap_count++;
-		printf("SPL: kmem_cache_scan random debug reap %llu\n", kmem_move_stats.kms_debug_reaps);
+		//printf("SPL: kmem_cache_scan random debug reap %llu\n", kmem_move_stats.kms_debug_reaps);
                 kmem_cache_reap(cp);
                 return;
             } else if ((debug_rand % kmem_mtb_move) == 0) {
                 KMEM_STAT_ADD(kmem_move_stats.kms_scans);
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_scans);
-		printf("SPL: kmem_cache_scan random debug move scans=%llu debug_scans=%llu\n",
-		       kmem_move_stats.kms_scans, kmem_move_stats.kms_debug_scans);
+		//printf("SPL: kmem_cache_scan random debug move scans=%llu debug_scans=%llu\n",
+		//       kmem_move_stats.kms_scans, kmem_move_stats.kms_debug_scans);
                 kmd->kmd_scans++;
                 (void) kmem_move_buffers(cp,
                                          kmem_reclaim_scan_range, 1, KMM_DEBUG);
@@ -5523,16 +5522,18 @@ am_i_reap_or_not(unsigned int free, unsigned int minmem, unsigned int maxmem)
 int spl_vm_pool_low(void)
 {
 
-  // 3500 is normal vm_page_free_min, which is 13MiB; we would be good with 1.3GiB
-  unsigned int eight_percent = (physmem / 12); // physmem  is in pages
+  // 3500 is normal vm_page_free_min, which is 13MiB
+  // 8% of memory on 16GiB box ~ 1.28GiB - physmem/8 - this was really aggressively empty
+  // 2% of memory on 16GiB box - 320MiB - physmem/50 -
+  unsigned int two_percent = (physmem / 50); // physmem  is in pages
 
   if (vm_page_free_wanted > 0) {
     return 1;  // we're paging, so we're low -- this will throttle arc
   }
 
-  if (vm_page_free_count < eight_percent) { // less than say 1.3GiB but not paging
+  if (vm_page_free_count < two_percent) { // less than say 1.3GiB but not paging
     //printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
-    if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
+    if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, two_percent)) {
       kmem_reap();	
       kmem_reap_idspace();
       return (spl_random(vm_page_free_min * 4) > vm_page_free_count);
@@ -5542,15 +5543,14 @@ int spl_vm_pool_low(void)
 
   }
 
-  //otherwise, fallthrough below
+  //otherwise, we have more than 8% real xnu free memory, so fallthrough below
 
 #if 0 // smd
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return 1;
 	}
 
-
-	if ( vm_page_free_count < vm_page_free_min_scaled ) {
+	if ( vm_page_free_count < vm_page_free_min ) {
 		uint64_t newtarget;
 		newtarget = kmem_used() -
 			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
