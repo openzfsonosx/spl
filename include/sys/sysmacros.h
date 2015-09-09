@@ -104,6 +104,7 @@ extern unsigned int max_ncpus;
  * stay below this, but kmem_reap needs to be higher.
  */
 #define minclsyspri  81 /* BASEPRI_KERNEL */
+#define defclsyspri  81 /* BASEPRI_KERNEL */
 #define maxclsyspri  91
 
 
