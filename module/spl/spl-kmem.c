@@ -3936,6 +3936,20 @@ static void memory_monitor_thread()
 			// Figure out if we should reap as well
 			if (zfs_lbolt() - last_reap >= (hz * 60)) {
 				last_reap = zfs_lbolt();
+
+				uint64_t nintypct = total_memory * 90ULL / 100ULL;
+
+				if (segkmem_total_mem_allocated >= nintypct) {
+					pressure_bytes_target = MAX(pressure_bytes_target,
+								segkmem_total_mem_allocated - nintypct);
+					printf("SPL: 90%% hit, triggering reap\n");
+					kmem_reap();
+					kpreempt(KPREEMPT_SYNC);
+					kmem_reap_idspace();
+				}
+
+
+
 #if 0
 				extern unsigned int memorystatus_level;
 				printf("memorystatus_level %u\n", memorystatus_level);
@@ -4371,7 +4385,6 @@ spl_kmem_mp_init(void)
 //    register_cpu_setup_func(kmem_cpu_setup, NULL);
 //    mutex_exit(&cpu_lock);
 #endif
-
     kmem_update_timeout(NULL);
 
 #ifndef APPLE
@@ -5436,13 +5449,8 @@ int spl_vm_pool_low(void)
 		return 1;
 	}
 
-	if (segkmem_total_mem_allocated >= total_memory) {
-		pressure_bytes_target = segkmem_total_mem_allocated-total_memory;
-		static int warn =1;
-		if (warn) {
-			warn = 0;
-			printf("SPL: at 80%% target, pressure starting\n");
-		}
+	uint64_t nintypct = total_memory * 90ULL / 100ULL;
+	if (segkmem_total_mem_allocated >= nintypct) {
 		return 1;
 	}
 
