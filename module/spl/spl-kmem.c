@@ -5523,18 +5523,19 @@ int spl_vm_pool_low(void)
 {
 
   // 3500 is normal vm_page_free_min, which is 13MiB
-  // 8% of memory on 16GiB box ~ 1.28GiB - physmem/8 - this was really aggressively empty
-  // 2% of memory on 16GiB box - 320MiB - physmem/50 -
-  unsigned int two_percent = (physmem / 50); // physmem  is in pages
+  // 8% of memory on 16GiB box ~ 1.28GiB - physmem/12 - this was really aggressively empty
+  // 2% of memory on 16GiB box - 320MiB - physmem/50 - on new arc.c from illumos, this didn't get back memory
+  unsigned int eight_percent = (physmem / 12); // physmem  is in pages
 
   if (vm_page_free_wanted > 0) {
     return 1;  // we're paging, so we're low -- this will throttle arc
   }
 
-  if (vm_page_free_count < two_percent) { // less than say 1.3GiB but not paging
+  if (vm_page_free_count < eight_percent) { // less than say 1.3GiB but not paging
     //printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
-    if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, two_percent)) {
-      kmem_reap();	
+    if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
+      kmem_reap();
+      kpreempt(KPREEMPT_SYNC); // lundman - maybe idspace wasn't happening?
       kmem_reap_idspace();
       return (spl_random(vm_page_free_min * 4) > vm_page_free_count);
     } else {
