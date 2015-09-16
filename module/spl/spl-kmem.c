@@ -3981,7 +3981,7 @@ static void memory_monitor_thread()
 				if (memorystatus_level < 30) {
 					printf("SPL: memorystatus_level low, reaping\n");
 					kmem_reap();
-					kpreempt(KPREEMPT_SYNC);
+					// kpreempt(KPREEMPT_SYNC); - no - smd
 					kmem_reap_idspace();
 					printf("SPL: reaping complete.\n");
 
@@ -5535,7 +5535,7 @@ int spl_vm_pool_low(void)
     //printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
     if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
       kmem_reap();
-      kpreempt(KPREEMPT_SYNC); // lundman - maybe idspace wasn't happening?
+      // kpreempt(KPREEMPT_SYNC); // lundman - maybe idspace wasn't happening? - no, not this (smd)
       kmem_reap_idspace();
       return (spl_random(vm_page_free_min * 4) > vm_page_free_count);
     } else {
