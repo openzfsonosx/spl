@@ -3096,7 +3096,17 @@ kmem_avail(void)
 #endif
   //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
   // smd - spike the vm_page_speculative_count, that can be hundreds of MB or small numbers of MB
-  return (vm_page_free_count) * PAGE_SIZE;
+  uint64_t rt_t_diff = real_total_memory - total_memory;
+  uint64_t free_count_bytes = 0;
+
+  free_count_bytes = vm_page_free_count * PAGE_SIZE;
+
+  if (free_count_bytes <= rt_t_diff)
+    return 0;
+
+  return (rt_t_diff - free_count_bytes);
+  
+  // return (vm_page_free_count) * PAGE_SIZE;
 }
 
 /*
