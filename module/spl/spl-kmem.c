@@ -112,6 +112,7 @@ extern uint64_t		zfs_active_rwlock;
 uint64_t            pressure_bytes_target = 0;
 
 extern uint64_t            total_memory;
+extern uint64_t		real_total_memory;
 
 #define MULT 1
 
@@ -3104,7 +3105,7 @@ kmem_avail(void)
   if (free_count_bytes <= rt_t_diff)
     return 0;
 
-  return (rt_t_diff - free_count_bytes);
+  return (free_count_bytes - rt_t_diff);
   
   // return (vm_page_free_count) * PAGE_SIZE;
 }
