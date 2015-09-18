@@ -5471,6 +5471,9 @@ size_t
 kmem_num_pages_wanted()
 {
 
+  if (vm_page_free_wanted > 0)
+    return vm_page_free_wanted;
+
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
 	}
