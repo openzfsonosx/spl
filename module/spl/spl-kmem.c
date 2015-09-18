@@ -5484,7 +5484,8 @@ kmem_num_pages_wanted()
 size_t
 kmem_size(void)
 {
-    return (physmem * PAGE_SIZE);
+  //return (physmem * PAGE_SIZE);
+  return total_memory; // smd
 }
 
 size_t
@@ -5498,7 +5499,7 @@ kmem_used(void)
   // probably important because we use it in calculating spl_vm_pool_low
   // 
   
-  return (kmem_size() - kmem_avail()) - (vm_page_speculative_count * PAGE_SIZE); 
+  return (kmem_size() - kmem_avail());
 }
 
 static inline unsigned int
