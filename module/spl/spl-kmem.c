@@ -3100,6 +3100,9 @@ kmem_avail(void)
 
   if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
     return 0;
+
+  if (vmem_size(heap_arena, VMEM_FREE) < ((vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE)) // extreme?
+    return 0;
     
   uint64_t rt_t_diff = real_total_memory - total_memory;
   uint64_t free_count_bytes = 0;
@@ -3109,7 +3112,7 @@ kmem_avail(void)
   if (free_count_bytes <= rt_t_diff)
     return 0;
 
-  return (free_count_bytes - rt_t_diff);
+  return (MIN(free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE));
   
   // return (vm_page_free_count) * PAGE_SIZE;
 }
