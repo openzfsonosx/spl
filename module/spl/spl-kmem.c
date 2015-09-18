@@ -3109,6 +3109,9 @@ kmem_avail(void)
   if (free_count_bytes <= rt_t_diff) // actual free is somehow less than 20%
     return 0;
 
+  if (pressure_bytes_target > 0 && pressure_bytes_target < (total_memory - free_count_bytes))
+    return 0;
+
   return (MIN((free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE)));
   
   // return (vm_page_free_count) * PAGE_SIZE;
