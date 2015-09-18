@@ -114,7 +114,7 @@ uint64_t            pressure_bytes_target = 0;
 extern uint64_t            total_memory;
 extern uint64_t		real_total_memory;
 
-#define MULT 4
+#define MULT 1
 
 static char kext_version[64] = SPL_META_VERSION "-" SPL_META_RELEASE SPL_DEBUG_STR;
 
@@ -3119,6 +3119,28 @@ kmem_avail(void)
   
   // return (vm_page_free_count) * PAGE_SIZE;
 }
+
+// smd
+int64_t
+kmem_avail_may_be_negative(void)
+{
+  int64_t a;
+
+  a=kmem_avail();
+  if(a > 0)
+    return (a);
+
+  if (pressure_bytes_target > 0 && \
+      pressure_bytes_target < kmem_used())
+    return (pressure_bytes_target-kmem_used()); // yes, negative
+
+  if (vm_page_free_wanted > 0)
+    return (-(vm_page_free_wanted * PAGE_SIZE)); // yes, negative
+
+  return 0;
+
+}
+
 
 /*
  * Return the maximum amount of memory that is (in theory) allocatable
