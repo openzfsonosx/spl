@@ -3112,7 +3112,7 @@ kmem_avail(void)
   if (free_count_bytes <= rt_t_diff)
     return 0;
 
-  return (MIN(free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE));
+  return (MIN((free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE)));
   
   // return (vm_page_free_count) * PAGE_SIZE;
 }
