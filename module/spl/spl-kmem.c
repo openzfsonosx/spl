@@ -3101,9 +3101,6 @@ kmem_avail(void)
   if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
     return 0;
 
-  if (pressure_bytes_target > 0 && pressure_bytes_target < kmem_used()) // 'pressure' is not yet satisfied
-    return 0;
-
   uint64_t rt_t_diff = real_total_memory - total_memory;
   uint64_t free_count_bytes = 0;
 
