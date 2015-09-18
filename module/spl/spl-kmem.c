@@ -3101,15 +3101,15 @@ kmem_avail(void)
   if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
     return 0;
 
-  if (vmem_size(heap_arena, VMEM_FREE) < ((vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE)) // extreme?
+  if (pressure_bytes_target > 0 && pressure_bytes_target < kmem_used()) // 'pressure' is not yet satisfied
     return 0;
-    
+
   uint64_t rt_t_diff = real_total_memory - total_memory;
   uint64_t free_count_bytes = 0;
 
   free_count_bytes = vm_page_free_count * PAGE_SIZE;
 
-  if (free_count_bytes <= rt_t_diff)
+  if (free_count_bytes <= rt_t_diff) // actual free is somehow less than 20%
     return 0;
 
   return (MIN((free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE)));
@@ -4027,11 +4027,13 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		if (ks->spl_simulate_pressure.value.ui64) {
 			pressure_bytes_target = kmem_used() -
 				(ks->spl_simulate_pressure.value.ui64 * 1024 * 1024);
-			kmem_reap();
-			kmem_reap_idspace();
 			if (ks->spl_simulate_pressure.value.ui64 == 666) {
 			  printf("SPL: simulate pressure 666, dumping stack\n");
 			  spl_backtrace("SPL: simulate_pressure 666");
+			} else {
+			  kmem_reap();
+			  kpreempt(KPREEMPT_SYNC);
+			  kmem_reap_idspace();
 			}
 		}
 	} else {
@@ -5471,8 +5473,12 @@ size_t
 kmem_num_pages_wanted()
 {
 
-  if (vm_page_free_wanted > 0)
+  if (vm_page_free_wanted > 0) {
+    if (pressure_bytes_target > 0)
+      pressure_bytes_target -= vm_page_free_wanted;
     return vm_page_free_wanted;
+  }
+
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
@@ -5568,7 +5574,6 @@ int spl_vm_pool_low(void)
 
   //otherwise, we have more than 8% real xnu free memory, so fallthrough below
 
-#if 0 // smd
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return 1;
 	}
@@ -5582,7 +5587,7 @@ int spl_vm_pool_low(void)
 			printf("SPL pool low: new target %llu (smd: reaping) vm_page_free_wanted = %u\n", newtarget, vm_page_free_wanted);
 			kmem_reap();
 			kmem_reap_idspace();
-			return 0; // because this probably freeded up some memory (smd 5 sep)
+			return 1;
 		}
 		return 1;
 	}
