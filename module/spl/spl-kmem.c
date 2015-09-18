@@ -5588,11 +5588,11 @@ int spl_vm_pool_low(void)
     if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
       kmem_reap();
       kmem_reap_idspace();
-      return 1; // (spl_random(vm_page_free_min * 4) > vm_page_free_count);
+      // fall through // return 1; // (spl_random(vm_page_free_min * 4) > vm_page_free_count);
     }
   }
 
-  // fallthrough: more than 8% of memory, OR we have not reaped
+  // check on pressure.  (was fallthrough: more than 8% of memory, OR we have not reaped)
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return 1;
