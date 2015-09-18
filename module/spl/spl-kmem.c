@@ -114,7 +114,7 @@ uint64_t            pressure_bytes_target = 0;
 extern uint64_t            total_memory;
 extern uint64_t		real_total_memory;
 
-#define MULT 1
+#define MULT 4
 
 static char kext_version[64] = SPL_META_VERSION "-" SPL_META_RELEASE SPL_DEBUG_STR;
 
@@ -3101,15 +3101,18 @@ kmem_avail(void)
   if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
     return 0;
 
-  uint64_t rt_t_diff = real_total_memory - total_memory;
+  uint64_t rt_t_diff = 0;
   uint64_t free_count_bytes = 0;
 
+  rt_t_diff = real_total_memory - total_memory;
   free_count_bytes = vm_page_free_count * PAGE_SIZE;
 
   if (free_count_bytes <= rt_t_diff) // actual free is somehow less than 20%
     return 0;
 
-  if (pressure_bytes_target > 0 && pressure_bytes_target < (total_memory - free_count_bytes))
+  if (pressure_bytes_target > 0 && \
+      pressure_bytes_target < (total_memory - free_count_bytes) && \
+      pressure_bytes_target < vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)))
     return 0;
 
   return (MIN((free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE)));
@@ -3967,7 +3970,7 @@ static void memory_monitor_thread()
             // kmems locking strategy.
 			uint64_t newtarget;
 			newtarget = kmem_used() -
-				(os_num_pages_wanted * PAGESIZE * MULT);
+			  (os_num_pages_wanted * PAGESIZE * MULT);
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
@@ -5473,15 +5476,14 @@ size_t
 kmem_num_pages_wanted()
 {
 
-  if (vm_page_free_wanted > 0) {
-    if (pressure_bytes_target > 0)
-      pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE);
-    return vm_page_free_wanted;
-  }
-
-
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
+	}
+
+	if (vm_page_free_wanted > 0) {
+	  if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
+	    pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);	
+	  return vm_page_free_wanted * MULT;
 	}
 
     return 0;
@@ -5563,22 +5565,18 @@ int spl_vm_pool_low(void)
     //printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
     if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
       kmem_reap();
-      // kpreempt(KPREEMPT_SYNC); // lundman - maybe idspace wasn't happening? - no, not this (smd)
       kmem_reap_idspace();
-      return (spl_random(vm_page_free_min * 4) > vm_page_free_count);
-    } else {
-      return 0;
+      return 1; // (spl_random(vm_page_free_min * 4) > vm_page_free_count);
     }
-
   }
 
-  //otherwise, we have more than 8% real xnu free memory, so fallthrough below
+  // fallthrough: more than 8% of memory, OR we have not reaped
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return 1;
 	}
 
-	if ( vm_page_free_count < vm_page_free_min ) {
+	if ( vm_page_free_count < vm_page_free_min ) { // this is very tight and unlikely to be called
 		uint64_t newtarget;
 		newtarget = kmem_used() -
 			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
