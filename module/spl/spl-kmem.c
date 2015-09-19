@@ -3121,7 +3121,7 @@ kmem_avail(void)
   //return (MIN((free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE)));
   //return (free_count_bytes - rt_t_diff);
   
-  return (vm_page_free_count) * PAGE_SIZE;
+  return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
 }
 
 // smd
@@ -4054,6 +4054,10 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	if (rw == KSTAT_WRITE) {
 
 		if (ks->spl_simulate_pressure.value.ui64) {
+		  printf("SPL: pressure_bytes_target_sysctl %lu, previous pressure %lu, kmem_used() %lu\n",
+			 kp->spl_simulate_pressure.value.ui64*1024*1024,
+			 pressure_bytes_target,
+			 kmem_used);
 			pressure_bytes_target = kmem_used() -
 				(ks->spl_simulate_pressure.value.ui64 * 1024 * 1024);
 			if (ks->spl_simulate_pressure.value.ui64 == 666) {
@@ -4070,7 +4074,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_active_threads.value.ui64 = zfs_threads;
 		ks->spl_active_mutex.value.ui64 = zfs_active_mutex;
 		ks->spl_active_rwlock.value.ui64 = zfs_active_rwlock;
-		ks->spl_simulate_pressure.value.ui64 = 0;
+		ks->spl_simulate_pressure.value.ui64 = pressure_bytes_target;
 	}
 
 	return (0);
@@ -5536,18 +5540,28 @@ kmem_used(void)
   return (kmem_size() - kmem_avail());
 }
 
-static inline unsigned int
-my_log2(unsigned int n)
+static inline uint64_t
+my_log2(uint64_t n)
 {
-  unsigned int i = n;
-  unsigned int j = 0;
+  uint64_t i = n;
+  uint64_t j = 0;
 
   while(i >>= 1) ++j;
   return j;
 }
 
+static inline uint64_t
+spl_random64(uint64_t range)
+{
+  uint64_t r;
+
+  (void) random_get_bytes((void *)&r, sizeof (uint64_t));
+
+  return (r % range);
+}
+
 static inline unsigned int
-spl_random(unsigned int range)
+spl_random32(unsigned int range)
 {
   unsigned int r;
 
@@ -5556,11 +5570,11 @@ spl_random(unsigned int range)
   return (r % range);
 }
 
-static inline int
-am_i_reap_or_not(unsigned int free, unsigned int minmem, unsigned int maxmem)
+static inline uint64_t
+am_i_reap_or_not(uint64_t free, uint64_t minmem, uint64)t maxmem)
 {
-  unsigned int range = 0;
-  unsigned int i = 0;
+  uint64_t range = 0;
+  uint64_t i = 0;
 
   if (free < minmem) {
     return FALSE;
@@ -5571,32 +5585,43 @@ am_i_reap_or_not(unsigned int free, unsigned int minmem, unsigned int maxmem)
     i = (free - minmem) >> 8;
     if(i == 0) return TRUE;
     range = my_log2(maxmem - minmem);
-    return (spl_random(range) > my_log2(i));
+    return (spl_random64(range) > my_log2(i));
   }
 }
   
-int spl_vm_pool_low(void)
+int
+spl_vm_pool_low(void)
 {
 
   // 3500 is normal vm_page_free_min, which is 13MiB
   // 8% of memory on 16GiB box ~ 1.28GiB - physmem/12 - this was really aggressively empty
   // 2% of memory on 16GiB box - 320MiB - physmem/50 - on new arc.c from illumos, this didn't get back memory
-  unsigned int eight_percent = (physmem / 12); // physmem  is in pages
+  uint64_t  eight_percent = (physmem / 12); // physmem  is in pages
 
   if (vm_page_free_wanted > 0) {
     return 1;  // we're paging, so we're low -- this will throttle arc
   }
+
+  if (am_i_reap_or_not(vmem_size(heap_arena, VMEM_FREE),
+		       vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)),
+		       vemm_size(heap_arena, (VMEM_ALLOC | VMEM_FREE) / 92 * 100))) {
+    printf("SPL: am_i_reap_or_not true for heap_arena free %zd, alloc %zd, reaping\n",
+	   vmem_size(heap_arena, VMEM_FREE),
+	   vmem_size(heap_arena, (VMEM_ALLOC|VMEM_FREE)));
+    kmem_reap();
+    kmem_reap_idspace();
+    return 1;
+  }
+    
 
   if (vm_page_free_count < eight_percent) { // less than say 1.3GiB but not paging
     //printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
     if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
       kmem_reap();
       kmem_reap_idspace();
-      // fall through // return 1; // (spl_random(vm_page_free_min * 4) > vm_page_free_count);
+      return (spl_random64(vm_page_free_min * 4) > vm_page_free_count); // 14000 (54MiB) vs free_count
     }
   }
-
-  // check on pressure.  (was fallthrough: more than 8% of memory, OR we have not reaped)
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return 1;
