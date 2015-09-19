@@ -4055,7 +4055,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 
 		if (ks->spl_simulate_pressure.value.ui64) {
 		  printf("SPL: pressure_bytes_target_sysctl %lu, previous pressure %lu, kmem_used() %lu\n",
-			 kp->spl_simulate_pressure.value.ui64*1024*1024,
+			 ks->spl_simulate_pressure.value.ui64*1024*1024,
 			 pressure_bytes_target,
 			 kmem_used);
 			pressure_bytes_target = kmem_used() -
@@ -5571,7 +5571,7 @@ spl_random32(unsigned int range)
 }
 
 static inline uint64_t
-am_i_reap_or_not(uint64_t free, uint64_t minmem, uint64)t maxmem)
+am_i_reap_or_not(uint64_t free, uint64_t minmem, uint64_t maxmem)
 {
   uint64_t range = 0;
   uint64_t i = 0;
