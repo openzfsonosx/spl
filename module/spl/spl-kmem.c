@@ -5507,8 +5507,8 @@ kmem_num_pages_wanted()
 	}
 
 	if (vm_page_free_wanted > 0) {
-	  if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
-	    pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);	
+	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
+	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);	
 	  return vm_page_free_wanted * MULT;
 	}
 
