@@ -4000,7 +4000,7 @@ static void memory_monitor_thread()
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
-				printf("SPL: memory_monitory_thread pressure: new target %lu\n", newtarget);
+				printf("SPL: memory_monitory_thread pressure: new target %llu\n", newtarget);
 			}
 
 			// Figure out if we should reap as well
@@ -4017,9 +4017,9 @@ static void memory_monitor_thread()
 					kpreempt(KPREEMPT_SYNC);
 					kmem_reap_idspace();
 				} else if (pressure_bytes_target) {
-				  printf("SPL: releasing pressure (was %lu), segkmem_total_mem_allocated=%lu\n",
-					 prssure_bytes_target,
-					 segkmen_total_mem_allocated);
+				  printf("SPL: releasing pressure (was %llu), segkmem_total_mem_allocated=%llu\n",
+					 pressure_bytes_target,
+					 segkmem_total_mem_allocated);
 				  pressure_bytes_target = 0;
 				}
 
@@ -4058,10 +4058,10 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	if (rw == KSTAT_WRITE) {
 
 		if (ks->spl_simulate_pressure.value.ui64) {
-		  printf("SPL: pressure_bytes_target_sysctl %lu, previous pressure %lu, kmem_used() %lu\n",
+		  printf("SPL: pressure_bytes_target_sysctl %llu, previous pressure %llu, kmem_used() %lu\n",
 			 ks->spl_simulate_pressure.value.ui64*1024*1024,
 			 pressure_bytes_target,
-			 kmem_used);
+			 kmem_used());
 			pressure_bytes_target = kmem_used() -
 				(ks->spl_simulate_pressure.value.ui64 * 1024 * 1024);
 			if (ks->spl_simulate_pressure.value.ui64 == 666) {
@@ -4092,7 +4092,7 @@ spl_kmem_init(uint64_t total_memory)
     int use_large_pages = 0;
     size_t maxverify, minfirewall;
 
-    printf("SPL: Total memory %lu\n", total_memory);
+    printf("SPL: Total memory %llu\n", total_memory);
 
 	sysctl_register_oid(&sysctl__spl);
 	sysctl_register_oid(&sysctl__spl_kext_version);
@@ -5610,7 +5610,7 @@ spl_vm_pool_low(void)
       am_i_reap_or_not(vmem_size(heap_arena, VMEM_FREE),
 		       vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)),
 		       vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE) / 92 * 100))) {
-    printf("SPL: am_i_reap_or_not true for heap_arena free %lld, alloc %lld, reaping\n",
+    printf("SPL: am_i_reap_or_not true for heap_arena free %lu, alloc %lu, reaping\n",
 	   vmem_size(heap_arena, VMEM_FREE),
 	   vmem_size(heap_arena, (VMEM_ALLOC|VMEM_FREE)));
     kmem_reap();
@@ -5638,7 +5638,7 @@ spl_vm_pool_low(void)
 			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
-			printf("SPL pool low: new target %lu (smd: reaping) vm_page_free_wanted = %lu\n", newtarget, vm_page_free_wanted);
+			printf("SPL pool low: new target %llu (smd: reaping) vm_page_free_wanted = %u\n", newtarget, vm_page_free_wanted);
 			kmem_reap();
 			kmem_reap_idspace();
 			return 1;
