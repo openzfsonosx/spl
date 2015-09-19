@@ -60,6 +60,10 @@
 // proxy to the machine experiencing memory pressure.
 extern unsigned int vm_page_free_wanted; // 0 by default smd
 extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min
+uint32_t vm_page_free_min_multiplier = 4;
+uint32_t vm_page_free_min_min = 256*1024*1024/4096;
+#define VM_PAGE_FREE_MIN (MAX(vm_page_free_min * vm_page_free_min_multiplier, vm_page_free_min_min))
+uint32_t kmem_avail_use_spec = 1;
 extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
 extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
 
@@ -110,6 +114,10 @@ extern uint64_t		zfs_active_rwlock;
 // Set the memory target wanted when we detect pressure, this
 // will get cleared once we are under it.
 uint64_t            pressure_bytes_target = 0;
+// signalling kmem_avail() and kmem_num_pages_wanted()
+#define PRESSURE_KMEM_AVAIL 1<<0
+#define PRESSURE_KMEM_NUM_PAGES_WANTED 1<<1
+static uint64_t	    pressure_bytes_signal = 0;
 
 extern uint64_t            total_memory;
 extern uint64_t		real_total_memory;
@@ -486,6 +494,9 @@ typedef struct spl_stats {
     kstat_named_t spl_active_rwlock;
     kstat_named_t spl_monitor_thread_wake_count;
     kstat_named_t spl_simulate_pressure;
+  kstat_named_t spl_vm_page_free_min_multiplier;
+  kstat_named_t spl_vm_page_free_min_min;
+  kstat_named_t spl_kmem_avail_use_spec;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -495,6 +506,9 @@ static spl_stats_t spl_stats = {
     {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
     {"simulate_pressure", KSTAT_DATA_UINT64},
+    {"vm_page_free_multiplier", KSTAT_DATA_UINT64},
+    {"vm_page_free_min_min", KSTAT_DATA_UINT64},
+    {"kmem_avail_use_spec", KSTAT_DATA_INT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -3085,7 +3099,7 @@ kmem_cache_stat(kmem_cache_t *cp, char *name)
  * On 32-bit systems, physical memory may exceed virtual memory,
  * we just truncate the result at 1GB.
  */
-size_t
+int64_t
 kmem_avail(void)
 {
 #ifndef APPLE
@@ -3098,49 +3112,38 @@ kmem_avail(void)
   //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
   // smd - spike the vm_page_speculative_count, that can be hundreds of MB or small numbers of MB
 
-  if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
-    return 0;
+  if (pressure_bytes_signal & PRESSURE_KMEM_AVAIL) { // set from 90% and reap
+    printf("SPL: got pressure bytes signal in kmem_avail()\n");
+    pressure_bytes_signal &= ~(PRESSURE_KMEM_AVAIL);;
+    return (-128*1024*1024); // get 128MiB from arc
+  }
 
-  uint64_t rt_t_diff = 0;
-  uint64_t free_count_bytes = 0;
+  if (vm_page_free_wanted > 0) { // xnu wants memory, arc can't have it
+    printf("SPL: %s page_free_wanted %u, returning %lld\n", __func__,
+	   vm_page_free_wanted, ((int64_t)vm_page_free_wanted) * PAGE_SIZE * -128LL);
+    return (((int64_t)vm_page_free_wanted) * PAGE_SIZE * -128LL);  // yes, negative, will shrink bigtime
+  }
 
-  rt_t_diff = real_total_memory - total_memory;
-  free_count_bytes = vm_page_free_count * PAGE_SIZE;
+  if (vm_page_free_count < VM_PAGE_FREE_MIN) {  // this is what prints (smd: reaping)
+#if 0 // this is a verrrrrry common log-filling printout
+    static int silence = 0;
+    if(silence < 1) {
+      printf("SPL: %s page_free_count %u smaller than VM_PAGE_FREE_MIN (%u) returning %lld\n",
+	     __func__, vm_page_free_count, VM_PAGE_FREE_MIN,
+	     (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN)));
+      silence=10;
+    } else {
+      silence--;
+    }
+#endif    
+    return (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN));
+  }
 
-  //if (free_count_bytes <= rt_t_diff) // actual free is somehow less than 20%
-  //  return 0;
-
-  //if (pressure_bytes_target > 0 &&				   \
-  //    pressure_bytes_target < (total_memory - free_count_bytes) &&	\
-  //    pressure_bytes_target < vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)))
-  //  return 0;
-
-  return (MIN((free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE)));
-  
-  // return (vm_page_free_count) * PAGE_SIZE;
+  if(kmem_avail_use_spec)
+    return (((int64_t)vm_page_free_count + (int64_t)vm_page_speculative_count) * PAGE_SIZE);
+  else
+    return (((int64_t)vm_page_free_count) * PAGE_SIZE);
 }
-
-// smd
-int64_t
-kmem_avail_may_be_negative(void)
-{
-  int64_t a;
-
-  a=kmem_avail();
-  if(a > 0)
-    return (a);
-
-  if (pressure_bytes_target > 0 && \
-      pressure_bytes_target < kmem_used())
-    return (pressure_bytes_target-kmem_used()); // yes, negative
-
-  if (vm_page_free_wanted > 0)
-    return (-(vm_page_free_wanted * PAGE_SIZE)); // yes, negative
-
-  return 0;
-
-}
-
 
 /*
  * Return the maximum amount of memory that is (in theory) allocatable
@@ -3996,26 +3999,35 @@ static void memory_monitor_thread()
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
-				printf("SPL: memory_monitory_thread pressure: new target %llu\n", newtarget);
+				printf("SPL: memory_monitory_thread pressure: new target %llu (diff: %u)\n",
+				       newtarget, os_num_pages_wanted);
 			}
 
 			// Figure out if we should reap as well
 			if (zfs_lbolt() - last_reap >= (hz * 60)) {
 				last_reap = zfs_lbolt();
 
+				if (vm_page_free_wanted > 0) {
+				  printf("SPL: vm_page_free_wanted > 0 in monitory thread, signalling kmem_avail\n");
+				  pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
+				}
+				    
 				uint64_t nintypct = total_memory * 90ULL / 100ULL;
 
 				if (segkmem_total_mem_allocated >= nintypct) {
 					pressure_bytes_target = MAX(pressure_bytes_target,
 								segkmem_total_mem_allocated - nintypct);
-					printf("SPL: 90%% hit, triggering reap\n");
+					printf("SPL: 90%% hit, triggering reap and signalling\n");
+					pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
 					kmem_reap();
 					kpreempt(KPREEMPT_SYNC);
 					kmem_reap_idspace();
+				} else if (!os_num_pages_wanted && pressure_bytes_target) {
+				  printf("SPL: releasing pressure (was %llu), segkmem_total_mem_allocated=%llu\n",
+					 pressure_bytes_target,
+					 segkmem_total_mem_allocated);
+				  pressure_bytes_target = 0;
 				}
-
-
-
 #if 0
 				extern unsigned int memorystatus_level;
 				printf("memorystatus_level %u\n", memorystatus_level);
@@ -4049,7 +4061,36 @@ spl_kstat_update(kstat_t *ksp, int rw)
 
 	if (rw == KSTAT_WRITE) {
 
+	  if(ks->spl_kmem_avail_use_spec.value.i64 == 1) {
+	    printf("SPL: kmem_avail_use_spec TRUE\n");
+	    kmem_avail_use_spec = 1;
+	  }	
+
+	  if(ks->spl_kmem_avail_use_spec.value.i64 == -1) {
+	    printf("SPL: kmem_avail_use_spec FALSE\n");
+	    kmem_avail_use_spec = 0;
+	  }
+	    
+	  if(ks->spl_vm_page_free_min_multiplier.value.ui64) {
+	    printf("SPL: vm_page_free_min_multiplier was %u, now %u, headroom now %u\n",
+		   vm_page_free_min_multiplier,
+		   (uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64,
+		   MAX(vm_page_free_min*(uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64, vm_page_free_min_min));
+	    vm_page_free_min_multiplier = (uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64;
+	  }
+	  if(ks->spl_vm_page_free_min_min.value.ui64) {
+	    printf("SPL: vm_page_free_min_min was %u, now %u, headroom now %u\n",
+		   vm_page_free_min_min,
+		   (uint32_t)ks->spl_vm_page_free_min_min.value.ui32,
+		   MAX(vm_page_free_min*vm_page_free_min_multiplier, (uint32_t)ks->spl_vm_page_free_min_min.value.ui32));
+	    vm_page_free_min_min = (uint32_t)ks->spl_vm_page_free_min_min.value.ui32;
+	  }
+
 		if (ks->spl_simulate_pressure.value.ui64) {
+		  printf("SPL: pressure_bytes_target_sysctl %llu, previous pressure %llu, kmem_used() %lu\n",
+			 ks->spl_simulate_pressure.value.ui64*1024*1024,
+			 pressure_bytes_target,
+			 kmem_used());
 			pressure_bytes_target = kmem_used() -
 				(ks->spl_simulate_pressure.value.ui64 * 1024 * 1024);
 			if (ks->spl_simulate_pressure.value.ui64 == 666) {
@@ -4066,7 +4107,10 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_active_threads.value.ui64 = zfs_threads;
 		ks->spl_active_mutex.value.ui64 = zfs_active_mutex;
 		ks->spl_active_rwlock.value.ui64 = zfs_active_rwlock;
-		ks->spl_simulate_pressure.value.ui64 = 0;
+		ks->spl_simulate_pressure.value.ui64 = pressure_bytes_target;
+		ks->spl_vm_page_free_min_multiplier.value.ui64 = (uint64_t)vm_page_free_min_multiplier;
+		ks->spl_vm_page_free_min_min.value.ui64 = (uint64_t)vm_page_free_min_min;
+		ks->spl_kmem_avail_use_spec.value.i64 = (int64_t)kmem_avail_use_spec;
 	}
 
 	return (0);
@@ -5498,14 +5542,33 @@ size_t
 kmem_num_pages_wanted()
 {
 
-	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
-		return (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
+  if(pressure_bytes_signal & PRESSURE_KMEM_NUM_PAGES_WANTED) {
+    printf("SPL: kmem_num_pages_wanted got signal, returning 128M (want 32k pages)\n");
+    pressure_bytes_signal &= ~(PRESSURE_KMEM_NUM_PAGES_WANTED);
+    return 32768;
+  }
+  
+  	if (vm_page_free_wanted > 0) {
+	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
+	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);
+	  printf("SPL: kmem_num_pages_wanted() sees paging\n");
+	  return vm_page_free_wanted * 128; // MULT;  // paging, be aggressive
 	}
 
-	if (vm_page_free_wanted > 0) {
-	  if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
-	    pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);	
-	  return vm_page_free_wanted * MULT;
+	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
+	  size_t i = (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
+	  if(i) {
+	    printf("SPL: kmem_num_pages_wanted returning pressure (%ld pages wanted)\n", i);
+	    return(i);
+	  } else {
+	    printf("SPL: kmem_num_pages_wanted returning MINIMUM 1 page wanted\n");
+	    return(1);
+	  }
+	}
+
+	if (vm_page_free_count < VM_PAGE_FREE_MIN) {
+	  printf("SPL: kmem_num_pages_wanted vm_page_free_count (%u) < VM_PAGE_FREE_MIN (%u)\n", vm_page_free_count, VM_PAGE_FREE_MIN);
+	  return (VM_PAGE_FREE_MIN - vm_page_free_count);
 	}
 
     return 0;
@@ -5532,18 +5595,28 @@ kmem_used(void)
   return (kmem_size() - kmem_avail());
 }
 
-static inline unsigned int
-my_log2(unsigned int n)
+static inline uint64_t
+my_log2(uint64_t n)
 {
-  unsigned int i = n;
-  unsigned int j = 0;
+  uint64_t i = n;
+  uint64_t j = 0;
 
   while(i >>= 1) ++j;
   return j;
 }
 
+static inline uint64_t
+spl_random64(uint64_t range)
+{
+  uint64_t r;
+
+  (void) random_get_bytes((void *)&r, sizeof (uint64_t));
+
+  return (r % range);
+}
+
 static inline unsigned int
-spl_random(unsigned int range)
+spl_random32(unsigned int range)
 {
   unsigned int r;
 
@@ -5552,11 +5625,11 @@ spl_random(unsigned int range)
   return (r % range);
 }
 
-static inline int
-am_i_reap_or_not(unsigned int free, unsigned int minmem, unsigned int maxmem)
+static inline uint64_t
+am_i_reap_or_not(uint64_t free, uint64_t minmem, uint64_t maxmem)
 {
-  unsigned int range = 0;
-  unsigned int i = 0;
+  uint64_t range = 0;
+  uint64_t i = 0;
 
   if (free < minmem) {
     return FALSE;
@@ -5567,44 +5640,56 @@ am_i_reap_or_not(unsigned int free, unsigned int minmem, unsigned int maxmem)
     i = (free - minmem) >> 8;
     if(i == 0) return TRUE;
     range = my_log2(maxmem - minmem);
-    return (spl_random(range) > my_log2(i));
+    return (spl_random64(range) > my_log2(i));
   }
 }
   
-int spl_vm_pool_low(void)
+int
+spl_vm_pool_low(void)
 {
 
   // 3500 is normal vm_page_free_min, which is 13MiB
   // 8% of memory on 16GiB box ~ 1.28GiB - physmem/12 - this was really aggressively empty
   // 2% of memory on 16GiB box - 320MiB - physmem/50 - on new arc.c from illumos, this didn't get back memory
-  unsigned int eight_percent = (physmem / 12); // physmem  is in pages
+  uint64_t  eight_percent = (physmem / 12); // physmem  is in pages
 
-  if (vm_page_free_wanted > 0) {
+  if (vm_page_free_wanted > 0 || vm_page_free_count < VM_PAGE_FREE_MIN) {
     return 1;  // we're paging, so we're low -- this will throttle arc
   }
 
+  if (vmem_size(heap_arena, VMEM_ALLOC) > 0 && \
+      am_i_reap_or_not(vmem_size(heap_arena, VMEM_FREE),
+		       vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)),
+		       vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE) / 92 * 100))) {
+    printf("SPL: am_i_reap_or_not true for heap_arena free %lu, alloc %lu, reaping\n",
+	   vmem_size(heap_arena, VMEM_FREE),
+	   vmem_size(heap_arena, (VMEM_ALLOC|VMEM_FREE)));
+    kmem_reap();
+    kmem_reap_idspace();
+    return 1;
+  }
+    
+
   if (vm_page_free_count < eight_percent) { // less than say 1.3GiB but not paging
     //printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
-    if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
+    if (am_i_reap_or_not(vm_page_free_count, VM_PAGE_FREE_MIN, eight_percent)) {
       kmem_reap();
       kmem_reap_idspace();
-      // fall through // return 1; // (spl_random(vm_page_free_min * 4) > vm_page_free_count);
+      return (spl_random64(VM_PAGE_FREE_MIN * 4) > vm_page_free_count); // 14000 (54MiB) vs free_count
     }
   }
-
-  // check on pressure.  (was fallthrough: more than 8% of memory, OR we have not reaped)
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return 1;
 	}
 
-	if ( vm_page_free_count < vm_page_free_min ) { // this is very tight and unlikely to be called
+	if ( vm_page_free_count < VM_PAGE_FREE_MIN ) { // 20 sept: this gets called OFTEN
 		uint64_t newtarget;
 		newtarget = kmem_used() -
-			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
+			((VM_PAGE_FREE_MIN - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
-			printf("SPL pool low: new target %llu (smd: reaping) vm_page_free_wanted = %u\n", newtarget, vm_page_free_wanted);
+			printf("SPL pool low: new target %llu (smd: reaping) vm_page_free_wanted = %u vm_page_free_count = %u VM_PAGE_FREE_MIN = %u\n", newtarget, vm_page_free_wanted, vm_page_free_count, VM_PAGE_FREE_MIN);
 			kmem_reap();
 			kmem_reap_idspace();
 			return 1;
