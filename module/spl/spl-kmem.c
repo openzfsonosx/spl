@@ -110,7 +110,7 @@ extern uint64_t		zfs_active_rwlock;
 // Set the memory target wanted when we detect pressure, this
 // will get cleared once we are under it.
 uint64_t            pressure_bytes_target = 0;
-uint64_t	    pressure_bytes_signal = 0;
+static uint64_t	    pressure_bytes_signal = 0;
 
 extern uint64_t            total_memory;
 extern uint64_t		real_total_memory;
