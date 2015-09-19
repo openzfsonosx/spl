@@ -4000,7 +4000,8 @@ static void memory_monitor_thread()
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
-				printf("SPL: memory_monitory_thread pressure: new target %llu\n", newtarget);
+				printf("SPL: memory_monitory_thread pressure: new target %llu (diff: %u)\n",
+				       newtarget, os_num_pages_wanted);
 			}
 
 			// Figure out if we should reap as well
