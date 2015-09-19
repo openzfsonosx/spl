@@ -76,7 +76,7 @@ extern uint64_t physmem;
 
     size_t kmem_size(void);
     size_t kmem_used(void);
-    size_t kmem_avail(void);
+    int64_t kmem_avail(void);
     size_t kmem_num_pages_wanted();
 	int	spl_vm_pool_low(void);
 
