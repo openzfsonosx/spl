@@ -4016,8 +4016,12 @@ static void memory_monitor_thread()
 					kmem_reap();
 					kpreempt(KPREEMPT_SYNC);
 					kmem_reap_idspace();
+				} else if (pressure_bytes_target) {
+				  printf("SPL: releasing pressure (was %llu), segkmem_total_mem_allocated=%llu\n",
+					 prssure_bytes_target,
+					 segkmen_total_mem_allocated);
+				  pressure_bytes_target = 0;
 				}
-
 
 
 #if 0
@@ -5602,10 +5606,11 @@ spl_vm_pool_low(void)
     return 1;  // we're paging, so we're low -- this will throttle arc
   }
 
-  if (am_i_reap_or_not(vmem_size(heap_arena, VMEM_FREE),
+  if (vmem_size(heap_arena, VMEM_ALLOC) > 0 && \
+      am_i_reap_or_not(vmem_size(heap_arena, VMEM_FREE),
 		       vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)),
 		       vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE) / 92 * 100))) {
-    printf("SPL: am_i_reap_or_not true for heap_arena free %zd, alloc %zd, reaping\n",
+    printf("SPL: am_i_reap_or_not true for heap_arena free %lld, alloc %lld, reaping\n",
 	   vmem_size(heap_arena, VMEM_FREE),
 	   vmem_size(heap_arena, (VMEM_ALLOC|VMEM_FREE)));
     kmem_reap();
