@@ -3099,7 +3099,7 @@ kmem_avail(void)
   // smd - spike the vm_page_speculative_count, that can be hundreds of MB or small numbers of MB
 
   if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
-    return -(vm_page_free_wanted * PAGE_SIZE);  // yes, negative, will shrink
+    return -(vm_page_free_wanted * PAGE_SIZE * 128);  // yes, negative, will shrink bigtime
 
   //uint64_t rt_t_diff = 0;
   //uint64_t free_count_bytes = 0;
