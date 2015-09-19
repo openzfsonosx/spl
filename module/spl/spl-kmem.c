@@ -3107,13 +3107,13 @@ kmem_avail(void)
   rt_t_diff = real_total_memory - total_memory;
   free_count_bytes = vm_page_free_count * PAGE_SIZE;
 
-  if (free_count_bytes <= rt_t_diff) // actual free is somehow less than 20%
-    return 0;
+  //if (free_count_bytes <= rt_t_diff) // actual free is somehow less than 20%
+  //  return 0;
 
-  if (pressure_bytes_target > 0 && \
-      pressure_bytes_target < (total_memory - free_count_bytes) && \
-      pressure_bytes_target < vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)))
-    return 0;
+  //if (pressure_bytes_target > 0 &&				   \
+  //    pressure_bytes_target < (total_memory - free_count_bytes) &&	\
+  //    pressure_bytes_target < vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)))
+  //  return 0;
 
   return (MIN((free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE)));
   
