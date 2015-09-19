@@ -4015,6 +4015,11 @@ static void memory_monitor_thread()
 			if (zfs_lbolt() - last_reap >= (hz * 60)) {
 				last_reap = zfs_lbolt();
 
+				if (vm_page_free_wanted > 0) {
+				  printf("SPL: vm_page_free_wanted > 0 in monitory thread, signalling kmem_avail\n");
+				  pressure_bytes_signal = 1;
+				}
+				    
 				uint64_t nintypct = total_memory * 90ULL / 100ULL;
 
 				if (segkmem_total_mem_allocated >= nintypct) {
