@@ -3085,7 +3085,7 @@ kmem_cache_stat(kmem_cache_t *cp, char *name)
  * On 32-bit systems, physical memory may exceed virtual memory,
  * we just truncate the result at 1GB.
  */
-size_t
+int64_t
 kmem_avail(void)
 {
 #ifndef APPLE
@@ -3099,7 +3099,7 @@ kmem_avail(void)
   // smd - spike the vm_page_speculative_count, that can be hundreds of MB or small numbers of MB
 
   if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
-    return 0;
+    return -(vm_page_free_wanted * PAGE_SIZE);  // yes, negative, will shrink
 
   uint64_t rt_t_diff = 0;
   uint64_t free_count_bytes = 0;
@@ -3107,13 +3107,13 @@ kmem_avail(void)
   rt_t_diff = real_total_memory - total_memory;
   free_count_bytes = vm_page_free_count * PAGE_SIZE;
 
-  //if (free_count_bytes <= rt_t_diff) // actual free is somehow less than 20%
-  //  return 0;
+  if (free_count_bytes <= rt_t_diff) // actual free is somehow less than 20%
+    return 0; // fine, won't shrink
 
-  //if (pressure_bytes_target > 0 &&				   \
-  //    pressure_bytes_target < (total_memory - free_count_bytes) &&	\
-  //    pressure_bytes_target < vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)))
-  //  return 0;
+  if (pressure_bytes_target > 0 &&				   \
+      pressure_bytes_target < (total_memory - free_count_bytes) &&	\
+      pressure_bytes_target < vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)))
+    return -1024; // yes, negative.  shrink a little.
 
   return (MIN((free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE)));
   
