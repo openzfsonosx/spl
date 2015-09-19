@@ -5604,7 +5604,7 @@ spl_vm_pool_low(void)
 
   if (am_i_reap_or_not(vmem_size(heap_arena, VMEM_FREE),
 		       vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE)),
-		       vemm_size(heap_arena, (VMEM_ALLOC | VMEM_FREE) / 92 * 100))) {
+		       vmem_size(heap_arena, (VMEM_ALLOC | VMEM_FREE) / 92 * 100))) {
     printf("SPL: am_i_reap_or_not true for heap_arena free %zd, alloc %zd, reaping\n",
 	   vmem_size(heap_arena, VMEM_FREE),
 	   vmem_size(heap_arena, (VMEM_ALLOC|VMEM_FREE)));
