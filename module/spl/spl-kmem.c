@@ -5525,12 +5525,20 @@ kmem_num_pages_wanted()
 {
   	if (vm_page_free_wanted > 0) {
 	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
-	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);	
+	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);
+	  printf("SPL: kmem_num_pages_wanted() sees paging\n");
 	  return vm_page_free_wanted * 128; // MULT;  // paging, be aggressive
 	}
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
-		return (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
+	  size_t i = (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
+	  if(i) {
+	    printf("SPL: kmem_num_pages_wanted returning pressure %ld", i);
+	    return(i);
+	  } else {
+	    printf("SPL: kmem_num_pages_wanted returning MINIMUM 1\n");
+	    return(1);
+	  }
 	}
 
     return 0;
