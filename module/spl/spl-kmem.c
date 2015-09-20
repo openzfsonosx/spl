@@ -5653,13 +5653,13 @@ spl_vm_pool_low(void)
 		return 1;
 	}
 
-	if ( vm_page_free_count < vm_page_free_min ) { // this is very tight and unlikely to be called
+	if ( vm_page_free_count < vm_page_free_min ) { // 20 sept: this gets called OFTEN
 		uint64_t newtarget;
 		newtarget = kmem_used() -
 			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
-			printf("SPL pool low: new target %llu (smd: reaping) vm_page_free_wanted = %u\n", newtarget, vm_page_free_wanted);
+			printf("SPL pool low: new target %llu (smd: reaping) vm_page_free_wanted = %u vm_page_free_count = %u vm_page_free_min = %u\n", newtarget, vm_page_free_wanted, vm_page_free_count, vm_page_free_min);
 			kmem_reap();
 			kmem_reap_idspace();
 			return 1;
