@@ -3108,6 +3108,9 @@ kmem_avail(void)
   if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
     return -(vm_page_free_wanted * PAGE_SIZE * 128);  // yes, negative, will shrink bigtime
 
+  if (vm_page_free_count < vm_page_free_min)  // this is what prints (smd: reaping)
+    return -(vm_page_free_min);
+
   //uint64_t rt_t_diff = 0;
   //uint64_t free_count_bytes = 0;
 
@@ -3130,28 +3133,6 @@ kmem_avail(void)
   
   return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
 }
-
-// smd
-int64_t
-kmem_avail_may_be_negative(void)
-{
-  int64_t a;
-
-  a=kmem_avail();
-  if(a > 0)
-    return (a);
-
-  if (pressure_bytes_target > 0 && \
-      pressure_bytes_target < kmem_used())
-    return (pressure_bytes_target-kmem_used()); // yes, negative
-
-  if (vm_page_free_wanted > 0)
-    return (-(vm_page_free_wanted * PAGE_SIZE)); // yes, negative
-
-  return 0;
-
-}
-
 
 /*
  * Return the maximum amount of memory that is (in theory) allocatable
@@ -5539,6 +5520,11 @@ kmem_num_pages_wanted()
 	    printf("SPL: kmem_num_pages_wanted returning MINIMUM 1\n");
 	    return(1);
 	  }
+	}
+
+	if (vm_page_free_count < vm_page_free_min) {
+	  printf("SPL: kmem_num_pages_wanted vm_page_free_count (%u) < vm_page_free_min (%u)\n", vm_page_free_count, vm_page_free_min);
+	  return (vm_page_free_min - vm_page_free_count);
 	}
 
     return 0;
