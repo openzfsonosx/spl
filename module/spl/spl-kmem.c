@@ -5523,15 +5523,14 @@ kmem_cache_scan(kmem_cache_t *cp)
 size_t
 kmem_num_pages_wanted()
 {
+  	if (vm_page_free_wanted > 0) {
+	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
+	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);	
+	  return vm_page_free_wanted * 128; // MULT;  // paging, be aggressive
+	}
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 		return (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
-	}
-
-	if (vm_page_free_wanted > 0) {
-	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
-	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);	
-	  return vm_page_free_wanted * MULT;
 	}
 
     return 0;
