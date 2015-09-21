@@ -3109,7 +3109,7 @@ kmem_avail(void)
     return -(vm_page_free_wanted * PAGE_SIZE * 128);  // yes, negative, will shrink bigtime
 
   if (vm_page_free_count < vm_page_free_min)  // this is what prints (smd: reaping)
-    return -(vm_page_free_min);
+    return -(vm_page_free_min * 2);
 
   //uint64_t rt_t_diff = 0;
   //uint64_t free_count_bytes = 0;
@@ -4011,14 +4011,12 @@ static void memory_monitor_thread()
 					kmem_reap();
 					kpreempt(KPREEMPT_SYNC);
 					kmem_reap_idspace();
-				} else if (pressure_bytes_target) {
+				} else if (!os_num_pages_wanted && pressure_bytes_target) {
 				  printf("SPL: releasing pressure (was %llu), segkmem_total_mem_allocated=%llu\n",
 					 pressure_bytes_target,
 					 segkmem_total_mem_allocated);
 				  pressure_bytes_target = 0;
 				}
-
-
 #if 0
 				extern unsigned int memorystatus_level;
 				printf("memorystatus_level %u\n", memorystatus_level);
@@ -5609,7 +5607,7 @@ spl_vm_pool_low(void)
   // 2% of memory on 16GiB box - 320MiB - physmem/50 - on new arc.c from illumos, this didn't get back memory
   uint64_t  eight_percent = (physmem / 12); // physmem  is in pages
 
-  if (vm_page_free_wanted > 0) {
+  if (vm_page_free_wanted > 0 || vm_page_free_count < vm_page_free_min) {
     return 1;  // we're paging, so we're low -- this will throttle arc
   }
 
