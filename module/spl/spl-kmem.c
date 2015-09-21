@@ -110,6 +110,9 @@ extern uint64_t		zfs_active_rwlock;
 // Set the memory target wanted when we detect pressure, this
 // will get cleared once we are under it.
 uint64_t            pressure_bytes_target = 0;
+// signalling kmem_avail() and kmem_num_pages_wanted()
+#define PRESSURE_KMEM_AVAIL 1<<0
+#define PRESSURE_KMEM_NUM_PAGES_WANTED 1<<1
 static uint64_t	    pressure_bytes_signal = 0;
 
 extern uint64_t            total_memory;
@@ -3099,9 +3102,9 @@ kmem_avail(void)
   //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
   // smd - spike the vm_page_speculative_count, that can be hundreds of MB or small numbers of MB
 
-  if (pressure_bytes_signal) { // set from 90% and reap
+  if (pressure_bytes_signal & PRESSURE_KMEM_AVAIL) { // set from 90% and reap
     printf("SPL: got pressure bytes signal in kmem_avail()\n");
-    pressure_bytes_signal = 0;
+    pressure_bytes_signal &= ~(PRESSURE_KMEM_AVAIL);;
     return (-128*1024*1024); // get 128MiB from arc
   }
 
@@ -3998,7 +4001,7 @@ static void memory_monitor_thread()
 
 				if (vm_page_free_wanted > 0) {
 				  printf("SPL: vm_page_free_wanted > 0 in monitory thread, signalling kmem_avail\n");
-				  pressure_bytes_signal = 1;
+				  pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
 				}
 				    
 				uint64_t nintypct = total_memory * 90ULL / 100ULL;
@@ -4007,7 +4010,7 @@ static void memory_monitor_thread()
 					pressure_bytes_target = MAX(pressure_bytes_target,
 								segkmem_total_mem_allocated - nintypct);
 					printf("SPL: 90%% hit, triggering reap and signalling\n");
-					pressure_bytes_signal = 1;
+					pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
 					kmem_reap();
 					kpreempt(KPREEMPT_SYNC);
 					kmem_reap_idspace();
@@ -5502,6 +5505,13 @@ kmem_cache_scan(kmem_cache_t *cp)
 size_t
 kmem_num_pages_wanted()
 {
+
+  if(pressure_bytes_signal & PRESSURE_KMEM_NUM_PAGES_WANTED) {
+    printf("SPL: kmem_num_pages_wanted got signal, returning 128M (want 32k pages)\n");
+    pressure_bytes_signal &= ~(PRESSURE_KMEM_NUM_PAGES_WANTED);
+    return 32768;
+  }
+  
   	if (vm_page_free_wanted > 0) {
 	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
 	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);
