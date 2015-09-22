@@ -60,7 +60,7 @@
 // proxy to the machine experiencing memory pressure.
 extern unsigned int vm_page_free_wanted; // 0 by default smd
 extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min
-#define VM_PAGE_FREE_MIN (vm_page_free_min * 4)
+#define VM_PAGE_FREE_MIN (MAX(vm_page_free_min * 4, 1024*1024*1024/4096))  // 1GiB headroom
 extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
 extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
 
