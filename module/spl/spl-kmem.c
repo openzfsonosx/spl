@@ -61,7 +61,7 @@
 extern unsigned int vm_page_free_wanted; // 0 by default smd
 extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min
 uint32_t vm_page_free_min_multiplier = 4;
-uint32_t vm_page_free_min_min = 1024*1024*1024/4096;
+uint32_t vm_page_free_min_min = 256*1024*1024/4096;
 #define VM_PAGE_FREE_MIN (MAX(vm_page_free_min * vm_page_free_min_multiplier, vm_page_free_min_min))
 extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
 extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
@@ -3116,7 +3116,7 @@ kmem_avail(void)
   }
 
   if (vm_page_free_wanted > 0) { // xnu wants memory, arc can't have it
-    printf("SPL: %s page_Free_wanted %u, returning %lld\n", __func__,
+    printf("SPL: %s page_free_wanted %u, returning %lld\n", __func__,
 	   vm_page_free_wanted, ((int64_t)vm_page_free_wanted) * PAGE_SIZE * -128LL);
     return (((int64_t)vm_page_free_wanted) * PAGE_SIZE * -128LL);  // yes, negative, will shrink bigtime
   }
@@ -3126,12 +3126,12 @@ kmem_avail(void)
     if(silence < 1) {
       printf("SPL: %s page_free_count %u smaller than VM_PAGE_FREE_MIN (%u) returning %lld\n",
 	     __func__, vm_page_free_count, VM_PAGE_FREE_MIN,
-	     2LL * (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN)));
+	     (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN)));
       silence=10;
     } else {
       silence--;
     }
-    return (2LL * (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN)));
+    return (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN));
   }
 
   //uint64_t rt_t_diff = 0;
