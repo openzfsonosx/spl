@@ -60,7 +60,9 @@
 // proxy to the machine experiencing memory pressure.
 extern unsigned int vm_page_free_wanted; // 0 by default smd
 extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min
-#define VM_PAGE_FREE_MIN (MAX(vm_page_free_min * 4, 1024*1024*1024/4096))  // 1GiB headroom
+uint32_t vm_page_free_min_multiplier = 4;
+uint32_t vm_page_free_min_min = 1024*1024*1024/4096;
+#define VM_PAGE_FREE_MIN (MAX(vm_page_free_min * vm_page_free_min_multiplier, vm_page_free_min_min))
 extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
 extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
 
@@ -491,6 +493,8 @@ typedef struct spl_stats {
     kstat_named_t spl_active_rwlock;
     kstat_named_t spl_monitor_thread_wake_count;
     kstat_named_t spl_simulate_pressure;
+  kstat_named_t spl_vm_page_free_min_multiplier;
+  kstat_named_t spl_vm_page_free_min_min;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -500,6 +504,8 @@ static spl_stats_t spl_stats = {
     {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
     {"simulate_pressure", KSTAT_DATA_UINT64},
+    {"vm_page_free_multiplier", KSTAT_DATA_UINT32},
+    {"vm_page_free_min_min", KSTAT_DATA_UINT32},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -3109,11 +3115,17 @@ kmem_avail(void)
     return (-128*1024*1024); // get 128MiB from arc
   }
 
-  if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
-    return -(vm_page_free_wanted * PAGE_SIZE * 128);  // yes, negative, will shrink bigtime
+  if (vm_page_free_wanted > 0) { // xnu wants memory, arc can't have it
+    printf("SPL: %s page_Free_wanted %u, returning %lld\n", __func__,
+	   vm_page_free_wanted, vm_page_free_wanted * PAGE_SIZE * -128LL);
+    return (vm_page_free_wanted * PAGE_SIZE * -128LL);  // yes, negative, will shrink bigtime
+  }
 
-  if (vm_page_free_count < VM_PAGE_FREE_MIN)  // this is what prints (smd: reaping)
-    return -(VM_PAGE_FREE_MIN * 2);
+  if (vm_page_free_count < VM_PAGE_FREE_MIN) {  // this is what prints (smd: reaping)
+    printf("SPL: %s page_free_count %u smaller than VM_PAGE_FREE_MIN (%u) returning %lld\n",
+	   __func__, vm_page_free_count, VM_PAGE_FREE_MIN, VM_PAGE_FREE_MIN * -2LL);
+    return (VM_PAGE_FREE_MIN * PAGE_SIZE * -2LL);
+  }
 
   //uint64_t rt_t_diff = 0;
   //uint64_t free_count_bytes = 0;
@@ -4054,6 +4066,18 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	spl_stats_t *ks = ksp->ks_data;
 
 	if (rw == KSTAT_WRITE) {
+	  if(ks->spl_vm_page_free_min_multiplier.value.ui32) {
+	    uint32_t v = ks->spl_vm_page_free_min_multiplier.value.ui32;
+	    printf("SPL: vm_page_free_min_multiplier was %u, now %u, headroom now %u\n",
+		   vm_page_free_min_multiplier, v, MAX(vm_page_free_min*v, vm_page_free_min_min));
+	    vm_page_free_min_multiplier = v;
+	  }
+	  if(ks->spl_vm_page_free_min_min.value.ui32) {
+	    uint32_t v = ks->spl_vm_page_free_min_min.value.ui32;
+	    printf("SPL: vm_page_free_min_min was %u, now %u, headroom now %u\n",
+		   vm_page_free_min_min, v, MAX(vm_page_free_min*vm_page_free_min_multiplier, v));
+	    vm_page_free_min_min = v;
+	  }
 
 		if (ks->spl_simulate_pressure.value.ui64) {
 		  printf("SPL: pressure_bytes_target_sysctl %llu, previous pressure %llu, kmem_used() %lu\n",
@@ -4077,6 +4101,8 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_active_mutex.value.ui64 = zfs_active_mutex;
 		ks->spl_active_rwlock.value.ui64 = zfs_active_rwlock;
 		ks->spl_simulate_pressure.value.ui64 = pressure_bytes_target;
+		ks->spl_vm_page_free_min_multiplier.value.ui32 = vm_page_free_min_multiplier;
+		ks->spl_vm_page_free_min_min.value.ui32 = vm_page_free_min_min;
 	}
 
 	return (0);
