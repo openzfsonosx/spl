@@ -5558,10 +5558,10 @@ kmem_num_pages_wanted()
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 	  size_t i = (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
 	  if(i) {
-	    printf("SPL: kmem_num_pages_wanted returning pressure %ld\n", i);
+	    printf("SPL: kmem_num_pages_wanted returning pressure (%ld pages wanted)\n", i);
 	    return(i);
 	  } else {
-	    printf("SPL: kmem_num_pages_wanted returning MINIMUM 1\n");
+	    printf("SPL: kmem_num_pages_wanted returning MINIMUM 1 page wanted\n");
 	    return(1);
 	  }
 	}
