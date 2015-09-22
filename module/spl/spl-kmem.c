@@ -3125,6 +3125,7 @@ kmem_avail(void)
   }
 
   if (vm_page_free_count < VM_PAGE_FREE_MIN) {  // this is what prints (smd: reaping)
+#if 0 // this is a verrrrrry common log-filling printout
     static int silence = 0;
     if(silence < 1) {
       printf("SPL: %s page_free_count %u smaller than VM_PAGE_FREE_MIN (%u) returning %lld\n",
@@ -3134,6 +3135,7 @@ kmem_avail(void)
     } else {
       silence--;
     }
+#endif    
     return (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN));
   }
 
