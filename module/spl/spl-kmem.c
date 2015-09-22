@@ -60,6 +60,7 @@
 // proxy to the machine experiencing memory pressure.
 extern unsigned int vm_page_free_wanted; // 0 by default smd
 extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min
+#define VM_PAGE_FREE_MIN (vm_page_free_min * 4)
 extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
 extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
 
@@ -3111,8 +3112,8 @@ kmem_avail(void)
   if (vm_page_free_wanted > 0) // xnu wants memory, arc can't have it
     return -(vm_page_free_wanted * PAGE_SIZE * 128);  // yes, negative, will shrink bigtime
 
-  if (vm_page_free_count < vm_page_free_min)  // this is what prints (smd: reaping)
-    return -(vm_page_free_min * 2);
+  if (vm_page_free_count < VM_PAGE_FREE_MIN)  // this is what prints (smd: reaping)
+    return -(VM_PAGE_FREE_MIN * 2);
 
   //uint64_t rt_t_diff = 0;
   //uint64_t free_count_bytes = 0;
@@ -3134,7 +3135,8 @@ kmem_avail(void)
   //return (MIN((free_count_bytes - rt_t_diff), vmem_size(heap_arena, VMEM_FREE)));
   //return (free_count_bytes - rt_t_diff);
   
-  return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+  //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
+  return vm_page_free_count * PAGE_SIZE;
 }
 
 /*
@@ -5530,9 +5532,9 @@ kmem_num_pages_wanted()
 	  }
 	}
 
-	if (vm_page_free_count < vm_page_free_min) {
-	  printf("SPL: kmem_num_pages_wanted vm_page_free_count (%u) < vm_page_free_min (%u)\n", vm_page_free_count, vm_page_free_min);
-	  return (vm_page_free_min - vm_page_free_count);
+	if (vm_page_free_count < VM_PAGE_FREE_MIN) {
+	  printf("SPL: kmem_num_pages_wanted vm_page_free_count (%u) < VM_PAGE_FREE_MIN (%u)\n", vm_page_free_count, VM_PAGE_FREE_MIN);
+	  return (VM_PAGE_FREE_MIN - vm_page_free_count);
 	}
 
     return 0;
@@ -5617,7 +5619,7 @@ spl_vm_pool_low(void)
   // 2% of memory on 16GiB box - 320MiB - physmem/50 - on new arc.c from illumos, this didn't get back memory
   uint64_t  eight_percent = (physmem / 12); // physmem  is in pages
 
-  if (vm_page_free_wanted > 0 || vm_page_free_count < vm_page_free_min) {
+  if (vm_page_free_wanted > 0 || vm_page_free_count < VM_PAGE_FREE_MIN) {
     return 1;  // we're paging, so we're low -- this will throttle arc
   }
 
@@ -5636,10 +5638,10 @@ spl_vm_pool_low(void)
 
   if (vm_page_free_count < eight_percent) { // less than say 1.3GiB but not paging
     //printf("SPL: pool low: vm_page_free_count=%u eight_percent=%u\n (reaping)", vm_page_free_count, eight_percent);
-    if (am_i_reap_or_not(vm_page_free_count, vm_page_free_min, eight_percent)) {
+    if (am_i_reap_or_not(vm_page_free_count, VM_PAGE_FREE_MIN, eight_percent)) {
       kmem_reap();
       kmem_reap_idspace();
-      return (spl_random64(vm_page_free_min * 4) > vm_page_free_count); // 14000 (54MiB) vs free_count
+      return (spl_random64(VM_PAGE_FREE_MIN * 4) > vm_page_free_count); // 14000 (54MiB) vs free_count
     }
   }
 
@@ -5647,13 +5649,13 @@ spl_vm_pool_low(void)
 		return 1;
 	}
 
-	if ( vm_page_free_count < vm_page_free_min ) { // 20 sept: this gets called OFTEN
+	if ( vm_page_free_count < VM_PAGE_FREE_MIN ) { // 20 sept: this gets called OFTEN
 		uint64_t newtarget;
 		newtarget = kmem_used() -
-			((vm_page_free_min - vm_page_free_count) * PAGE_SIZE*MULT);
+			((VM_PAGE_FREE_MIN - vm_page_free_count) * PAGE_SIZE*MULT);
 		if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 			pressure_bytes_target = newtarget;
-			printf("SPL pool low: new target %llu (smd: reaping) vm_page_free_wanted = %u vm_page_free_count = %u vm_page_free_min = %u\n", newtarget, vm_page_free_wanted, vm_page_free_count, vm_page_free_min);
+			printf("SPL pool low: new target %llu (smd: reaping) vm_page_free_wanted = %u vm_page_free_count = %u VM_PAGE_FREE_MIN = %u\n", newtarget, vm_page_free_wanted, vm_page_free_count, VM_PAGE_FREE_MIN);
 			kmem_reap();
 			kmem_reap_idspace();
 			return 1;
