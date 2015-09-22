@@ -63,6 +63,7 @@ extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_m
 uint32_t vm_page_free_min_multiplier = 4;
 uint32_t vm_page_free_min_min = 256*1024*1024/4096;
 #define VM_PAGE_FREE_MIN (MAX(vm_page_free_min * vm_page_free_min_multiplier, vm_page_free_min_min))
+uint32_t kmem_avail_use_spec = 1;
 extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
 extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
 
@@ -495,6 +496,7 @@ typedef struct spl_stats {
     kstat_named_t spl_simulate_pressure;
   kstat_named_t spl_vm_page_free_min_multiplier;
   kstat_named_t spl_vm_page_free_min_min;
+  kstat_named_t spl_kmem_avail_use_spec;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -506,6 +508,7 @@ static spl_stats_t spl_stats = {
     {"simulate_pressure", KSTAT_DATA_UINT64},
     {"vm_page_free_multiplier", KSTAT_DATA_UINT32},
     {"vm_page_free_min_min", KSTAT_DATA_UINT32},
+    {"kmem_avail_use_spec", KSTAT_DATA_INT32},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -3134,7 +3137,10 @@ kmem_avail(void)
     return (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN));
   }
 
-return (((int64_t)vm_page_free_count) * PAGE_SIZE);
+  if(kmem_avail_use_spec)
+    return (((int64_t)vm_page_free_count + (int64_t)vm_page_speculative_count) * PAGE_SIZE);
+  else
+    return (((int64_t)vm_page_free_count) * PAGE_SIZE);
 }
 
 /*
@@ -4052,11 +4058,22 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	spl_stats_t *ks = ksp->ks_data;
 
 	if (rw == KSTAT_WRITE) {
+
+	  if(ks->spl_kmem_avail_use_spec.value.i32 == 1) {
+	    printf("SPL: kmem_avail_use_spec TRUE\n");
+	    kmem_avail_use_spec = 1;
+	  }	
+
+	  if(ks->spl_kmem_avail_use_spec.value.i32 == -1) {
+	    printf("SPL: kmem_avail_use_spec FALSE\n");
+	    kmem_avail_use_spec = 0;
+	  }
+	    
 	  if(ks->spl_vm_page_free_min_multiplier.value.ui32) {
 	    printf("SPL: vm_page_free_min_multiplier was %u, now %u, headroom now %u\n",
 		   vm_page_free_min_multiplier,
 		   ks->spl_vm_page_free_min_multiplier.value.ui32,
-		   MAX(vm_page_free_min*ks->spl_vm_page_free_min_multiplier.valui.ui32, vm_page_free_min_min));
+		   MAX(vm_page_free_min*ks->spl_vm_page_free_min_multiplier.value.ui32, vm_page_free_min_min));
 	    vm_page_free_min_multiplier = ks->spl_vm_page_free_min_multiplier.value.ui32;
 	  }
 	  if(ks->spl_vm_page_free_min_min.value.ui32) {
@@ -4064,7 +4081,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		   vm_page_free_min_min,
 		   ks->spl_vm_page_free_min_min.value.ui32,
 		   MAX(vm_page_free_min*vm_page_free_min_multiplier, ks->spl_vm_page_free_min_min.value.ui32));
-	    vm_page_free_min_min = ks->vm_page_free_min_min.value.ui32;
+	    vm_page_free_min_min = ks->spl_vm_page_free_min_min.value.ui32;
 	  }
 
 		if (ks->spl_simulate_pressure.value.ui64) {
@@ -4091,6 +4108,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_simulate_pressure.value.ui64 = pressure_bytes_target;
 		ks->spl_vm_page_free_min_multiplier.value.ui32 = vm_page_free_min_multiplier;
 		ks->spl_vm_page_free_min_min.value.ui32 = vm_page_free_min_min;
+		ks->spl_kmem_avail_use_spec.value.i32 = kmem_avail_use_spec;
 	}
 
 	return (0);
