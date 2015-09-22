@@ -4074,16 +4074,18 @@ spl_kstat_update(kstat_t *ksp, int rw)
 
 	if (rw == KSTAT_WRITE) {
 	  if(ks->spl_vm_page_free_min_multiplier.value.ui32) {
-	    uint32_t v = ks->spl_vm_page_free_min_multiplier.value.ui32;
 	    printf("SPL: vm_page_free_min_multiplier was %u, now %u, headroom now %u\n",
-		   vm_page_free_min_multiplier, v, MAX(vm_page_free_min*v, vm_page_free_min_min));
-	    vm_page_free_min_multiplier = v;
+		   vm_page_free_min_multiplier,
+		   ks->spl_vm_page_free_min_multiplier.value.ui32,
+		   MAX(vm_page_free_min*ks->spl_vm_page_free_min_multiplier.valui.ui32, vm_page_free_min_min));
+	    vm_page_free_min_multiplier = ks->spl_vm_page_free_min_multiplier.value.ui32;
 	  }
 	  if(ks->spl_vm_page_free_min_min.value.ui32) {
-	    uint32_t v = ks->spl_vm_page_free_min_min.value.ui32;
 	    printf("SPL: vm_page_free_min_min was %u, now %u, headroom now %u\n",
-		   vm_page_free_min_min, v, MAX(vm_page_free_min*vm_page_free_min_multiplier, v));
-	    vm_page_free_min_min = v;
+		   vm_page_free_min_min,
+		   ks->spl_vm_page_free_min_min.value.ui32,
+		   MAX(vm_page_free_min*vm_page_free_min_multiplier, ks->spl_vm_page_free_min_min.value.ui32));
+	    vm_page_free_min_min = ks->vm_page_free_min_min.value.ui32;
 	  }
 
 		if (ks->spl_simulate_pressure.value.ui64) {
