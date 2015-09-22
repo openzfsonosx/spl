@@ -3117,14 +3117,21 @@ kmem_avail(void)
 
   if (vm_page_free_wanted > 0) { // xnu wants memory, arc can't have it
     printf("SPL: %s page_Free_wanted %u, returning %lld\n", __func__,
-	   vm_page_free_wanted, vm_page_free_wanted * PAGE_SIZE * -128LL);
-    return (vm_page_free_wanted * PAGE_SIZE * -128LL);  // yes, negative, will shrink bigtime
+	   vm_page_free_wanted, ((int64_t)vm_page_free_wanted) * PAGE_SIZE * -128LL);
+    return (((int64_t)vm_page_free_wanted) * PAGE_SIZE * -128LL);  // yes, negative, will shrink bigtime
   }
 
   if (vm_page_free_count < VM_PAGE_FREE_MIN) {  // this is what prints (smd: reaping)
-    printf("SPL: %s page_free_count %u smaller than VM_PAGE_FREE_MIN (%u) returning %lld\n",
-	   __func__, vm_page_free_count, VM_PAGE_FREE_MIN, VM_PAGE_FREE_MIN * -2LL);
-    return (VM_PAGE_FREE_MIN * PAGE_SIZE * -2LL);
+    static int silence = 0;
+    if(silence < 1) {
+      printf("SPL: %s page_free_count %u smaller than VM_PAGE_FREE_MIN (%u) returning %lld\n",
+	     __func__, vm_page_free_count, VM_PAGE_FREE_MIN,
+	     2LL * (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN)));
+      silence=10;
+    } else {
+      silence--;
+    }
+    return (2LL * (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN)));
   }
 
   //uint64_t rt_t_diff = 0;
@@ -3148,7 +3155,7 @@ kmem_avail(void)
   //return (free_count_bytes - rt_t_diff);
   
   //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
-  return vm_page_free_count * PAGE_SIZE;
+return (((int64_t)vm_page_free_count) * PAGE_SIZE);
 }
 
 /*
