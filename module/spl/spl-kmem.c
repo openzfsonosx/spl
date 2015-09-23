@@ -5559,15 +5559,11 @@ kmem_num_pages_wanted()
 
 	  if(i > old_i) {
 	    printf("SPL: %s returning pressure (%ld pages wanted), reset counter\n", __func__, i);
-	    counter = 0;
+	    counter = 60;
 	    old_i = i;
 	    return(i);
 	  } else { // we are stable or draining, wait a bit
 	    if(--counter <= 0) {
-	      // note that the first time we go through this path, counter will end up -1
-	      // this is a good thing (if not deliberate originally)
-	      // the first time through this path, to_free will already have been very big
-	      // a reap is worthwhile
 	      printf("SPL: %s i (%ld) <= old_i (%ld) counter %d, reaping and  returning i\n", __func__, i, old_i, counter);
 	      kmem_reap_idspace();
 	      kmem_reap();
