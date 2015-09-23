@@ -5564,7 +5564,9 @@ kmem_num_pages_wanted()
 	    return(i);
 	  } else { // we are stable or draining, wait a bit
 	    if(--counter <= 0) {
-	      printf("SPL: %s i (%ld) <= old_i (%ld) counter %d, returning i\n", __func__, i, old_i, counter);
+	      printf("SPL: %s i (%ld) <= old_i (%ld) counter %d, reaping and  returning i\n", __func__, i, old_i, counter);
+	      kmem_reap_idspace();
+	      kmem_reap();
 	      counter=60; // smd - WAG, tune me
 	      return(i); 
 	    } else {
