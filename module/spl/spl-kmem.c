@@ -3125,18 +3125,11 @@ kmem_avail(void)
   }
 
   if (vm_page_free_count < VM_PAGE_FREE_MIN) {  // this is what prints (smd: reaping)
-#if 0 // this is a verrrrrry common log-filling printout
-    static int silence = 0;
-    if(silence < 1) {
-      printf("SPL: %s page_free_count %u smaller than VM_PAGE_FREE_MIN (%u) returning %lld\n",
-	     __func__, vm_page_free_count, VM_PAGE_FREE_MIN,
-	     (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN)));
-      silence=10;
-    } else {
-      silence--;
+    if(!kmem_avail_use_spec) {
+      return (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN));
+    } else if((vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
+      return (((int64_t)vm_page_free_count)  - ((int64_t)VM_PAGE_FREE_MIN));
     }
-#endif    
-    return (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN));
   }
 
   if(kmem_avail_use_spec)
