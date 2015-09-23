@@ -5574,7 +5574,7 @@ kmem_num_pages_wanted()
 	      counter=60; // smd - WAG, tune me
 	      return(i); 
 	    } else {
-	      printf("SPL: %s i == old_i == %ld, counter ld\n", __func__, i);
+	      printf("SPL: %s i == old_i == %ld, counter %d\n", __func__, i, counter);
 	      return(1); // and wait for arc_reclaim_thread to DTRT, rather than making to_free much bigger
 	    }
 	  }
