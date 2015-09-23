@@ -3114,7 +3114,7 @@ kmem_avail(void)
 
   if (pressure_bytes_signal & PRESSURE_KMEM_AVAIL) { // set from 90% and reap
     printf("SPL: got pressure bytes signal in kmem_avail()\n");
-    pressure_bytes_signal &= ~(PRESSURE_KMEM_AVAIL);;
+    pressure_bytes_signal &= ~(PRESSURE_KMEM_AVAIL);
     return (-128*1024*1024); // get 128MiB from arc
   }
 
@@ -5547,18 +5547,30 @@ kmem_num_pages_wanted()
   	if (vm_page_free_wanted > 0) {
 	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
 	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);
-	  printf("SPL: kmem_num_pages_wanted() sees paging\n");
+	  printf("SPL: %s sees paging vm_page_free_wanted = %u\n", __func__, vm_page_free_wanted);
 	  return vm_page_free_wanted * 128; // MULT;  // paging, be aggressive
 	}
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
+	  static size_t old_i = 0;
+	  static int counter = 60;
+
 	  size_t i = (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
-	  if(i) {
-	    printf("SPL: kmem_num_pages_wanted returning pressure (%ld pages wanted)\n", i);
+
+	  if(i > old_i) {
+	    printf("SPL: %s returning pressure (%ld pages wanted), reset counter\n", __func__, i);
+	    counter = 0;
+	    old_i = i;
 	    return(i);
-	  } else {
-	    printf("SPL: kmem_num_pages_wanted returning MINIMUM 1 page wanted\n");
-	    return(1);
+	  } else { // we are stable or draining, wait a bit
+	    if(--counter <= 0) {
+	      printf("SPL: %s i (%ld) <= old_i (%ld) counter %d, returning i\n", __func__, i, old_i, counter);
+	      counter=60; // smd - WAG, tune me
+	      return(i); 
+	    } else {
+	      printf("SPL: %s i == old_i == %ld, counter ld\n", __func__, i);
+	      return(1); // and wait for arc_reclaim_thread to DTRT, rather than making to_free much bigger
+	    }
 	  }
 	}
 
