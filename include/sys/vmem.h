@@ -34,7 +34,7 @@ extern "C" {
 
 
 
-#define KMEM_QUANTUM (PAGESIZE<<5) // normally <<7 (512l), seems better with <<5 (128k)
+#define KMEM_QUANTUM (PAGESIZE<<4) // (<<5, 128k, has been running for months (23 sept 2015), try <<4 (64k)
 
 
 
