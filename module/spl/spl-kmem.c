@@ -5569,6 +5569,7 @@ kmem_num_pages_wanted()
 	  } else { // i < old_i
 	    printf("SPL: %s i (pressure) has fallen to %ld, resetting old_i from %ld\n",
 		   __func__, i, old_i);
+	    old_i = i;
 	    // return(0); -- fall through
 	  }
 	}
