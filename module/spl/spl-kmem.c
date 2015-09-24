@@ -5553,26 +5553,23 @@ kmem_num_pages_wanted()
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
 	  static size_t old_i = 0;
-	  static int counter = 60;
 
 	  size_t i = (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
 
 	  if(i > old_i) {
-	    printf("SPL: %s returning pressure (%ld pages wanted), reset counter\n", __func__, i);
-	    counter = 60;
+	    printf("SPL: %s seeing more pressure (%ld, %ld new pages wanted), reset counter\n",
+		   __func__, i, i-old_i);
+	    size_t f = i-old_i;
 	    old_i = i;
-	    return(i);
-	  } else { // we are stable or draining, wait a bit
-	    if(--counter <= 0) {
-	      printf("SPL: %s i (%ld) <= old_i (%ld) counter %d, reaping and  returning i\n", __func__, i, old_i, counter);
-	      kmem_reap_idspace();
-	      kmem_reap();
-	      counter=60; // smd - WAG, tune me
-	      return(i); 
-	    } else {
-	      printf("SPL: %s i == old_i == %ld, counter %d\n", __func__, i, counter);
-	      return(1); // and wait for arc_reclaim_thread to DTRT, rather than making to_free much bigger
-	    }
+	    return(f);
+	  } else if (i == old_i) { // this branch is very frequently taken
+	    kmem_reap_idspace();
+	    kmem_reap();
+	    //return(0); -- fall through
+	  } else { // i < old_i
+	    printf("SPL: %s i (pressure) has fallen to %ld, resetting old_i from %ld\n",
+		   __func__, i, old_i);
+	    // return(0); -- fall through
 	  }
 	}
 
