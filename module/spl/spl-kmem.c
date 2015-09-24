@@ -5545,8 +5545,9 @@ kmem_cache_scan(kmem_cache_t *cp)
 //===============================================================
 
 size_t
-kmem_num_pages_wanted()
+kmem_num_pages_wanted(void)
 {
+  int32_t still_pressure = 0;
 
   if(pressure_bytes_signal & PRESSURE_KMEM_NUM_PAGES_WANTED) {
     printf("SPL: kmem_num_pages_wanted got signal, returning 128M (want 32k pages)\n");
@@ -5576,10 +5577,12 @@ kmem_num_pages_wanted()
 	    kmem_reap_idspace();
 	    kmem_reap();
 	    //return(0); -- fall through
+	    still_pressure=1;
 	  } else { // i < old_i
 	    printf("SPL: %s i (pressure) has fallen to %ld, resetting old_i from %ld\n",
 		   __func__, i, old_i);
 	    old_i = i;
+	    still_pressure=1;
 	    // return(0); -- fall through
 	  }
 	}
@@ -5602,7 +5605,7 @@ kmem_num_pages_wanted()
 	  }
 	}
 
-    return 0;
+	return (still_pressure);
 }
 
 size_t
