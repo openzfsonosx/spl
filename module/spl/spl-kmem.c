@@ -3124,7 +3124,9 @@ kmem_avail(void)
     return (((int64_t)vm_page_free_wanted) * PAGE_SIZE * -128LL);  // yes, negative, will shrink bigtime
   }
 
-  if (vm_page_free_count < VM_PAGE_FREE_MIN) {  // this is what prints (smd: reaping)
+  if (vm_page_free_count < VM_PAGE_FREE_MIN) {
+    kmem_reap();
+    kmem_reap_idspace();
     if(!kmem_avail_use_spec) {
       return (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN));
     } else if((vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
