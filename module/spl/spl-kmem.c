@@ -5584,7 +5584,7 @@ kmem_num_pages_wanted()
 		   __func__, vm_page_speculative_count, vm_page_free_count);
 	    return(1); // minimum.  free_count can grow via pressure on spec via xnu.
 	  } else {
-	    printf("SPL: %s both vm_page_speculative_count (%u) and vm_page_free_count (%u) less than VM_PAGE_FREE_MIN (%u)\n",
+	    printf("SPL: %s vm_page_speculative_count (%u) and vm_page_free_count (%u) < VM_PAGE_FREE_MIN (%u)\n",
 		   __func__, vm_page_speculative_count, vm_page_free_count, VM_PAGE_FREE_MIN);
 	    // free_count is low, so we do need to free some stuff up
 	    // we know that VM_PAGE_FEE_MIN - vm_page_free_count > 0, so take min
