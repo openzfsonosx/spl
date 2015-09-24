@@ -3140,6 +3140,14 @@ kmem_avail(void)
     return (((int64_t)vm_page_free_count) * PAGE_SIZE);
 }
 
+// we use this to avoid an arc_memory_throttle if we have
+// a multiple (vm_page_free_min_multiplier) of vm_page_free_count
+int32_t
+spl_minimal_physmem_p(void)
+{
+  return (vm_page_free_count >= (vm_page_free_count * vm_page_free_min_multiplier)); // 3500 pg * 4 = ca 56MiB
+}
+
 /*
  * Return the maximum amount of memory that is (in theory) allocatable
  * from the heap. This may be used as an estimate only since there
