@@ -5557,7 +5557,7 @@ kmem_num_pages_wanted()
 	  size_t i = (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
 
 	  if(i > old_i) {
-	    printf("SPL: %s seeing more pressure (%ld, %ld new pages wanted), reset counter\n",
+	    printf("SPL: %s seeing more pressure (%ld, %ld new pages wanted), reset old_i\n",
 		   __func__, i, i-old_i);
 	    size_t f = i-old_i;
 	    old_i = i;
