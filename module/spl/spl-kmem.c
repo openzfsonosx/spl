@@ -3145,7 +3145,7 @@ kmem_avail(void)
 int32_t
 spl_minimal_physmem_p(void)
 {
-  return (vm_page_free_count >= (vm_page_free_count * vm_page_free_min_multiplier)); // 3500 pg * 4 = ca 56MiB
+  return (vm_page_free_count >= (vm_page_free_min * vm_page_free_min_multiplier)); // 3500 pg * 4 = ca 56MiB
 }
 
 /*
