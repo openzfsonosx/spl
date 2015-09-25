@@ -3140,12 +3140,19 @@ kmem_avail(void)
     return (((int64_t)vm_page_free_count) * PAGE_SIZE);
 }
 
-// we use this to avoid an arc_memory_throttle if we have
-// a multiple (vm_page_free_min_multiplier) of vm_page_free_count
+// TRUE if we have more than a critical minimum of memory
+// used in arc_memory_throttle; if FALSE, we throttle 
 int32_t
 spl_minimal_physmem_p(void)
 {
-  return (vm_page_free_count >= (vm_page_free_min * vm_page_free_min_multiplier)); // 3500 pg * 4 = ca 56MiB
+  
+  //return (vm_page_free_count >= (vm_page_free_min * vm_page_free_min_multiplier)); // 3500 pg * 4 = ca 56MiB
+  // this caused too much throttling, with the symptom being a lock-up of all zfs writes
+  // it would stick there for a long time (pressure2 would unstick it)
+  // so probably take the Sun logic in arc_memory_throttle and try this instead:
+
+  return(vm_page_free_count > vm_page_free_min);
+
 }
 
 /*
@@ -5559,6 +5566,7 @@ kmem_num_pages_wanted(void)
 	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
 	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);
 	  printf("SPL: %s sees paging vm_page_free_wanted = %u\n", __func__, vm_page_free_wanted);
+	  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
 	  return vm_page_free_wanted * 128; // MULT;  // paging, be aggressive
 	}
 
@@ -5567,22 +5575,37 @@ kmem_num_pages_wanted(void)
 
 	  size_t i = (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
 
-	  if(i > old_i) {
+#define dprintf if(0) printf
+	  if(i > old_i + 1) {
 	    printf("SPL: %s seeing more pressure (%ld, %ld new pages wanted), reset old_i\n",
-		   __func__, i, i-old_i);
+		   __func__, i, i - old_i);
 	    size_t f = i-old_i;
 	    old_i = i;
 	    return(f);
+	  } else if (i > old_i) {
+	    // trivial amount of pressure, don't ask for a page
+	    dprintf("SPL: %s trivial pressure (%ld, %ld new pages wanted), reset old_i\n",
+		   __func__, i, i - old_i);
+	    old_i = i;
+	    // fall through, may hit return with still_pressure == 0
 	  } else if (i == old_i) { // this branch is very frequently taken
 	    kmem_reap_idspace();
 	    kmem_reap();
 	    //return(0); -- fall through
-	    still_pressure=1;
+	    still_pressure=256;
+	  } else if(i <= old_i - 1) {
+	    // trivial amount of negative pressure
+	    dprintf("SPL: %s trivial unpressure (%ld, %ld new pages wanted), reset old_i\n",
+		   __func__, i, i - old_i);
+	    // because of parallelsism, i - old_i may be less than -1
+	    // (i have seen -5)
+	    old_i = i;
+	    // fall through, may hit return with still_pressure == 0
 	  } else { // i < old_i
 	    printf("SPL: %s i (pressure) has fallen to %ld, resetting old_i from %ld\n",
 		   __func__, i, old_i);
 	    old_i = i;
-	    still_pressure=1;
+	    still_pressure=256;
 	    // return(0); -- fall through
 	  }
 	}
@@ -5592,20 +5615,17 @@ kmem_num_pages_wanted(void)
 	    printf("SPL: %s vm_page_free_count (%u) < VM_PAGE_FREE_MIN (%u)\n",
 		   __func__, vm_page_free_count, VM_PAGE_FREE_MIN);
 	    return (VM_PAGE_FREE_MIN - vm_page_free_count);
-	  } else if(vm_page_speculative_count >= VM_PAGE_FREE_MIN) { // speculative is big
-	    printf("SPL: %s vm_page_speculative_count is big (%u), vm_page_free_count is not (%u)\n",
-		   __func__, vm_page_speculative_count, vm_page_free_count);
-	    return(1); // minimum.  free_count can grow via pressure on spec via xnu.
-	  } else {
-	    printf("SPL: %s vm_page_speculative_count (%u) and vm_page_free_count (%u) < VM_PAGE_FREE_MIN (%u)\n",
-		   __func__, vm_page_speculative_count, vm_page_free_count, VM_PAGE_FREE_MIN);
-	    // free_count is low, so we do need to free some stuff up
-	    // we know that VM_PAGE_FEE_MIN - vm_page_free_count > 0, so take min
-	    // frequent common case: spec is 208, free is 59600, FREE_MIN is 65536
-	    if(vm_page_free_count < VM_PAGE_FREE_MIN / 2) { 
-	      return(vm_page_free_count / 2);
-	    } else {
-	      return(256); // free a meg
+	  } else if((vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
+	    if(vm_page_free_count < vm_page_speculative_count) {
+	      if(vm_page_free_count < (vm_page_free_min * vm_page_free_min_multiplier)) {
+		printf("SPL: %s page_free_count %u < %u, returning  %u\n",
+		       __func__, vm_page_free_count, vm_page_free_min * vm_page_free_min_multiplier,
+		       vm_page_free_min * vm_page_free_min_multiplier);
+		pressure_bytes_signal |= PRESSURE_KMEM_NUM_PAGES_WANTED;
+		return(vm_page_free_min * vm_page_free_min_multiplier);
+	      } else {
+		return(256);
+	      }
 	    }
 	  }
 	}
