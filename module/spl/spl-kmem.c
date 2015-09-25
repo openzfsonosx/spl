@@ -3140,12 +3140,19 @@ kmem_avail(void)
     return (((int64_t)vm_page_free_count) * PAGE_SIZE);
 }
 
-// we use this to avoid an arc_memory_throttle if we have
-// a multiple (vm_page_free_min_multiplier) of vm_page_free_count
+// TRUE if we have more than a critical minimum of memory
+// used in arc_memory_throttle; if FALSE, we throttle 
 int32_t
 spl_minimal_physmem_p(void)
 {
-  return (vm_page_free_count >= (vm_page_free_min * vm_page_free_min_multiplier)); // 3500 pg * 4 = ca 56MiB
+  
+  //return (vm_page_free_count >= (vm_page_free_min * vm_page_free_min_multiplier)); // 3500 pg * 4 = ca 56MiB
+  // this caused too much throttling, with the symptom being a lock-up of all zfs writes
+  // it would stick there for a long time (pressure2 would unstick it)
+  // so probably take the Sun logic in arc_memory_throttle and try this instead:
+
+  return(vm_page_free_count > vm_page_free_min);
+
 }
 
 /*
