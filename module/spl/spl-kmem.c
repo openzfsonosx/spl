@@ -5559,6 +5559,7 @@ kmem_num_pages_wanted(void)
 	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
 	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);
 	  printf("SPL: %s sees paging vm_page_free_wanted = %u\n", __func__, vm_page_free_wanted);
+	  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
 	  return vm_page_free_wanted * 128; // MULT;  // paging, be aggressive
 	}
 
@@ -5598,6 +5599,7 @@ kmem_num_pages_wanted(void)
 		printf("SPL: %s page_free_count %u < %u, returning  %u\n",
 		       __func__, vm_page_free_count, vm_page_free_min * vm_page_free_min_multiplier,
 		       vm_page_free_min);
+		pressure_bytes_signal |= PRESSURE_KMEM_NUM_PAGES_WANTED;
 		return(vm_page_free_min);
 	      } else {
 		return(256);
