@@ -5601,7 +5601,12 @@ kmem_num_pages_wanted(void)
 		   __func__, vm_page_speculative_count, vm_page_free_count, VM_PAGE_FREE_MIN);
 	    // free_count is low, so we do need to free some stuff up
 	    // we know that VM_PAGE_FEE_MIN - vm_page_free_count > 0, so take min
-	    return(VM_PAGE_FREE_MIN - MIN(vm_page_free_count,vm_page_speculative_count));
+	    // frequent common case: spec is 208, free is 59600, FREE_MIN is 65536
+	    if(vm_page_free_count < VM_PAGE_FREE_MIN / 2) { 
+	      return(vm_page_free_count / 2);
+	    } else {
+	      return(256); // free a meg
+	    }
 	  }
 	}
 
