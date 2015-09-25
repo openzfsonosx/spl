@@ -5577,12 +5577,12 @@ kmem_num_pages_wanted(void)
 	    kmem_reap_idspace();
 	    kmem_reap();
 	    //return(0); -- fall through
-	    still_pressure=1;
+	    still_pressure=256;
 	  } else { // i < old_i
 	    printf("SPL: %s i (pressure) has fallen to %ld, resetting old_i from %ld\n",
 		   __func__, i, old_i);
 	    old_i = i;
-	    still_pressure=1;
+	    still_pressure=256;
 	    // return(0); -- fall through
 	  }
 	}
@@ -5592,20 +5592,16 @@ kmem_num_pages_wanted(void)
 	    printf("SPL: %s vm_page_free_count (%u) < VM_PAGE_FREE_MIN (%u)\n",
 		   __func__, vm_page_free_count, VM_PAGE_FREE_MIN);
 	    return (VM_PAGE_FREE_MIN - vm_page_free_count);
-	  } else if(vm_page_speculative_count >= VM_PAGE_FREE_MIN) { // speculative is big
-	    printf("SPL: %s vm_page_speculative_count is big (%u), vm_page_free_count is not (%u)\n",
-		   __func__, vm_page_speculative_count, vm_page_free_count);
-	    return(1); // minimum.  free_count can grow via pressure on spec via xnu.
-	  } else {
-	    printf("SPL: %s vm_page_speculative_count (%u) and vm_page_free_count (%u) < VM_PAGE_FREE_MIN (%u)\n",
-		   __func__, vm_page_speculative_count, vm_page_free_count, VM_PAGE_FREE_MIN);
-	    // free_count is low, so we do need to free some stuff up
-	    // we know that VM_PAGE_FEE_MIN - vm_page_free_count > 0, so take min
-	    // frequent common case: spec is 208, free is 59600, FREE_MIN is 65536
-	    if(vm_page_free_count < VM_PAGE_FREE_MIN / 2) { 
-	      return(vm_page_free_count / 2);
-	    } else {
-	      return(256); // free a meg
+	  } else if((vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
+	    if(vm_page_free_count < vm_page_speculative_count) {
+	      if(vm_page_free_count < (vm_page_free_min * vm_page_free_min_multiplier)) {
+		printf("SPL: %s page_free_count %u < %u, returning  %u\n",
+		       __func__, vm_page_free_count, vm_page_free_min * vm_page_free_min_multiplier,
+		       vm_page_free_min);
+		return(vm_page_free_min);
+	      } else {
+		return(256);
+	      }
 	    }
 	  }
 	}
