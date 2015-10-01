@@ -92,7 +92,7 @@ install-exec-local: spl.kext
 	rm -rf $(KERNEL_MODDIR)
 	mkdir -p $(KERNEL_MODDIR)
 	rsync -r spl.kext/ $(KERNEL_MODDIR)
-	chown -R root:wheel $(KERNEL_MODDIR)
+	chown -R root:wheel $(KERNEL_MODDIR) || echo "Unable to chown root:wheel $(KERNEL_MODDIR)"
 	@echo
 	@echo "To load module: kextload -v $(KERNEL_MODDIR)"
 	@echo "To uninstall module: rm -rf $(KERNEL_MODDIR)"
