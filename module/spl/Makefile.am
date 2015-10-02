@@ -58,7 +58,7 @@ spl_SOURCES = 	\
 	spl-tsd.c \
     spl-vmem.c \
 	spl-vnode.c \
-	spl-xdr.c 
+	spl-xdr.c
 
 spl_CPPFLAGS=$(CFLAGS_KMOD)
 spl_LDFLAGS=$(LINKFLAGS_KMOD)
@@ -99,7 +99,7 @@ install-exec-local: spl.kext
 	@echo
 
 uninstall-am:
-	rm -rf /System/Library/Extensions/spl.kext
+	rm -rf $(KERNEL_MODDIR)
 
 clean:
 	rm -rf spl.kext/
