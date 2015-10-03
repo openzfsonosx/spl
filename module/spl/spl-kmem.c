@@ -5577,7 +5577,7 @@ kmem_num_pages_wanted(void)
 
 	  if(i > old_i + 1) {
 	    printf("SPL: %s seeing more pressure (%ld, %ld new pages wanted), reset old_i\n",
-		   __func__, i, i -old_i);
+		   __func__, i, i - old_i);
 	    size_t f = i-old_i;
 	    old_i = i;
 	    return(f);
@@ -5592,7 +5592,7 @@ kmem_num_pages_wanted(void)
 	    kmem_reap();
 	    //return(0); -- fall through
 	    still_pressure=256;
-	  } else if(i < old_i - 1) {
+	  } else if(i <= old_i - 1) {
 	    // trivial amount of negative pressure
 	    printf("SPL: %s trivial unpressure (%ld, %ld new pages wanted), reset old_i\n",
 		   __func__, i, i - old_i);
