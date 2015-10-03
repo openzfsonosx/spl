@@ -5605,9 +5605,9 @@ kmem_num_pages_wanted(void)
 	      if(vm_page_free_count < (vm_page_free_min * vm_page_free_min_multiplier)) {
 		printf("SPL: %s page_free_count %u < %u, returning  %u\n",
 		       __func__, vm_page_free_count, vm_page_free_min * vm_page_free_min_multiplier,
-		       vm_page_free_min);
+		       vm_page_free_min * vm_page_free_min_multiplier);
 		pressure_bytes_signal |= PRESSURE_KMEM_NUM_PAGES_WANTED;
-		return(vm_page_free_min);
+		return(vm_page_free_min * vm_page_free_min_multiplier);
 	      } else {
 		return(256);
 	      }
