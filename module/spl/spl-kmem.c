@@ -5577,14 +5577,14 @@ kmem_num_pages_wanted(void)
 
 	  if(i > old_i + 1) {
 	    printf("SPL: %s seeing more pressure (%ld, %ld new pages wanted), reset old_i\n",
-		   __func__, i, i-old_i);
+		   __func__, i, i -old_i);
 	    size_t f = i-old_i;
 	    old_i = i;
 	    return(f);
 	  } else if (i > old_i) {
 	    // trivial amount of pressure, don't ask for a page
-	    printf("SPL: %s trivial pressure (%ld, %ld new pagees wanted), reset old_i\n",
-		   __func__, i, old_i);
+	    printf("SPL: %s trivial pressure (%ld, %ld new pages wanted), reset old_i\n",
+		   __func__, i, i - old_i);
 	    old_i = i;
 	    // fall through, may hit return with still_pressure == 0
 	  } else if (i == old_i) { // this branch is very frequently taken
@@ -5595,7 +5595,7 @@ kmem_num_pages_wanted(void)
 	  } else if(i < old_i - 1) {
 	    // trivial amount of negative pressure
 	    printf("SPL: %s trivial unpressure (%ld, %ld new pages wanted), reset old_i\n",
-		   __func__, i, old_i);
+		   __func__, i, i - old_i);
 	    old_i = i;
 	    // fall through, may hit return with still_pressure == 0
 	  } else { // i < old_i
