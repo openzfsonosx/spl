@@ -5592,6 +5592,12 @@ kmem_num_pages_wanted(void)
 	    kmem_reap();
 	    //return(0); -- fall through
 	    still_pressure=256;
+	  } else if(i < old_i - 1) {
+	    // trivial amount of negative pressure
+	    printf("SPL: %s trivial unpressure (%ld, %ld new pages wanted), reset old_i\n",
+		   __func__, i, old_i);
+	    old_i = i;
+	    // fall through, may hit return with still_pressure == 0
 	  } else { // i < old_i
 	    printf("SPL: %s i (pressure) has fallen to %ld, resetting old_i from %ld\n",
 		   __func__, i, old_i);
