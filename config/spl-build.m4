@@ -44,7 +44,7 @@ AC_DEFUN([SPL_AC_KERNEL], [
 		[KERNEL_MODPREFIX="$withval"])
 	AC_MSG_CHECKING([kernel module prefix])
 	AS_IF([test -z "$KERNEL_MODPREFIX"], [
-		KERNEL_MODPREFIX="/System/Library/Extensions"
+		KERNEL_MODPREFIX="/Library/Extensions"
 	])
 	AC_MSG_RESULT([$KERNEL_MODPREFIX])
 
