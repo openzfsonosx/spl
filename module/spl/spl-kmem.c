@@ -5596,6 +5596,8 @@ kmem_num_pages_wanted(void)
 	    // trivial amount of negative pressure
 	    printf("SPL: %s trivial unpressure (%ld, %ld new pages wanted), reset old_i\n",
 		   __func__, i, i - old_i);
+	    // because of parallelsism, i - old_i may be less than -1
+	    // (i have seen -5)
 	    old_i = i;
 	    // fall through, may hit return with still_pressure == 0
 	  } else { // i < old_i
