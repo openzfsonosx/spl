@@ -3114,7 +3114,7 @@ kmem_avail(void)
   // smd - spike the vm_page_speculative_count, that can be hundreds of MB or small numbers of MB
 
   if (pressure_bytes_signal & PRESSURE_KMEM_AVAIL) { // set from 90% and reap
-    printf("SPL: got pressure bytes signal in kmem_avail()\n");
+    dprintf("SPL: got pressure bytes signal in kmem_avail()\n");
     pressure_bytes_signal &= ~(PRESSURE_KMEM_AVAIL);
     return (-128*1024*1024); // get 128MiB from arc
   }
