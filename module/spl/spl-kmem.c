@@ -1,3 +1,4 @@
+#define dprintf if(0) printf
 /*
  * CDDL HEADER START
  *
@@ -5557,7 +5558,7 @@ kmem_num_pages_wanted(void)
   int32_t still_pressure = 0;
 
   if(pressure_bytes_signal & PRESSURE_KMEM_NUM_PAGES_WANTED) {
-    printf("SPL: kmem_num_pages_wanted got signal, returning 128M (want 32k pages)\n");
+    dprintf("SPL: kmem_num_pages_wanted got signal, returning 128M (want 32k pages)\n");
     pressure_bytes_signal &= ~(PRESSURE_KMEM_NUM_PAGES_WANTED);
     return 32768;
   }
@@ -5565,9 +5566,18 @@ kmem_num_pages_wanted(void)
   	if (vm_page_free_wanted > 0) {
 	  //if (pressure_bytes_target > (vm_page_free_wanted * PAGE_SIZE * MULT))
 	  //  pressure_bytes_target -= (vm_page_free_wanted * PAGE_SIZE * MULT);
-	  printf("SPL: %s sees paging vm_page_free_wanted = %u\n", __func__, vm_page_free_wanted);
+	  printf("SPL: %s sees paging vm_page_free_wanted = %u, vm_page_free_count = %u\n",
+		 __func__, vm_page_free_wanted, vm_page_free_count);
 	  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
 	  return vm_page_free_wanted * 128; // MULT;  // paging, be aggressive
+	}
+
+	if (vm_page_free_count <= vm_page_free_min) {
+	  printf("SPL: %s memory very low %u < %u, reaping\n", __func__, vm_page_free_count, vm_page_free_min);
+	  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
+	  kmem_reap_idspace();
+	  kmem_reap();
+	  return vm_page_free_wanted * 128;
 	}
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
@@ -5575,7 +5585,6 @@ kmem_num_pages_wanted(void)
 
 	  size_t i = (kmem_used() - pressure_bytes_target) / PAGE_SIZE;
 
-#define dprintf if(0) printf
 	  if(i > old_i + 1) {
 	    printf("SPL: %s seeing more pressure (%ld, %ld new pages wanted), reset old_i\n",
 		   __func__, i, i - old_i);
@@ -5618,7 +5627,7 @@ kmem_num_pages_wanted(void)
 	  } else if((vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
 	    if(vm_page_free_count < vm_page_speculative_count) {
 	      if(vm_page_free_count < (vm_page_free_min * vm_page_free_min_multiplier)) {
-		printf("SPL: %s page_free_count %u < %u, returning  %u\n",
+		dprintf("SPL: %s page_free_count %u < %u, returning  %u\n",
 		       __func__, vm_page_free_count, vm_page_free_min * vm_page_free_min_multiplier,
 		       vm_page_free_min * vm_page_free_min_multiplier);
 		pressure_bytes_signal |= PRESSURE_KMEM_NUM_PAGES_WANTED;
