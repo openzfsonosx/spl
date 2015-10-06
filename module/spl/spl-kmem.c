@@ -4117,7 +4117,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		   MAX(vm_page_free_min*(uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64, vm_page_free_min_min));
 	    vm_page_free_min_multiplier = (uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64;
 	  }
-	  if(ks->spl_vm_page_free_min_min.value.ui64 != (uint64_t)vm_page_free_min) {
+	  if(ks->spl_vm_page_free_min_min.value.ui64 != (uint64_t)vm_page_free_min_min) {
 	    printf("SPL: vm_page_free_min_min was %u, now %u, headroom now %u\n",
 		   vm_page_free_min_min,
 		   (uint32_t)ks->spl_vm_page_free_min_min.value.ui32,
