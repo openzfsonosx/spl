@@ -64,7 +64,7 @@ extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_m
 uint32_t vm_page_free_min_multiplier = 4;
 uint32_t vm_page_free_min_min = 256*1024*1024/4096;
 #define VM_PAGE_FREE_MIN (MAX(vm_page_free_min * vm_page_free_min_multiplier, vm_page_free_min_min))
-uint32_t kmem_avail_use_spec = 1;
+int64_t kmem_avail_use_spec = 1;
 uint64_t vm_low_memory_signal_shift = 6; // 64, had been good with 128 (smd)
 #define LOW_MEMORY_MULT (1 << vm_low_memory_signal_shift)
 extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
@@ -4080,7 +4080,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 
 	if (rw == KSTAT_WRITE) {
 
-	  if(ks->spl_low_memory_signal_shift.value.ui64) {
+	  if(ks->spl_low_memory_signal_shift.value.ui64 != vm_low_memory_signal_shift) {
 	    uint64_t lowshift = ks->spl_low_memory_signal_shift.value.ui64;
 	    if(4 < lowshift && lowshift < 16) {
 	      printf("SPL: low_memory_signal_shift %llu -> %llu\n",
@@ -4092,6 +4092,13 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	    }
 	  }
 
+	  if(ks->spl_kmem_avail_use_spec.value.i64 != kmem_avail_use_spec) {
+	    printf("SPL:kmem_avail_use_spec changed from %lld to %lld\n",
+		   kmem_avail_use_spec,
+		   ks->spl_kmem_avail_use_spec.value.i64);
+	    kmem_avail_use_spec = ks->spl_kmem_avail_use_spec.value.i64;
+	  }
+#if 0
 	  if(ks->spl_kmem_avail_use_spec.value.i64 == 1) {
 	    printf("SPL: kmem_avail_use_spec TRUE\n");
 	    kmem_avail_use_spec = 1;
@@ -4101,15 +4108,16 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	    printf("SPL: kmem_avail_use_spec FALSE\n");
 	    kmem_avail_use_spec = 0;
 	  }
+#endif	     
 	    
-	  if(ks->spl_vm_page_free_min_multiplier.value.ui64) {
+	  if(ks->spl_vm_page_free_min_multiplier.value.ui64 != (uint64_t)vm_page_free_min_multiplier) {
 	    printf("SPL: vm_page_free_min_multiplier was %u, now %u, headroom now %u\n",
 		   vm_page_free_min_multiplier,
 		   (uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64,
 		   MAX(vm_page_free_min*(uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64, vm_page_free_min_min));
 	    vm_page_free_min_multiplier = (uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64;
 	  }
-	  if(ks->spl_vm_page_free_min_min.value.ui64) {
+	  if(ks->spl_vm_page_free_min_min.value.ui64 != (uint64_t)vm_page_free_min) {
 	    printf("SPL: vm_page_free_min_min was %u, now %u, headroom now %u\n",
 		   vm_page_free_min_min,
 		   (uint32_t)ks->spl_vm_page_free_min_min.value.ui32,
