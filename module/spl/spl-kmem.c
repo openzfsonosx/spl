@@ -5586,14 +5586,18 @@ kmem_num_pages_wanted(void)
 	  return vm_page_free_wanted * LOW_MEMORY_MULT;  // paging, be aggressive
 	}
 
-	if (vm_page_free_count <= (vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES)) {
-	  printf("SPL: %s memory very low %u < %u, reaping and returning %u\n",
-		 __func__, vm_page_free_count, vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES,
-		 vm_page_free_wanted * LOW_MEMORY_MULT);
+	size_t reducedmin = (vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES);
+	if (vm_page_free_count <= reducedmin) {
+	  size_t retpages = (reducedmin - vm_page_free_count) * LOW_MEMORY_MULT;
+	  printf("SPL: %s memory very low %u < %lu, reaping, retpages = %lu\n",
+		 __func__, vm_page_free_count, reducedmin, retpages);
 	  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
 	  kmem_reap_idspace();
 	  kmem_reap();
-	  return (vm_page_free_wanted * LOW_MEMORY_MULT);
+	  if(vm_page_free_count <= reducedmin)
+	    return (retpages);
+	  else
+	    return(0);
 	}
 
 	if (pressure_bytes_target && (pressure_bytes_target < kmem_used())) {
