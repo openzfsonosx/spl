@@ -69,6 +69,7 @@ uint64_t vm_low_memory_signal_shift = 6; // 64, had been good with 128 (smd)
 #define LOW_MEMORY_MULT (1 << vm_low_memory_signal_shift)
 extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
 extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
+#define SMALL_PRESSURE_INCURSION_PAGES (vm_page_free_min / 20)
 
 // Start and end address of kernel memory
 //http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L135
@@ -3154,8 +3155,6 @@ spl_minimal_physmem_p(void)
   // arc will throttle throttle if we are paging, otherwise
   // we want a small bit of pressure here so that we can compete a little with the xnu buffer cache
 
-#define SMALL_PRESSURE_INCURSION_PAGES (vm_page_free_min / 20)
-
   return(!vm_page_free_wanted &&
 	 (vm_page_free_count > (vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES)));
 
@@ -5587,8 +5586,10 @@ kmem_num_pages_wanted(void)
 	  return vm_page_free_wanted * LOW_MEMORY_MULT;  // paging, be aggressive
 	}
 
-	if (vm_page_free_count <= vm_page_free_min) {
-	  printf("SPL: %s memory very low %u < %u, reaping\n", __func__, vm_page_free_count, vm_page_free_min);
+	if (vm_page_free_count <= (vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES)) {
+	  printf("SPL: %s memory very low %u < %u, reaping and returning %u\n",
+		 __func__, vm_page_free_count, vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES,
+		 vm_page_free_wanted * LOW_MEMORY_MULT);
 	  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
 	  kmem_reap_idspace();
 	  kmem_reap();
