@@ -4098,17 +4098,6 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		   ks->spl_kmem_avail_use_spec.value.i64);
 	    kmem_avail_use_spec = ks->spl_kmem_avail_use_spec.value.i64;
 	  }
-#if 0
-	  if(ks->spl_kmem_avail_use_spec.value.i64 == 1) {
-	    printf("SPL: kmem_avail_use_spec TRUE\n");
-	    kmem_avail_use_spec = 1;
-	  }	
-
-	  if(ks->spl_kmem_avail_use_spec.value.i64 == -1) {
-	    printf("SPL: kmem_avail_use_spec FALSE\n");
-	    kmem_avail_use_spec = 0;
-	  }
-#endif	     
 	    
 	  if(ks->spl_vm_page_free_min_multiplier.value.ui64 != (uint64_t)vm_page_free_min_multiplier) {
 	    printf("SPL: vm_page_free_min_multiplier was %u, now %u, headroom now %u\n",
