@@ -4116,7 +4116,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	    vm_page_free_min_min = (uint32_t)ks->spl_vm_page_free_min_min.value.ui32;
 	  }
 
-		if (ks->spl_simulate_pressure.value.ui64) {
+		if (ks->spl_simulate_pressure.value.ui64 != pressure_bytes_target) {
 		  printf("SPL: pressure_bytes_target_sysctl %llu, previous pressure %llu, kmem_used() %lu\n",
 			 ks->spl_simulate_pressure.value.ui64*1024*1024,
 			 pressure_bytes_target,
