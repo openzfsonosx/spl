@@ -4016,7 +4016,7 @@ static void memory_monitor_thread()
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
-				printf("SPL: memory_monitory_thread pressure: new target %llu (diff: %u), kmem_avail() == %llu\n",
+				printf("SPL: memory_monitory_thread pressure: new target %llu (diff: %u), kmem_avail() == %lld\n",
 				       newtarget, os_num_pages_wanted, kmem_avail());
 			}
 
@@ -4025,7 +4025,7 @@ static void memory_monitor_thread()
 				last_reap = zfs_lbolt();
 
 				if (vm_page_free_wanted > 0) {
-				  printf("SPL: memory_monitory_thread vm_page_free_wanted > 0, signalling kmem_avail and reaping, kmem_avail() == %llu\n", kmem_avail());
+				  printf("SPL: memory_monitory_thread vm_page_free_wanted > 0, signalling kmem_avail and reaping, kmem_avail() == %lld\n", kmem_avail());
 				  pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
 				  kmem_reap();
 				  kpreempt(KPREEMPT_SYNC);
@@ -4037,13 +4037,13 @@ static void memory_monitor_thread()
 				if (segkmem_total_mem_allocated >= nintypct) {
 					pressure_bytes_target = MAX(pressure_bytes_target,
 								segkmem_total_mem_allocated - nintypct);
-					printf("SPL: 90%% hit, triggering reap and signalling, kmem_avail() == %llu\n", kmem_avail());
+					printf("SPL: 90%% hit, triggering reap and signalling, kmem_avail() == %lld\n", kmem_avail());
 					pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
 					kmem_reap();
 					kpreempt(KPREEMPT_SYNC);
 					kmem_reap_idspace();
 				} else if (!os_num_pages_wanted && pressure_bytes_target) {
-				  printf("SPL: releasing pressure (was %llu), segkmem_total_mem_allocated=%llu kmem_avail() == %llu\n",
+				  printf("SPL: releasing pressure (was %llu), segkmem_total_mem_allocated=%llu kmem_avail() == %lld\n",
 					 pressure_bytes_target,
 					 segkmem_total_mem_allocated,
 					 kmem_avail());
