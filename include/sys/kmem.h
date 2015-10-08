@@ -60,12 +60,12 @@ extern uint64_t physmem;
 	 */
 
 // Work around symbol collisions in XNU
-#define kmem_alloc(size, kmflags)   zfs_kmem_alloc((size), (kmflags))
-#define kmem_zalloc(size, kmflags)  zfs_kmem_zalloc((size), (kmflags))
+#define kmem_alloc(size, kmflags)   zfs_kmem_alloc((size), (kmflags), __FILE__, __LINE__)
+#define kmem_zalloc(size, kmflags)  zfs_kmem_zalloc((size), (kmflags), __FILE__, __LINE__)
 #define kmem_free(buf, size)        zfs_kmem_free((buf), (size))
 
-    void* zfs_kmem_alloc(size_t size, int kmflags);
-    void* zfs_kmem_zalloc(size_t size, int kmflags);
+    void* zfs_kmem_alloc(size_t size, int kmflags, char *file, int line);
+    void* zfs_kmem_zalloc(size_t size, int kmflags, char *file, int line);
     void zfs_kmem_free(void *buf, size_t size);
 
     void spl_kmem_init(uint64_t);
