@@ -4027,7 +4027,7 @@ static void memory_monitor_thread()
 				last_reap = zfs_lbolt();
 
 				if (vm_page_free_wanted > 0) {
-				  printf("SPL: memory_monitory_thread vm_page_free_wanted > 0, signalling kmem_avail and reapingk, kmem_avail() == %llu\n", kmem_avail());
+				  printf("SPL: memory_monitory_thread vm_page_free_wanted > 0, signalling kmem_avail and reaping, kmem_avail() == %llu\n", kmem_avail());
 				  pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
 				  kmem_reap();
 				  kpreempt(KPREEMPT_SYNC);
