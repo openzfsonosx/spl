@@ -3119,8 +3119,6 @@ kmem_avail(void)
 //    return ((size_t)ptob(MIN(MAX(MIN(rmem, fmem), 0),
 //                             1 << (30 - PAGESHIFT))));
 #endif
-  //return (vm_page_free_count + vm_page_speculative_count) * PAGE_SIZE;
-  // smd - spike the vm_page_speculative_count, that can be hundreds of MB or small numbers of MB
 
   if (pressure_bytes_signal & PRESSURE_KMEM_AVAIL) { // set from 90% and reap
     dprintf("SPL: got pressure bytes signal in kmem_avail()\n");
