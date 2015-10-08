@@ -639,7 +639,7 @@ caller()
 void *
 calloc(size_t n, size_t s)
 {
-	return (zfs_kmem_zalloc(n * s, KM_NOSLEEP));
+    return (zfs_kmem_zalloc(n * s, KM_NOSLEEP, "calloc", 0));
 }
 
 #define	IS_DIGIT(c)	((c) >= '0' && (c) <= '9')
@@ -1880,12 +1880,11 @@ kmem_dump_init(size_t size)
 	if (kmem_dump_start != NULL)
 		zfs_kmem_free(kmem_dump_start, kmem_dump_size);
 
-	if (kmem_dump_log == NULL)
-		kmem_dump_log =
-			(kmem_dump_log_t *)zfs_kmem_zalloc(
-				KMEM_DUMP_LOGS * sizeof (kmem_dump_log_t), KM_SLEEP);
+    if (kmem_dump_log == NULL)
+        kmem_dump_log = (kmem_dump_log_t *)zfs_kmem_zalloc(KMEM_DUMP_LOGS *
+														   sizeof (kmem_dump_log_t), KM_SLEEP, "", 0);
 
-	kmem_dump_start = zfs_kmem_alloc(size, KM_SLEEP);
+    kmem_dump_start = kmem_alloc(size, KM_SLEEP);
 
 	if (kmem_dump_start != NULL) {
 		kmem_dump_size = size;
@@ -2562,11 +2561,29 @@ kmem_slab_prefill(kmem_cache_t *cp, kmem_slab_t *sp)
 	mutex_enter(&cp->cache_lock);
 }
 
+
+//#define KMEM_LEAK_SIZE 7
+
+#ifdef KMEM_LEAK_SIZE
+struct keep_struct {
+	char file[16];
+	uint32_t line;
+	list_node_t node;
+};
+typedef struct keep_struct keep_t;
+
+static list_t keep_list;
+static kmutex_t keep_lock;
+#endif
+
 void *
-zfs_kmem_zalloc(size_t size, int kmflag)
+zfs_kmem_zalloc(size_t size, int kmflag, char *file, int line)
 {
 	size_t index;
 	void *buf;
+#ifdef KMEM_LEAK_SIZE
+	int keep = 0;
+#endif
 
 	if ((index = ((size - 1) >> KMEM_ALIGN_SHIFT)) < KMEM_ALLOC_TABLE_MAX) {
 		kmem_cache_t *cp = kmem_alloc_table[index];
@@ -2574,6 +2591,15 @@ zfs_kmem_zalloc(size_t size, int kmflag)
 		if (buf != NULL) {
 			if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp)) {
 				kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
+
+#ifdef KMEM_LEAK_SIZE
+		if (cp->cache_bufsize == KMEM_LEAK_SIZE) {
+			size += sizeof(keep_t);
+			index = (((size - 1) >> KMEM_ALIGN_SHIFT));
+			cp = kmem_alloc_table[index];
+			keep = 1;
+		}
+#endif
 				((uint8_t *)buf)[size] = KMEM_REDZONE_BYTE;
 				((uint32_t *)btp)[1] = KMEM_SIZE_ENCODE(size);
 
@@ -2589,11 +2615,28 @@ zfs_kmem_zalloc(size_t size, int kmflag)
 		if (buf != NULL)
 			bzero(buf, size);
 	}
+
+#ifdef KMEM_LEAK_SIZE
+	if (keep) {
+		keep_t *kp;
+		char *r;
+		kp = &buf[size - sizeof(keep_t)];
+		strlcpy(kp->file, (r = strrchr(file, '/')) ? r+1 : file,
+				sizeof(kp->file));
+		kp->line = line;
+		list_link_init(&kp->node);
+		mutex_enter(&keep_lock);
+		list_insert_head(&keep_list, kp);
+		mutex_exit(&keep_lock);
+	}
+#endif
+
 	return (buf);
 }
 
+
 void *
-zfs_kmem_alloc(size_t size, int kmflag)
+zfs_kmem_alloc(size_t size, int kmflag, char *file, int line)
 {
 	size_t index;
 	kmem_cache_t *cp;
@@ -2626,6 +2669,18 @@ zfs_kmem_alloc(size_t size, int kmflag)
 		return (buf);
 	}
 
+#ifdef KMEM_LEAK_SIZE
+	int keep = 0;
+	char *r;
+	/* Move size 24 to + 20 to fit filename and line */
+	if (cp->cache_bufsize == KMEM_LEAK_SIZE) {
+		size += sizeof(keep_t);
+		index = (((size - 1) >> KMEM_ALIGN_SHIFT));
+        cp = kmem_alloc_table[index];
+		keep = 1;
+	}
+#endif
+
 	buf = kmem_cache_alloc(cp, kmflag);
 	if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp) && buf != NULL) {
 		kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
@@ -2636,6 +2691,20 @@ zfs_kmem_alloc(size_t size, int kmflag)
 			KMEM_BUFTAG_LITE_ENTER(btp, kmem_lite_count, caller());
 		}
 	}
+
+#ifdef KMEM_LEAK_SIZE
+	if (keep) {
+		keep_t *kp;
+		kp = &buf[size - sizeof(keep_t)];
+		strlcpy(kp->file, (r = strrchr(file, '/')) ? r+1 : file,
+				sizeof(kp->file));
+		kp->line = line;
+		list_link_init(&kp->node);
+		mutex_enter(&keep_lock);
+		list_insert_head(&keep_list, kp);
+		mutex_exit(&keep_lock);
+	}
+#endif
 	return (buf);
 }
 
@@ -2660,6 +2729,23 @@ zfs_kmem_free(void *buf, size_t size)
 		vmem_free(kmem_oversize_arena, buf, size);
 		return;
 	}
+
+#ifdef KMEM_LEAK_SIZE
+	if (cp->cache_bufsize == KMEM_LEAK_SIZE) {
+		keep_t *kp;
+		kp = &buf[size];
+
+		size += sizeof(keep_t);
+		index = (((size - 1) >> KMEM_ALIGN_SHIFT));
+        cp = kmem_alloc_table[index];
+
+		//memset(kp->file, 0, sizeof(kp->file));
+		//kp->line = 0;
+		mutex_enter(&keep_lock);
+		list_remove(&keep_list, kp);
+		mutex_exit(&keep_lock);
+	}
+#endif
 
 	if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp)) {
 		kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
@@ -5106,11 +5192,42 @@ spl_kmem_init(uint64_t xtotal_memory)
 		spl_ksp->ks_update = spl_kstat_update;
 		kstat_install(spl_ksp);
 	}
+
+    /*
+     * Initialize the platform-specific aligned/DMA memory allocator.
+     */
+//    ka_init();
+
+    /*
+     * Initialize 32-bit ID cache.
+     */
+//    id32_init();
+
+    /*
+     * Initialize the networking stack so modules loaded can
+     * register their callbacks.
+     */
+//    netstack_init();
+#ifdef KMEM_LEAK_SIZE
+	mutex_init(&keep_lock, NULL, MUTEX_DEFAULT, NULL);
+	list_create(&keep_list, sizeof (keep_t),
+				offsetof(keep_t, node));
+#endif
 }
 
 void
 spl_kmem_fini(void)
 {
+#ifdef KMEM_LEAK_SIZE
+	keep_t *kp;
+
+	for (kp = list_head(&keep_list);
+		 kp;
+		 kp = list_next(&keep_list, kp)) {
+		printf("SPL: %s:%d\n", kp->file, kp->line);
+	}
+#endif
+
 	sysctl_unregister_oid(&sysctl__spl_kext_version);
 	sysctl_unregister_oid(&sysctl__spl);
 
@@ -6433,8 +6550,6 @@ spl_zio_set_no_grow(const size_t size, kmem_cache_t *cp, const size_t cachenum)
 	ASSERT(iksvec[cachenum].ks_entry != NULL);
 
 	ksupp_t *ks = iksvec[cachenum].ks_entry;
-
-	// maybe update size->cp mapping vector
 
 	ks_set_cp(ks, cp, cachenum);
 
