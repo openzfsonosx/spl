@@ -2623,6 +2623,14 @@ zfs_kmem_zalloc(size_t size, int kmflag, char *file, int line)
 			if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp)) {
 				kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
 
+#ifdef KMEM_LEAK_SIZE
+		if (cp->cache_bufsize == KMEM_LEAK_SIZE) {
+			size += sizeof(keep_t);
+			index = (((size - 1) >> KMEM_ALIGN_SHIFT));
+			cp = kmem_alloc_table[index];
+			keep = 1;
+		}
+#endif
 				((uint8_t *)buf)[size] = KMEM_REDZONE_BYTE;
 				((uint32_t *)btp)[1] = KMEM_SIZE_ENCODE(size);
 
@@ -2717,6 +2725,8 @@ zfs_kmem_alloc(size_t size, int kmflag, char *file, int line)
 	}
 
 #ifdef KMEM_LEAK_SIZE
+	int keep = 0;
+	char *r;
 	/* Move size 24 to + 20 to fit filename and line */
 	if (cp->cache_bufsize == KMEM_LEAK_SIZE) {
 		size += sizeof(keep_t);
@@ -5271,7 +5281,6 @@ spl_kmem_init(uint64_t xtotal_memory)
 	mutex_init(&keep_lock, NULL, MUTEX_DEFAULT, NULL);
 	list_create(&keep_list, sizeof (keep_t),
 				offsetof(keep_t, node));
-	printf("SPL: Looking for leaks in size == %u\n", KMEM_LEAK_SIZE);
 #endif
 }
 
