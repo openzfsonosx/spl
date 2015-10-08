@@ -502,6 +502,8 @@ typedef struct spl_stats {
   kstat_named_t spl_vm_page_free_min_min;
   kstat_named_t spl_kmem_avail_use_spec;
   kstat_named_t spl_low_memory_signal_shift;
+  kstat_named_t spl_kmem_avail;
+  kstat_named_t spl_kmem_used;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -515,6 +517,8 @@ static spl_stats_t spl_stats = {
     {"vm_page_free_min_min", KSTAT_DATA_UINT64},
     {"kmem_avail_use_spec", KSTAT_DATA_INT64},
     {"low_memory_signal_shift", KSTAT_DATA_UINT64},
+    {"kmem_avail", KSTAT_DATA_INT64},
+    {"kmem_used", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4014,8 +4018,8 @@ static void memory_monitor_thread()
 
 			if (!pressure_bytes_target || (newtarget < pressure_bytes_target)) {
 				pressure_bytes_target = newtarget;
-				printf("SPL: memory_monitory_thread pressure: new target %llu (diff: %u)\n",
-				       newtarget, os_num_pages_wanted);
+				printf("SPL: memory_monitory_thread pressure: new target %llu (diff: %u), kmem_avail() == %llu\n",
+				       newtarget, os_num_pages_wanted, kmem_avail());
 			}
 
 			// Figure out if we should reap as well
@@ -4023,7 +4027,7 @@ static void memory_monitor_thread()
 				last_reap = zfs_lbolt();
 
 				if (vm_page_free_wanted > 0) {
-				  printf("SPL: memory_monitory_thread vm_page_free_wanted > 0, signalling kmem_avail and reaping\n");
+				  printf("SPL: memory_monitory_thread vm_page_free_wanted > 0, signalling kmem_avail and reapingk, kmem_avail() == %llu\n", kmem_avail());
 				  pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
 				  kmem_reap();
 				  kpreempt(KPREEMPT_SYNC);
@@ -4035,15 +4039,16 @@ static void memory_monitor_thread()
 				if (segkmem_total_mem_allocated >= nintypct) {
 					pressure_bytes_target = MAX(pressure_bytes_target,
 								segkmem_total_mem_allocated - nintypct);
-					printf("SPL: 90%% hit, triggering reap and signalling\n");
+					printf("SPL: 90%% hit, triggering reap and signalling, kmem_avail() == %llu\n", kmem_avail());
 					pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
 					kmem_reap();
 					kpreempt(KPREEMPT_SYNC);
 					kmem_reap_idspace();
 				} else if (!os_num_pages_wanted && pressure_bytes_target) {
-				  printf("SPL: releasing pressure (was %llu), segkmem_total_mem_allocated=%llu\n",
+				  printf("SPL: releasing pressure (was %llu), segkmem_total_mem_allocated=%llu kmem_avail() == %llu\n",
 					 pressure_bytes_target,
-					 segkmem_total_mem_allocated);
+					 segkmem_total_mem_allocated,
+					 kmem_avail());
 				  pressure_bytes_target = 0;
 				}
 #if 0
@@ -4139,6 +4144,8 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_vm_page_free_min_min.value.ui64 = (uint64_t)vm_page_free_min_min;
 		ks->spl_kmem_avail_use_spec.value.i64 = (int64_t)kmem_avail_use_spec;
 		ks->spl_low_memory_signal_shift.value.ui64 = vm_low_memory_signal_shift;
+		ks->spl_kmem_avail.value.i64 = kmem_avail();
+		ks->spl_kmem_used.value.ui64 = kmem_used();
 	}
 
 	return (0);
@@ -5669,6 +5676,17 @@ kmem_size(void)
   return total_memory; // smd
 }
 
+
+// inline function rather than macro for type safety paranoia
+static inline int64_t
+my_i64_abs(int64_t v)
+{
+  if(v >= 0)
+    return(v);
+  else
+    return(-v);
+}
+
 size_t
 kmem_used(void)
 {
@@ -5678,9 +5696,15 @@ kmem_used(void)
   // then [prev] kmem_used is 16000-2000==14000
   // and [now] kmem_used is 16000-2000-1000==13000
   // probably important because we use it in calculating spl_vm_pool_low
-  // 
-  
-  return (kmem_size() - kmem_avail());
+  //
+
+  // uhm, now that kmem_avail() can be negative, take that into account.
+  // the problem here is that we are punning kmem_size() internally with an indicator
+  // to arc (it's called in zfs/module/zfs/arc.c too, where negative is useful)
+
+  // kmem_used is only used in spl however, and only in the pressure mechanism
+
+  return (kmem_size() - my_i64_abs(kmem_avail()));
 }
 
 static inline uint64_t
