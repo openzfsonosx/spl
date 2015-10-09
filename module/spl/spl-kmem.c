@@ -2562,7 +2562,13 @@ kmem_slab_prefill(kmem_cache_t *cp, kmem_slab_t *sp)
 }
 
 
-//#define KMEM_LEAK_SIZE 7
+/*
+ * To look for memory leaks, define the cp cache_size you wish to monitor
+ * and SPL will keep a list of allocations, and remove on free. At kextunload
+ * it will dump any remaining allocations.
+ */
+
+//#define KMEM_LEAK_SIZE 2048
 
 #ifdef KMEM_LEAK_SIZE
 struct keep_struct {
@@ -5212,6 +5218,7 @@ spl_kmem_init(uint64_t xtotal_memory)
 	mutex_init(&keep_lock, NULL, MUTEX_DEFAULT, NULL);
 	list_create(&keep_list, sizeof (keep_t),
 				offsetof(keep_t, node));
+	printf("SPL: Looking for leaks in size == %u\n", KMEM_LEAK_SIZE);
 #endif
 }
 
@@ -5226,6 +5233,7 @@ spl_kmem_fini(void)
 		 kp = list_next(&keep_list, kp)) {
 		printf("SPL: %s:%d\n", kp->file, kp->line);
 	}
+	printf("SPL: End of leaks (if any)\n");
 #endif
 
 	sysctl_unregister_oid(&sysctl__spl_kext_version);
