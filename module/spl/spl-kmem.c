@@ -5281,6 +5281,7 @@ spl_kmem_init(uint64_t xtotal_memory)
 	mutex_init(&keep_lock, NULL, MUTEX_DEFAULT, NULL);
 	list_create(&keep_list, sizeof (keep_t),
 				offsetof(keep_t, node));
+	printf("SPL: Looking for leaks in size == %u\n", KMEM_LEAK_SIZE);
 #endif
 }
 
