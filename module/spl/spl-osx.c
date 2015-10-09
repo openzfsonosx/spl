@@ -312,20 +312,20 @@ int
 getpcstack(uintptr_t *pcstack, int pcstack_limit)
 {
 #ifdef DEBUG
-    
+
     int  depth = 0;
     void *stackptr;
-    
+
 #if defined (__i386__)
     __asm__ volatile("movl %%ebp, %0" : "=m" (stackptr));
 #elif defined (__x86_64__)
     __asm__ volatile("movq %%rbp, %0" : "=m" (stackptr));
 #endif
-    
+
     int frame_index;
     int nframes = pcstack_limit;
     cframe_t *frame = (cframe_t *)stackptr;
-    
+
     for (frame_index = 0; frame_index < nframes; frame_index++) {
         vm_offset_t curframep = (vm_offset_t) frame;
         if (!curframep)
@@ -340,7 +340,7 @@ getpcstack(uintptr_t *pcstack, int pcstack_limit)
         pcstack[depth++] = frame->caller;
         frame = frame->prev;
     }
-    
+
     return depth;
 #else
     return 0;
@@ -469,7 +469,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
           SPL_META_VERSION, SPL_META_RELEASE, SPL_DEBUG_STR,
 		max_ncpus, total_memory, physmem,
 		spl_cpufeature_smap ? "SMAP" : "");
-    
+
 	return KERN_SUCCESS;
 }
 
@@ -484,8 +484,11 @@ kern_return_t spl_stop (kmod_info_t * ki, void * d)
     spl_kmem_fini();
 	spl_kstat_fini();
     spl_mutex_subsystem_fini();
-    IOLog("SPL: Unloaded module. (os_mem_alloc: %llu)\n",
-		segkmem_total_mem_allocated);
+    IOLog("SPL: Unloaded module v%s-%s "
+          "(os_mem_alloc: %llu) %s\n",
+          SPL_META_VERSION, SPL_META_RELEASE,
+		  segkmem_total_mem_allocated,
+		  spl_cpufeature_smap ? "SMAP" : "");
     return KERN_SUCCESS;
 }
 
