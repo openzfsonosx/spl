@@ -1,0 +1,58 @@
+Differences from hybrid branch:
+
+	* KMEM_QUANTUM is 128k rather than 512k
+
+	Tunables:
+
+	* vm_page_free_min_multiplier
+	* vm_page_free_min_min
+
+	(used for determining how much free memory
+	overhead to leave compared to vm_page_free_min
+	which comes from xnu)
+
+	* kmem_avail_use_spec : speculative memory counts
+		as used memory (TRUE)
+
+	* low_memory_signal_shift : log2 of how much memory to
+		tell arc to give back when memory is low
+
+	* expose pressure_bytes_target(), kmem_avail() and
+		kmem_used() as readable kstats
+
+	* kstats should be able to take zero values
+
+	Reaping:
+
+	* do random reaping of all arenas when DEBUG is true
+
+	* reap often when memory is low, in
+		memory_pressure_thread(), kmem_avail() and
+		kmem_pages_wanted()
+
+	* try to make sure kmem_reap_idspace() is also
+		called
+
+	Memory signalling:
+
+	* mostly rely upon the xnu variables
+		vm_memory_page_free_count,
+		vm_page_free_wanted, and vm_page_free_min
+
+	* spl_minimal_physmem_p(), used by arc_memory_throttle()
+
+	* semaphoring from memory_pressure_thread() to
+		kmem_avail() and kmem_pages_wanted()
+
+	* kmem_avail() can be negative
+
+	* spl_vm_pool_low() should be used only within
+		spl, and should inform the two main
+		arc-signalling mechanisms: kmem_avail(),
+		kmem_pages_wanted()
+
+	* spl_vm_pool_low() should return 1 with greater probability as we get
+		closer to low memory
+
+	* we should take account of total_memory being
+		deflated to 80% of real total memory
