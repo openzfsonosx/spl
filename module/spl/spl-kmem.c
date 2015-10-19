@@ -3123,6 +3123,7 @@ kmem_avail(void)
   if (pressure_bytes_signal & PRESSURE_KMEM_AVAIL) { // set from 90% and reap
     dprintf("SPL: got pressure bytes signal in kmem_avail()\n");
     pressure_bytes_signal &= ~(PRESSURE_KMEM_AVAIL);
+    kpreempt(KPREEMPT_SYNC);
     return (-1024*1024*LOW_MEMORY_MULT); // get 128MiB from arc
   }
 
@@ -3134,7 +3135,9 @@ kmem_avail(void)
 
   if (vm_page_free_count < VM_PAGE_FREE_MIN) {
     kmem_reap();
+    kpreempt(KPREEMPT_SYNC);
     kmem_reap_idspace();
+    kpreempt(KPREEMPT_SYNC);
     if(!kmem_avail_use_spec) {
       return (((int64_t)vm_page_free_count) - ((int64_t)VM_PAGE_FREE_MIN));
     } else if((vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
@@ -5588,6 +5591,7 @@ kmem_num_pages_wanted(void)
 	  printf("SPL: %s sees paging vm_page_free_wanted = %u, vm_page_free_count = %u\n",
 		 __func__, vm_page_free_wanted, vm_page_free_count);
 	  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
+	  kpreempt(KPREEMPT_SYNC);
 	  return vm_page_free_wanted * LOW_MEMORY_MULT;  // paging, be aggressive
 	}
 
@@ -5598,7 +5602,9 @@ kmem_num_pages_wanted(void)
 		 __func__, vm_page_free_count, reducedmin, retpages);
 	  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
 	  kmem_reap_idspace();
+	  kpreempt(KPREEMPT_SYNC);
 	  kmem_reap();
+	  kpreempt(KPREEMPT_SYNC);
 	  if(vm_page_free_count <= reducedmin)
 	    return (retpages);
 	  else
@@ -5615,6 +5621,7 @@ kmem_num_pages_wanted(void)
 		   __func__, i, i - old_i);
 	    size_t f = i-old_i;
 	    old_i = i;
+	    kpreempt(KPREEMPT_SYNC);
 	    return(f);
 	  } else if (i > old_i) {
 	    // trivial amount of pressure, don't ask for a page
@@ -5624,7 +5631,9 @@ kmem_num_pages_wanted(void)
 	    // fall through, may hit return with still_pressure == 0
 	  } else if (i == old_i) { // this branch is very frequently taken
 	    kmem_reap_idspace();
+	    kpreempt(KPREEMPT_SYNC);
 	    kmem_reap();
+	    kpreempt(KPREEMPT_SYNC);
 	    //return(0); -- fall through
 	    still_pressure=LOW_MEMORY_MULT;
 	  } else if(i <= old_i - 1) {
@@ -5640,6 +5649,7 @@ kmem_num_pages_wanted(void)
 		   __func__, i, old_i);
 	    old_i = i;
 	    still_pressure=LOW_MEMORY_MULT;
+	    kpreempt(KPREEMPT_SYNC);
 	    // return(0); -- fall through
 	  }
 	}
@@ -5656,8 +5666,10 @@ kmem_num_pages_wanted(void)
 		       __func__, vm_page_free_count, vm_page_free_min * vm_page_free_min_multiplier,
 		       vm_page_free_min * vm_page_free_min_multiplier);
 		pressure_bytes_signal |= PRESSURE_KMEM_NUM_PAGES_WANTED;
+		kpreempt(KPREEMPT_SYNC);
 		return(vm_page_free_min * vm_page_free_min_multiplier);
 	      } else {
+		kpreempt(KPREEMPT_SYNC);
 		return(LOW_MEMORY_MULT);
 	      }
 	    }
