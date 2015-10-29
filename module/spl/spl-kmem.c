@@ -83,6 +83,13 @@ static kcondvar_t memory_monitor_thread_cv;
 static kmutex_t memory_monitor_lock;
 static boolean_t memory_monitor_thread_exit;
 
+static kcondvar_t reap_thread_cv;
+static kmutex_t reap_thread_lock;
+static boolean_t reap_thread_exit;
+static boolean_t reap_now = 0;
+static kmutex_t reap_now_lock;
+
+
 // Start and end address of kernel memory
 //http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L135
 extern vm_offset_t virtual_space_start;
@@ -512,6 +519,7 @@ typedef struct spl_stats {
     kstat_named_t spl_active_mutex;
     kstat_named_t spl_active_rwlock;
     kstat_named_t spl_monitor_thread_wake_count;
+  kstat_named_t spl_reap_thread_wake_count;
     kstat_named_t spl_simulate_pressure;
   kstat_named_t spl_vm_page_free_min_multiplier;
   kstat_named_t spl_vm_page_free_min_min;
@@ -528,6 +536,7 @@ static spl_stats_t spl_stats = {
     {"active_mutex", KSTAT_DATA_UINT64},
     {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
+    {"reap_thread_wake_count", KSTAT_DATA_UINT64},
     {"simulate_pressure", KSTAT_DATA_UINT64},
     {"vm_page_free_multiplier", KSTAT_DATA_UINT64},
     {"vm_page_free_min_min", KSTAT_DATA_UINT64},
@@ -4102,10 +4111,48 @@ kmem_cache_fini(int pass, int use_large_pages)
 	}
 }
 
-// return the inverse of how much memory is actually free
-// this replaces kmem_used() in memory_monitor_thread() because
-// that in turn relies on kmem_avail() which is used to signal arc and
-// therefore may be artificially low
+static void
+reap_thread()
+{
+  callb_cpr_t cpr;
+
+  CALLB_CPR_INIT(&cpr, &reap_thread_lock, callb_generic_cpr, FTAG);
+
+  mutex_enter(&reap_thread_lock);
+
+  printf("SPL: beginning reap_thread() loop\n");
+
+  while(!reap_thread_exit) {
+    mutex_exit(&reap_thread_lock);
+
+    spl_stats.spl_reap_thread_wake_count.value.ui64++;
+
+    mutex_enter(&reap_now_lock);
+    if(reap_now) {
+      reap_now = 0;
+      mutex_exit(&reap_now_lock);
+      kmem_reap();
+      kmem_reap_idspace();
+      printf("SPL: reap thread reaped, cv_broadcasting\n");
+      cv_broadcast(&reap_thread_cv);
+    } else {
+      mutex_exit(&reap_now_lock);
+    }
+    mutex_enter(&reap_thread_lock);
+    printf("SPL: reap_now calling cv_timedwait\n");
+    CALLB_CPR_SAFE_BEGIN(&cpr);
+    (void)cv_timedwait(&reap_thread_cv, &reap_thread_lock, ddi_get_lbolt() + (10 * hz));
+    CALLB_CPR_SAFE_END(&cpr, &reap_thread_lock);
+    printf("SPL: reap now back from cv_timedwait\n");
+  }
+  reap_thread_exit = FALSE;
+  printf("SPL: reap_thread_exit set to FALSE and exiting: cv_broadcasting\n");
+  cv_broadcast(&reap_thread_cv);
+  printf("SPL: reap thread exit: doing CALLB_CPR_EXIT\n");
+  CALLB_CPR_EXIT(&cpr);
+  printf("SPL: thread exit\n");
+  thread_exit();
+}
 
 static void
 memory_monitor_thread()
@@ -4181,10 +4228,10 @@ memory_monitor_thread()
 				 vm_page_free_wanted,
 				 zfs_lbolt() - last_reap,
 				 pages_reclaimed);
-			  kmem_reap();
-			  kpreempt(KPREEMPT_SYNC);
-			  kmem_reap_idspace();
-			  kpreempt(KPREEMPT_SYNC);
+			  mutex_enter(&reap_now_lock);
+			  reap_now=TRUE;
+			  mutex_exit(&reap_now_lock);
+			  cv_signal(&reap_thread_cv);
 			  last_reap = zfs_lbolt();
 			}
 			// !spl_minimal_physmem_p_logic()  happens a lot with delta 0 and 1
@@ -4199,10 +4246,10 @@ memory_monitor_thread()
 			  mutex_enter(&pressure_bytes_signal_lock);
 			  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
 			  mutex_exit(&pressure_bytes_signal_lock);
-			  kmem_reap();
-			  kpreempt(KPREEMPT_SYNC);
-			  kmem_reap_idspace();
-			  kpreempt(KPREEMPT_SYNC);
+			  mutex_enter(&reap_now_lock);
+			  reap_now = TRUE;
+			  mutex_exit(&reap_now_lock);
+			  cv_signal(&reap_thread_cv);
 			  last_reap = zfs_lbolt();
 			}
 
@@ -4242,10 +4289,10 @@ memory_monitor_thread()
 					mutex_enter(&pressure_bytes_signal_lock);
 					pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
 					mutex_exit(&pressure_bytes_signal_lock);
-					kmem_reap();
-					kpreempt(KPREEMPT_SYNC);
-					kmem_reap_idspace();
-					kpreempt(KPREEMPT_SYNC);
+					mutex_enter(&reap_now_lock);
+					reap_now = 1;
+					mutex_exit(&reap_now_lock);
+					cv_signal(&reap_thread_cv);
 					last_reap = zfs_lbolt();
 				} else if(pressure_bytes_target > 0) {
 				  printf("SPL: MMT pressure based periodic reaping, pressure_bytes_target == %llu, vm_page_free_count == %u, vm_page_speculative_count == %u, pages_reclaimed = %u\n",
@@ -4253,10 +4300,10 @@ memory_monitor_thread()
 					 vm_page_free_count,
 					 vm_page_speculative_count,
 					 pages_reclaimed);
-				  kmem_reap();
-				  kpreempt(KPREEMPT_SYNC);
-				  kmem_reap_idspace();
-				  kpreempt(KPREEMPT_SYNC);
+				  mutex_enter(&reap_now_lock);
+				  reap_now = 1;
+				  mutex_exit(&reap_now_lock);
+				  cv_signal(&reap_thread_cv);
 				  last_reap = zfs_lbolt();
 				}
 			}
@@ -4268,10 +4315,9 @@ memory_monitor_thread()
 			    printf("SPL: MMT background 80%% real memory check, vm_page_free_wanted = %u, vm_page_free_count == %u, periodic reaping\n",
 				   vm_page_free_wanted,
 				   vm_page_free_count);
-			    kmem_reap();
-			    kpreempt(KPREEMPT_SYNC);
-			    kmem_reap_idspace();
-			    kpreempt(KPREEMPT_SYNC);
+			    mutex_enter(&reap_now_lock);
+			    reap_now = 1;
+			    mutex_exit(&reap_now_lock);
 			    last_reap = zfs_lbolt();
 			    cv_broadcast(&memory_monitor_thread_cv);
 			  }
@@ -4281,10 +4327,9 @@ memory_monitor_thread()
 			if (zfs_lbolt() - last_reap > (hz*3600)) {
 			  printf("SPL: MMT it's been an hour since the last reap, vm_page_free_count == %u\n",
 				 vm_page_free_count);
-			  kmem_reap();
-			  kpreempt(KPREEMPT_SYNC);
-			  kmem_reap_idspace();
-			  kpreempt(KPREEMPT_SYNC);
+			  mutex_enter(&reap_now_lock);
+			  reap_now = 1;
+			  mutex_exit(&reap_now_lock);
 			  last_reap = zfs_lbolt();
 			  cv_broadcast(&memory_monitor_thread_cv);
 			}
@@ -4292,9 +4337,11 @@ memory_monitor_thread()
 				
 		// block until signalled, or after 1 second
 		mutex_enter(&memory_monitor_lock);
+		printf("SPL: MMT calling cv_timedwait\n");
 		CALLB_CPR_SAFE_BEGIN(&cpr);
-		(void) cv_timedwait(&memory_monitor_thread_cv,
-				    &memory_monitor_lock, ddi_get_lbolt() + hz);
+		(void)cv_timedwait(&memory_monitor_thread_cv,
+				   &memory_monitor_lock, ddi_get_lbolt() + hz);
+		printf("SPL: MMT back from cv_timedwait\n");
 		CALLB_CPR_SAFE_END(&cpr, &memory_monitor_lock);
 	} // while
 
@@ -4737,9 +4784,17 @@ spl_kmem_thread_init(void)
     // Initialise the pressure signal lock
     mutex_init(&pressure_bytes_signal_lock, "pressure_bytes_signal_lock", MUTEX_DEFAULT, NULL);
     mutex_init(&pressure_bytes_target_lock, "pressure_bytes_target_lock", MUTEX_DEFAULT, NULL);
+    // Initialize the reap thread lock
+    mutex_init(&reap_thread_lock, "reap_thread_lock", MUTEX_DEFAULT, NULL);
+    mutex_init(&reap_now_lock, "reap_now_lock", MUTEX_DEFAULT, NULL);
 
     kmem_taskq = taskq_create("kmem_taskq", 1, minclsyspri,
                                        300, INT_MAX, TASKQ_PREPOPULATE);
+
+    reap_thread_exit = FALSE;
+    (void)thread_create(NULL, 0, reap_thread, 0, 0, 0, 0, 92);
+    (void)cv_init(&reap_thread_cv, NULL, CV_DEFAULT, NULL);
+    
     memory_monitor_thread_exit = FALSE;
 	(void)thread_create(NULL, 0, memory_monitor_thread, 0, 0, 0, 0, 92);
 	(void)cv_init(&memory_monitor_thread_cv, NULL, CV_DEFAULT, NULL);
@@ -4762,14 +4817,29 @@ spl_kmem_thread_fini(void)
 	  cv_signal(&memory_monitor_thread_cv);
 	  cv_wait(&memory_monitor_thread_cv, &memory_monitor_lock);
 	}
+	printf("SPL: stop memory monitor while loop done, dropping mutex\n");
 	mutex_exit(&memory_monitor_lock);
-	printf("SPL: stop memory monitor while loop done, mutex dropped\n");
 
 	printf("SPL: destroying MMT cv, lock, and pressure_bytes_signal/target locks\n");
 	cv_destroy(&memory_monitor_thread_cv);
 	mutex_destroy(&memory_monitor_lock);
 	mutex_destroy(&pressure_bytes_signal_lock);
 	mutex_destroy(&pressure_bytes_target_lock);
+
+	printf("SPL: stop reap thread\n");
+	mutex_enter(&reap_thread_lock);
+	printf("SPL: stop reap thread, lock acquired, setting exit variable and waiting\n");
+	reap_thread_exit = TRUE;
+	while(reap_thread_exit) {
+	  cv_signal(&reap_thread_cv);
+	  cv_wait(&reap_thread_cv, &reap_thread_lock);
+	}
+	printf("SPL: reap thread stop: while loop ended, dropping mutex\n");
+	mutex_exit(&reap_thread_lock);
+	printf("SPL: reap thread stop: destroying cv and mutex\n");
+	cv_destroy(&reap_thread_cv);
+	mutex_destroy(&reap_thread_lock);
+	mutex_destroy(&reap_now_lock);
 
 	printf("SPL: bsd_untimeout\n");
 	bsd_untimeout(kmem_update,  0);
@@ -5855,6 +5925,10 @@ kmem_num_pages_wanted(void)
 	  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
 	  mutex_exit(&pressure_bytes_signal_lock);
 	  cv_signal(&memory_monitor_thread_cv);
+	  mutex_enter(&reap_now_lock);
+	  reap_now = 1;
+	  mutex_exit(&reap_now_lock);
+	  cv_signal(&reap_thread_cv);
 	  kpreempt(KPREEMPT_SYNC);
 	  return vm_page_free_wanted * LOW_MEMORY_MULT;  // paging, be aggressive
 	}
