@@ -79,6 +79,8 @@ extern uint64_t physmem;
     int64_t kmem_avail(void);
     size_t kmem_num_pages_wanted();
 	int	spl_vm_pool_low(void);
+  int32_t spl_minimal_physmem_p(void);
+  int64_t spl_adjust_pressure(int64_t);
 
 
 #define KMC_NOTOUCH     0x00010000
