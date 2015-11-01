@@ -3161,10 +3161,55 @@ int64_t
 spl_adjust_pressure(int64_t amount)
 {
   mutex_enter(&pressure_bytes_target_lock);
-  pressure_bytes_target += amount;
+  int64_t p = pressure_bytes_target;
+  int64_t newp = p + amount;
+  int64_t delta = p - newp;
+  int64_t used = spl_memory_used();
+
+  if(newp >= used || newp <= 0) {
+    dprintf("SPL: warning: %s(%lld) newp %lld used %lld, will zero pressure_bytes_target\n",
+	   __func__, amount, newp, used);
+    pressure_bytes_target = 0;
+  } else if(delta < 0) {
+    if(newp > 0 && newp < 64*1024*1024) {
+      dprintf("SPL: WARNING: %s(%lld) results in small positive newp %lld, setting pressure_bytes_target to zero\n",
+	     __func__, amount, newp);
+      pressure_bytes_target = 0;
+    } else if (newp > 0 && newp < total_memory / 8) {
+      printf("SPL: WARNING: %s(%lld) results in medium positive newp %lld (total_memory/8 %lld)\n",
+	     __func__, amount, newp, total_memory / 8);
+      pressure_bytes_target = 0;
+    } else if(delta < -(int64_t)total_memory+(64*1024*1024)) {
+      printf("SPL: ERROR: %s(%lld) results in huge delta %lld\n", __func__, amount, delta);
+      pressure_bytes_target = 0;
+    } else if(delta > -8*1024*1024) {
+      dprintf("SPL: warning: %s(%lld), dropping small negative delta(%lld)\n",
+	     __func__, amount, delta);
+    } else {
+      dprintf("SPL: OK: %s(%lld), pressure now %lld\n",
+	     __func__, amount, newp);
+      pressure_bytes_target = newp;
+    }
+  } else if(delta > 0) {
+    // 0 < newp < used
+    if(newp < 64*1024*1024) {
+      dprintf("SPL: warning: %s(%lld) small positive newp %lld, setting pressure_bytes_target to zero\n",
+	     __func__, amount, newp);
+      pressure_bytes_target = 0;
+    } else if(newp < total_memory / 8) {
+      printf("SPL: WARNING: %s(%lld) results in medium positive newp %lld (total_memory / 8 %lld)\n",
+	     __func__, amount, newp, total_memory / 8);
+    } else {
+      dprintf("SPL: OK: %s(%lld), pressure now %lld\n",
+	     __func__, amount, newp);
+      pressure_bytes_target = newp;
+    }
+  } else {
+    // delta == 0 and newp in range
+    printf("SPL: %s(%lld) fallthrough, not changing pressure_bytes_target\n",
+	   __func__, amount);
+  }
   mutex_exit(&pressure_bytes_target_lock);
-  dprintf("SPL: %s(%lld), pressure_bytes_target now %lld\n",
-	 __func__, amount, pressure_bytes_target);
   return(pressure_bytes_target);
 }
 
@@ -3200,6 +3245,10 @@ kmem_avail(void)
     printf("SPL: %s got pressure_bytes_signal, returning %lld\n",
 	   __func__, retval);
     cv_signal(&memory_monitor_thread_cv);
+    //this causes MMT to wake up and if there's no pressure, immediately undo
+    //the manual pressure, so don't call spl_adjust_pressure; let it accumulate via
+    //the arc callback(s)
+    //spl_adjust_pressure(-retval);
     return (retval);
   }
 
@@ -3211,7 +3260,7 @@ kmem_avail(void)
     mutex_exit(&pressure_bytes_signal_lock);
     printf("SPL: %s page_free_wanted %u, returning %lld\n",
 	   __func__, vm_page_free_wanted, retval);
-    cv_signal(&memory_monitor_thread_cv);
+    spl_adjust_pressure(-retval);
     return (retval);
   }
 
@@ -3234,6 +3283,7 @@ kmem_avail(void)
 	mutex_exit(&pressure_bytes_target_lock);
 	printf("SPL: %s pressure wanted %lld bytes, headroom %lu (ceiling %u), returning %lld\n",
 	       __func__, pressure_delta, fsp, VM_PAGE_FREE_MIN, -askbytes);
+	spl_adjust_pressure(askbytes);
 	return(-askbytes); // trigger arc_reclaim and/or throttle
       }
     } else {
@@ -3249,16 +3299,17 @@ kmem_avail(void)
 	mutex_exit(&pressure_bytes_target_lock);
 	printf("SPL: %s pressure wanted %lld bytes, headroom %u (%u ceililng), returning %lld\n",
 	       __func__, pressure_delta, vm_page_free_count, VM_PAGE_FREE_MIN, -askbytes);
+	spl_adjust_pressure(askbytes);
 	return(-askbytes); // trigger arc_reclaim and/or throttle
       }
     }
-    // pressure but plenty of headroom?
-    // let arc grow by a megabyte while MMT tries to reduce pressure
+    // little pressure but plenty of headroom?
     mutex_exit(&pressure_bytes_target_lock);
     return(1024*1024);
   }
 
   // no pressure
+  // so no spl_adjust_pressure(-[value_of_return]) below
   if(kmem_avail_use_spec) {
     size_t fsp = vm_page_free_count + vm_page_speculative_count;
     // do we have lots of headroom?
@@ -4314,6 +4365,18 @@ memory_monitor_thread()
 
 		if (!shutting_down) {
 
+		  mutex_enter(&pressure_bytes_target_lock);
+		  if(pressure_bytes_target >= spl_memory_used()) {
+		    uint64_t s = spl_memory_used();
+		    uint64_t o = pressure_bytes_target;
+		    pressure_bytes_target = 0;
+		    mutex_exit(&pressure_bytes_target_lock);
+		    printf("SPL: MMT: pressure_bytes_target %llu >= spl_memory_used() %llu\n",
+			   o, s);
+		  } else {
+		    mutex_exit(&pressure_bytes_target_lock);
+		  }
+
 		  mutex_enter(&pressure_bytes_signal_lock);
 		  if(pressure_bytes_signal & PRESSURE_KMEM_MANUAL_PRESSURE) {
 		    pressure_bytes_signal &= ~PRESSURE_KMEM_MANUAL_PRESSURE;
@@ -4402,10 +4465,11 @@ memory_monitor_thread()
 			      vm_page_free_wanted == 0) {
 			    mutex_exit(&spl_os_pages_are_wanted_lock);
 			    mutex_enter(&pressure_bytes_target_lock);
+			    uint64_t op = pressure_bytes_target;
 			    pressure_bytes_target = 0;
 			    mutex_exit(&pressure_bytes_target_lock);
-			    printf("SPL: MMT released pressure, pressure_bytes_signal = %llu\n",
-				   pressure_bytes_signal);
+			    printf("SPL: MMT released pressure (was %lld), pressure_bytes_signal = %llu\n",
+				   op, pressure_bytes_signal);
 			    mutex_enter(&pressure_bytes_signal_lock);
 			    pressure_bytes_signal = 0;
 			    mutex_exit(&pressure_bytes_signal_lock);
@@ -4438,10 +4502,12 @@ memory_monitor_thread()
 					last_reap = zfs_lbolt();
 					next_release = last_reap + (5*hz);
 				} else if(pressure_bytes_target > 0 && pressure_bytes_target < spl_memory_used()) {
-				  printf("SPL: MMT pressure based periodic reaping, pressure_bytes_target == %llu, vm_page_free_count == %u, vm_page_speculative_count == %u\n",
-					 pressure_bytes_target,
+				  int64_t delta = spl_memory_used() - pressure_bytes_target;
+				  printf("SPL: MMT pressure based periodic reaping, pressure_bytes delta == %lld, vm_page_free_count == %u, vm_page_speculative_count == %u, pressure_bytes_signal %lld\n",
+					 delta,
 					 vm_page_free_count,
-					 vm_page_speculative_count);
+					 vm_page_speculative_count,
+					 pressure_bytes_signal);
 				  mutex_enter(&reap_now_lock);
 				  reap_now = 1;
 				  mutex_exit(&reap_now_lock);
@@ -4579,8 +4645,12 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_kmem_avail.value.i64 = kmem_avail();
 		ks->spl_kmem_used.value.ui64 = kmem_used();
 		ks->spl_spl_memory_used.value.ui64 = spl_memory_used();
-		ks->spl_pressure_differential.value.i64 = \
-		  (int64_t)spl_memory_used() - (int64_t)pressure_bytes_target;
+		if(pressure_bytes_target && pressure_bytes_target != spl_memory_used()) {
+		  ks->spl_pressure_differential.value.i64 =
+		    (int64_t)spl_memory_used - (int64_t)pressure_bytes_target;
+		} else {
+		  ks->spl_pressure_differential.value.i64 = 0;
+		}
 	}
 
 	return (0);
