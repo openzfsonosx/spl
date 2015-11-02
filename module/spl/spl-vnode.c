@@ -221,14 +221,15 @@ int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4)
     return error;
 }
 
-#if 0
+#if 1
 errno_t VNOP_LOOKUP(struct vnode *, struct vnode **, struct componentname *, vfs_context_t);
 
 errno_t VOP_LOOKUP(struct vnode *vp, struct vnode **vpp, struct componentname *cn, vfs_context_t ct)
 {
     return VNOP_LOOKUP(vp,vpp,cn,ct);
 }
-
+#endif
+#if 0
 extern errno_t VNOP_MKDIR   (struct vnode *, struct vnode **,
                              struct componentname *, struct vnode_attr *,
                              vfs_context_t);
