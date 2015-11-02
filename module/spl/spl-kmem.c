@@ -101,6 +101,10 @@ static kmutex_t spl_free_thread_lock;
 static boolean_t spl_free_thread_exit;
 int64_t spl_free;
 static kmutex_t spl_free_lock;
+int64_t spl_free_delta_ema;
+
+static int64_t spl_free_manual_pressure = 0;
+static kmutex_t spl_free_manual_pressure_lock;
 
 // Start and end address of kernel memory
 //http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L135
@@ -548,6 +552,9 @@ typedef struct spl_stats {
   kstat_named_t spl_spl_free;
   kstat_named_t spl_spl_free_minus_kmem_avail;
   kstat_named_t spl_spl_free_minus_pressure;
+  kstat_named_t spl_spl_free_manual_pressure;
+  kstat_named_t spl_spl_free_delta_ema;
+  kstat_named_t spl_spl_free_negative_count;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -573,6 +580,9 @@ static spl_stats_t spl_stats = {
     {"spl_spl_free", KSTAT_DATA_UINT64},
     {"spl_spl_free_minus_kmem_free", KSTAT_DATA_UINT64},
     {"spl_spl_free_minus_pressure", KSTAT_DATA_UINT64},
+    {"spl_spl_free_manual_pressure", KSTAT_DATA_UINT64},
+    {"spl_spl_free_delta_ema", KSTAT_DATA_UINT64},
+    {"spl_spl_free_negative_count", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4203,17 +4213,24 @@ kmem_cache_fini(int pass, int use_large_pages)
 	}
 }
 
+
+
 static void
 spl_free_thread()
 {
   callb_cpr_t cpr;
-
+  uint64_t last_update = zfs_lbolt();
+  uint64_t last_spl_free;
+  double ema_new = 0;
+  double ema_old = 0;
+  double alpha;
+  
   CALLB_CPR_INIT(&cpr, &spl_free_thread_lock, callb_generic_cpr, FTAG);
 
   mutex_enter(&spl_free_lock);
-  spl_free = total_memory;
+  spl_free = (vm_page_free_count + (vm_page_speculative_count >> 1)) * PAGESIZE;
   mutex_exit(&spl_free_lock);
-  
+
   mutex_enter(&spl_free_thread_lock);
 
   printf("SPL: beginning spl_free_thread() loop, spl_free == %lld\n", spl_free);
@@ -4221,50 +4238,58 @@ spl_free_thread()
   while(!spl_free_thread_exit) {
     mutex_exit(&spl_free_thread_lock);
     bool lowmem = false;
+    int64_t base;
 
     spl_stats.spl_free_wake_count.value.ui64++;
 
     mutex_enter(&spl_free_lock);
 
+    last_spl_free = spl_free;
+
+    spl_free = (int64_t)(vm_page_free_count + (vm_page_speculative_count >> 1))*PAGESIZE;
+
     if(vm_page_free_wanted > 0) {
-      spl_free -= vm_page_free_wanted * PAGESIZE;
+      spl_free = -(int64_t)vm_page_free_wanted * PAGESIZE;
       lowmem = true;
     }
 
+    base = spl_free;
+
+    if((vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
+      spl_free -= PAGESIZE * (int64_t)(VM_PAGE_FREE_MIN - (vm_page_free_count + vm_page_speculative_count));
+      lowmem=true;
+    }
+
     if(segkmem_total_mem_allocated > total_memory * 90ULL / 100ULL) {
+      spl_free -= 8*1024*1024;
       lowmem = true;
     }
 
     if(spl_free > real_total_memory * 90ULL / 100ULL) {
-      spl_free -= 2*1024*1024; // shrink at 20MiB/second
+      spl_free -= 2*1024*1024;
     }
 
-    if(spl_free > total_memory) {
-      spl_free -= 2*1024*1024; // shrink back towards our 80%
+    if(spl_free > total_memory) { // total_memory is 80% of real_total_memory
+      spl_free -= 16*1024*1024;
     }
 
-    if(!lowmem &&
-       (vm_page_free_count + vm_page_speculative_count) > VM_PAGE_FREE_MIN) {
-      int64_t fs = (int64_t)(PAGESIZE * (vm_page_free_count + vm_page_speculative_count/2));
-      if(spl_free < fs) {
-	spl_free += fs/16;
-      }
-    }
+    double delta = spl_free - base;
 
-    if(!lowmem && segkmem_total_mem_allocated < total_memory * 90ULL / 100ULL) {
-      spl_free += 1024*1024;
-    }
-
-    if(spl_free < -(int64_t)total_memory) {
-      spl_free = -(int64_t)total_memory / 2;
-    }
-
-    if(spl_free > (int64_t)real_total_memory - (PAGESIZE * (int64_t)vm_page_free_min)) {
-      spl_free = (int64_t)real_total_memory - (PAGESIZE * (int64_t)vm_page_free_min);
-    }
-
-    lowmem=false;
     mutex_exit(&spl_free_lock);
+
+    if(spl_free < 0)
+      spl_stats.spl_spl_free_negative_count.value.ui64++;
+
+    if(last_update > hz)
+      alpha = 1.0;
+    else {
+      double td_tick  = zfs_lbolt() - last_update;
+      alpha = td_tick / (hz*100);
+    }
+
+    ema_new = (alpha * (double)delta) + (1.0 - alpha)*ema_old;
+    spl_free_delta_ema = (int64_t)ema_new;
+    ema_old = ema_new;
 
     mutex_enter(&spl_free_thread_lock);
     CALLB_CPR_SAFE_BEGIN(&cpr);
@@ -4277,6 +4302,29 @@ spl_free_thread()
   CALLB_CPR_EXIT(&cpr);
   printf("SPL: %s thread_exit\n", __func__);
   thread_exit();
+}
+
+// this is intended to substitute for kmem_avail() in arc.c
+int64_t
+spl_free_wrapper(void)
+{
+  return(spl_free);
+}
+
+// this is intended to substitute for kmem_avail() in arc.c
+// when arc_reclaim_thread() calls spl_free_set_pressure(0);
+int64_t
+spl_free_manual_pressure_wrapper(void)
+{
+  return(spl_free_manual_pressure);
+}
+
+void
+spl_free_set_pressure(int64_t p)
+{
+  mutex_enter(&spl_free_manual_pressure_lock);
+  spl_free_manual_pressure = p;
+  mutex_exit(&spl_free_manual_pressure_lock);
 }
 
 static void
@@ -4373,17 +4421,6 @@ spl_mach_pressure_monitor_thread()
       if(os_num_pages_wanted < 1) {
       	mutex_enter(&spl_free_lock);
 	spl_free = -(int64_t)os_num_pages_wanted * PAGESIZE;
-	mutex_exit(&spl_free_lock);
-      } else if (!vm_page_free_wanted && pages_reclaimed > 0) {
-      	mutex_enter(&spl_free_lock);
-	spl_free += (int64_t)pages_reclaimed * PAGESIZE;
-	mutex_exit(&spl_free_lock);	
-      } else if(!vm_page_free_wanted &&
-		(vm_page_free_count + vm_page_speculative_count) > VM_PAGE_FREE_MIN) {
-	mutex_enter(&spl_free_lock);
-	spl_free = PAGESIZE * ((int64_t)vm_page_free_count + ((int64_t)vm_page_speculative_count / 2));
-	if(segkmem_total_mem_allocated > total_memory / 90ULL * 100ULL)
-	  spl_free -= 16*1024*1024;
 	mutex_exit(&spl_free_lock);
       }
     }
@@ -4741,10 +4778,11 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		    printf("SPL: simulate pressure 666, dumping stack\n");
 		    spl_backtrace("SPL: simulate_pressure 666");
 		  }
-		  mutex_enter(&spl_free_lock);
-		  spl_free -= ks->spl_simulate_pressure.value.i64 * 1024 *1024;
-		  mutex_exit(&spl_free_lock);
 		}
+
+		if(ks->spl_spl_free_manual_pressure.value.i64 != spl_free_manual_pressure)
+		  spl_free_set_pressure(-(ks->spl_spl_free_manual_pressure.value.i64 * 1024 *1024));
+		
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
 		ks->spl_active_threads.value.ui64 = zfs_threads;
@@ -4766,7 +4804,9 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		}
 		ks->spl_spl_free.value.i64 = spl_free;
 		ks->spl_spl_free_minus_kmem_avail.value.ui64 = spl_free - kmem_avail();
-		ks->spl_spl_free_minus_pressure.value.ui64 = spl_free - (total_memory - pressure_bytes_target);
+		ks->spl_spl_free_minus_pressure.value.ui64 = spl_free - spl_free_manual_pressure;
+		ks->spl_spl_free_manual_pressure.value.i64 = spl_free_manual_pressure;
+		ks->spl_spl_free_delta_ema.value.i64 = spl_free_delta_ema;
 	}
 
 	return (0);
@@ -5125,6 +5165,7 @@ spl_kmem_thread_init(void)
     // Initialize the spl_free locks
     mutex_init(&spl_free_thread_lock, "spl_free_thead_lock", MUTEX_DEFAULT, NULL);
     mutex_init(&spl_free_lock, "spl_free_lock", MUTEX_DEFAULT, NULL);
+    mutex_init(&spl_free_manual_pressure_lock, "spl_free_manual_pressure_lock", MUTEX_DEFAULT, NULL);
     // Initialize the spl_mach_pressure_monitor_thread lock
     mutex_init(&spl_mach_pressure_monitor_thread_lock, "mach_pressure_monitor_thread_lock", MUTEX_DEFAULT, NULL);
     mutex_init(&spl_os_pages_are_wanted_lock, "spl_os_pages_are_wanted_lock", MUTEX_DEFAULT, NULL);
@@ -5219,6 +5260,7 @@ spl_kmem_thread_fini(void)
 	cv_destroy(&spl_free_thread_cv);
 	mutex_destroy(&spl_free_thread_lock);
 	mutex_destroy(&spl_free_lock);
+	mutex_destroy(&spl_free_manual_pressure_lock);
 
 	printf("SPL: bsd_untimeout\n");
 	bsd_untimeout(kmem_update,  0);
