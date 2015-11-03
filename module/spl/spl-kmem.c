@@ -4213,8 +4213,6 @@ kmem_cache_fini(int pass, int use_large_pages)
 	}
 }
 
-
-
 static void
 spl_free_thread()
 {
@@ -4347,7 +4345,39 @@ reap_thread()
 
     mutex_enter(&reap_now_lock);
     uint64_t om = segkmem_total_mem_allocated;
-    if(reap_now && om > previous_segkmem_total_mem_allocated) {
+    if(om > previous_segkmem_total_mem_allocated &&
+       om > (total_memory * 90ULL / 100ULL) &&
+       zfs_lbolt() - last_reap > (hz*10)) {
+      reap_now = 0;
+      mutex_exit(&reap_now_lock);
+      printf("SPL: %s, reap_now not set but delta %llu since %llu seconds ago and high segkmem use %llu\n",
+	     __func__, om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz, om);
+      last_reap = zfs_lbolt();
+      previous_segkmem_total_mem_allocated = om;
+      kmem_reap();
+      kmem_reap_idspace();
+      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+    } else if(om > (total_memory * 90ULL / 100ULL) &&
+	      zfs_lbolt() - last_reap > (hz*60)) {
+      reap_now = 0;
+      mutex_exit(&reap_now_lock);
+      printf("SPL: %s, last reap %llu seconds ago and high segkmem use %llu\n",
+	     __func__, (zfs_lbolt() - last_reap)/hz, om);
+      last_reap = zfs_lbolt();
+      previous_segkmem_total_mem_allocated = om;
+      kmem_reap();
+      kmem_reap_idspace();
+      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+    } else if(zfs_lbolt() - last_reap > (hz*3600)) {
+      reap_now = 0;
+      mutex_exit(&reap_now_lock);
+      printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
+	     __func__, (zfs_lbolt() - last_reap)/hz, om);
+      previous_segkmem_total_mem_allocated = om;
+      kmem_reap();
+      kmem_reap_idspace();
+      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+    } else if(reap_now && om > previous_segkmem_total_mem_allocated) {
       reap_now = 0;
       mutex_exit(&reap_now_lock);
       printf("SPL: reap thread, segkmem_total_mem_allocated delta %llu since %llu seconds ago\n",
@@ -4357,7 +4387,7 @@ reap_thread()
       kmem_reap();
       kmem_reap_idspace();
       spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-    } else if(reap_now && zfs_lbolt() - last_reap > (hz*10)) {
+    } else if(reap_now && zfs_lbolt() - last_reap > (hz*30)) {
       reap_now = 0;
       mutex_exit(&reap_now_lock);
       printf("SPL: reap thread, last reap %llu seconds ago\n",
@@ -4436,41 +4466,9 @@ spl_mach_pressure_monitor_thread()
 	mutex_enter(&spl_os_pages_are_wanted_lock);
 	spl_os_pages_are_wanted = TRUE;
 	mutex_exit(&spl_os_pages_are_wanted_lock);
-
-	uint64_t newtarget = spl_memory_used() -
-	  ((uint64_t)os_num_pages_wanted * (uint64_t)PAGESIZE * (uint64_t)MULT);
-	mutex_enter(&pressure_bytes_target_lock);
-	if(!pressure_bytes_target) {
-	  pressure_bytes_target = newtarget;
-	  mutex_exit(&pressure_bytes_target_lock);
-	  printf("SPL: %s: pressure_bytes_target: increased from 0 to %llu (os_num_pages_wanted: %u), vm_page_free_count == %u, vm_page_speculative_count == %u, pages_reclaimed == %u\n",
-		 __func__,
-		 newtarget,
-		 os_num_pages_wanted,
-		 vm_page_free_count,
-		 vm_page_speculative_count,
-		 pages_reclaimed);
-	  cv_signal(&memory_monitor_thread_cv);
-	} else if(pressure_bytes_target > newtarget) {
-	  uint64_t oldtarget = pressure_bytes_target;
-	  pressure_bytes_target = newtarget;
-	  mutex_exit(&pressure_bytes_target_lock);
-	  printf("SPL: %s: pressure_bytes_target: decreased from %llu to %llu (os_num_pages_wanted: %u), vm_page_free_count == %u, vm_page_speculative_count == %u, pages_reclaimed == %u\n",
-		 __func__,
-		 oldtarget,
-		 newtarget,
-		 os_num_pages_wanted,
-		 vm_page_free_count,
-		 vm_page_speculative_count,
-		 pages_reclaimed);
-	  cv_signal(&memory_monitor_thread_cv);
-	} else {
-	  // if pressure_bytes_target == newtarget
-	  // or if pressure_bytes_target < newtarget
-	  // then do nothing (here)
-	  mutex_exit(&pressure_bytes_target_lock);
-	}
-      } // else: os_num_pages >= 1
+	// might want to spl_free_set_pressre(os_num_pages_wanted * PAGESIZE);
+	// or alternatively use this value in spl_free_thread()
+      }
     } // else: KERN_SUCCESS
 
     mutex_enter(&spl_mach_pressure_monitor_thread_lock);
@@ -4512,187 +4510,35 @@ memory_monitor_thread()
 
 		if (!shutting_down) {
 
-		  mutex_enter(&pressure_bytes_target_lock);
-		  if(pressure_bytes_target >= spl_memory_used()) {
-		    uint64_t s = spl_memory_used();
-		    uint64_t o = pressure_bytes_target;
-		    pressure_bytes_target = 0;
-		    mutex_exit(&pressure_bytes_target_lock);
-		    printf("SPL: MMT: pressure_bytes_target %llu >= spl_memory_used() %llu\n",
-			   o, s);
-		  } else {
-		    mutex_exit(&pressure_bytes_target_lock);
-		  }
-
-		  mutex_enter(&pressure_bytes_signal_lock);
-		  if(pressure_bytes_signal & PRESSURE_KMEM_MANUAL_PRESSURE) {
-		    pressure_bytes_signal &= ~PRESSURE_KMEM_MANUAL_PRESSURE;
-		    if(pressure_bytes_target < spl_memory_used()) {
-		      pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
+		  // has it been five minutes?  reap if the system has less than 20% real memory free
+		  if ((zfs_lbolt() - last_reap) > (hz*300)) {
+		    uint32_t twentypct_real_pages = (uint32_t)((real_total_memory / 20ULL) / PAGESIZE);
+		    if(vm_page_free_count < twentypct_real_pages) {
+		      printf("SPL: MMT background 80%% real memory check, vm_page_free_wanted = %u, vm_page_free_count == %u, periodic reaping\n",
+			     vm_page_free_wanted,
+			     vm_page_free_count);
+		      mutex_enter(&reap_now_lock);
+		      reap_now = 1;
+		      mutex_exit(&reap_now_lock);
+		      last_reap = zfs_lbolt();
+		      next_release = last_reap + (5*hz);
+		      cv_broadcast(&memory_monitor_thread_cv);
 		    }
-		    mutex_exit(&pressure_bytes_signal_lock);
-		    next_release = zfs_lbolt() + (60*hz); // give it time to pass through the arc
-		  } else {
-		    mutex_exit(&pressure_bytes_signal_lock);
 		  }
 
-			if(vm_page_free_wanted > 0) {
-			  next_release = zfs_lbolt() + (30*hz);
-			  // signal kmem_avail() and kmem_num_pages_wanted(), as this is an emergency
-			  // but we might have been cv_signalled right back from each of them
-			  mutex_enter(&pressure_bytes_target_lock);
-			  int64_t t = ((int64_t)vm_page_free_wanted * PAGESIZE * LOW_MEMORY_MULT);
-			  if(pressure_bytes_target && pressure_bytes_target < spl_memory_used()) {
-			    pressure_bytes_target -= t;
-			  } else {
-			    pressure_bytes_target = spl_memory_used() - t;
-			  }
-			  mutex_exit(&pressure_bytes_target_lock);
-			  mutex_enter(&pressure_bytes_signal_lock);
-			  if(pressure_bytes_signal == 0) {
-			    pressure_bytes_signal |=
-			      (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
-			    mutex_exit(&pressure_bytes_signal_lock);
-			    printf("SPL: MMT vm_page_free_wanted == %u, signalling both",
-				   vm_page_free_wanted);
-			  } else {
-			    uint64_t p = pressure_bytes_signal;
-			    mutex_exit(&pressure_bytes_signal_lock);
-			    if((p & (PRESSURE_KMEM_AVAIL|PRESSURE_KMEM_NUM_PAGES_WANTED)) ==
-			       (PRESSURE_KMEM_AVAIL|PRESSURE_KMEM_NUM_PAGES_WANTED)) {
-			      printf("SPL: MMT vm_page_free_wanted == %u, both flags still set\n",
-				     vm_page_free_wanted);
-			    } else if((p & PRESSURE_KMEM_NUM_PAGES_WANTED) ==
-				    PRESSURE_KMEM_NUM_PAGES_WANTED) {
-			      printf("SPL: MMT vm_page_free_wanted == %u, PRESSURE_KMEM_NUM_PAGES_WANTED still set\n",
-				     vm_page_free_wanted);
-			    } else if((p & PRESSURE_KMEM_AVAIL) == PRESSURE_KMEM_AVAIL) {
-			      printf("SPL: MMT vm_page_free_wanted == %u, PRESSURE_KMEM_AVAIL still set\n",
-				     vm_page_free_wanted);
-			    }
-			    mutex_enter(&pressure_bytes_signal_lock);
-			    pressure_bytes_signal |=
-			      (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
-			    mutex_exit(&pressure_bytes_signal_lock);
-			  }
-			  mutex_enter(&reap_now_lock);
-			  reap_now=TRUE;
-			  mutex_exit(&reap_now_lock);
-			  cv_signal(&reap_thread_cv);
-			  last_reap = zfs_lbolt();
-			}
-
-			// !spl_minimal_physmem_p_logic()  happens a lot with delta 0 and 1
-			// so wait until delta is at least 2 (which makes it happen infrequently)
-			if(!spl_minimal_physmem_p_logic() && (zfs_lbolt() - last_reap > 1)) {
-			  printf("SPL: MMT !spl_minimal_physmem, vm_page_free_wanted %u, vm_page_free_count %u, last reap delta %llu, signalling kmem_avail and reaping\n",
-				 vm_page_free_wanted,
-				 vm_page_free_count,
-				 zfs_lbolt() - last_reap);
-			  // only signal kmem_avail()
-			  mutex_enter(&pressure_bytes_signal_lock);
-			  pressure_bytes_signal |= PRESSURE_KMEM_AVAIL;
-			  mutex_exit(&pressure_bytes_signal_lock);
-			  mutex_enter(&reap_now_lock);
-			  reap_now = TRUE;
-			  mutex_exit(&reap_now_lock);
-			  cv_signal(&reap_thread_cv);
-			  last_reap = zfs_lbolt();
-			  next_release = last_reap + (5*hz);
-			}
-
-			// periodically release pressure if PRESSURE_KMEM_AVAIL is not set
-			// and if we do not want pages
-			if(zfs_lbolt() >= next_release) {
-			  next_release = zfs_lbolt() + (5*hz);
-			  mutex_enter(&spl_os_pages_are_wanted_lock);
-			  if (!spl_os_pages_are_wanted &&
-			      pressure_bytes_target &&
-			      !(pressure_bytes_signal & PRESSURE_KMEM_AVAIL) &&
-			      vm_page_free_wanted == 0) {
-			    mutex_exit(&spl_os_pages_are_wanted_lock);
-			    mutex_enter(&pressure_bytes_target_lock);
-			    uint64_t op = pressure_bytes_target;
-			    pressure_bytes_target = 0;
-			    mutex_exit(&pressure_bytes_target_lock);
-			    printf("SPL: MMT released pressure (was %lld), pressure_bytes_signal = %llu\n",
-				   op, pressure_bytes_signal);
-			    mutex_enter(&pressure_bytes_signal_lock);
-			    pressure_bytes_signal = 0;
-			    mutex_exit(&pressure_bytes_signal_lock);
-			    cv_broadcast(&memory_monitor_thread_cv);
-			  } else {
-			    mutex_exit(&spl_os_pages_are_wanted_lock);
-			  }
-			}
-
-			// has it been a minute?  check 90% ceiling, reap if still pressure
-			if ((zfs_lbolt() - last_reap) >= (hz * 60)) {
-
-				uint64_t nintypct = total_memory * 90ULL / 100ULL;
-
-				if (segkmem_total_mem_allocated >= nintypct) {
-				        mutex_enter(&pressure_bytes_target_lock);
-					pressure_bytes_target = MAX(pressure_bytes_target,
-								segkmem_total_mem_allocated - nintypct);
-					mutex_exit(&pressure_bytes_target_lock);
-					printf("SPL: MMT pressure: 90%% hit, triggering reap and signalling,  vm_page_free_count = %u, vm_page_speculative_count = %u\n",
-					       vm_page_free_count,
-					       vm_page_speculative_count);
-					mutex_enter(&pressure_bytes_signal_lock);
-					pressure_bytes_signal |= (PRESSURE_KMEM_AVAIL | PRESSURE_KMEM_NUM_PAGES_WANTED);
-					mutex_exit(&pressure_bytes_signal_lock);
-					mutex_enter(&reap_now_lock);
-					reap_now = 1;
-					mutex_exit(&reap_now_lock);
-					cv_signal(&reap_thread_cv);
-					last_reap = zfs_lbolt();
-					next_release = last_reap + (5*hz);
-				} else if(pressure_bytes_target > 0 && pressure_bytes_target < spl_memory_used()) {
-				  int64_t delta = spl_memory_used() - pressure_bytes_target;
-				  printf("SPL: MMT pressure based periodic reaping, pressure_bytes delta == %lld, vm_page_free_count == %u, vm_page_speculative_count == %u, pressure_bytes_signal %lld\n",
-					 delta,
-					 vm_page_free_count,
-					 vm_page_speculative_count,
-					 pressure_bytes_signal);
-				  mutex_enter(&reap_now_lock);
-				  reap_now = 1;
-				  mutex_exit(&reap_now_lock);
-				  cv_signal(&reap_thread_cv);
-				  last_reap = zfs_lbolt();
-				  next_release = last_reap + (5*hz);
-				}
-			}
-
-			// has it been five minutes?  reap if the system has less than 20% real memory free
-			if ((zfs_lbolt() - last_reap) > (hz*300)) {
-			  uint32_t twentypct_real_pages = (uint32_t)((real_total_memory / 20ULL) / PAGESIZE);
-			  if(vm_page_free_count < twentypct_real_pages) {
-			    printf("SPL: MMT background 80%% real memory check, vm_page_free_wanted = %u, vm_page_free_count == %u, periodic reaping\n",
-				   vm_page_free_wanted,
-				   vm_page_free_count);
-			    mutex_enter(&reap_now_lock);
-			    reap_now = 1;
-			    mutex_exit(&reap_now_lock);
-			    last_reap = zfs_lbolt();
-			    next_release = last_reap + (5*hz);
-			    cv_broadcast(&memory_monitor_thread_cv);
-			  }
-			}
-
-			// has it been an hour?  reap anyway
-			// reaping at frequencies higher than this takes longer and
-			// leads to worse fragmentation
-			if ((zfs_lbolt() - last_reap) > (hz*3600)) {
-			  printf("SPL: MMT it's been an hour since the last reap, vm_page_free_count == %u\n",
-				 vm_page_free_count);
-			  mutex_enter(&reap_now_lock);
-			  reap_now = 1;
-			  mutex_exit(&reap_now_lock);
-			  last_reap = zfs_lbolt();
-			  next_release = last_reap + (5*hz);
-			  cv_broadcast(&memory_monitor_thread_cv);
-			}
+		  // has it been an hour?  reap anyway
+		  // reaping at frequencies higher than this takes longer and
+		  // leads to worse fragmentation
+		  if ((zfs_lbolt() - last_reap) > (hz*3600)) {
+		    printf("SPL: MMT it's been an hour since the last reap, vm_page_free_count == %u\n",
+			   vm_page_free_count);
+		    mutex_enter(&reap_now_lock);
+		    reap_now = 1;
+		    mutex_exit(&reap_now_lock);
+		    last_reap = zfs_lbolt();
+		    next_release = last_reap + (5*hz);
+		    cv_broadcast(&memory_monitor_thread_cv);
+		  }
 		} //! shutting down
 				
 		// block until signalled, or after 1 second
