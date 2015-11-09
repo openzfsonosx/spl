@@ -83,6 +83,7 @@ extern uint64_t physmem;
   int64_t spl_adjust_pressure(int64_t);
   int64_t spl_free_wrapper(void);
   int64_t spl_free_manual_pressure_wrapper(void);
+  boolean_t spl_free_fast_pressure_wrapper(void);
   void spl_free_set_pressure(int64_t);
 
 #define KMC_NOTOUCH     0x00010000

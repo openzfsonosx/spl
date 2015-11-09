@@ -100,6 +100,7 @@ int64_t spl_free_delta_ema;
 
 static int64_t spl_free_manual_pressure = 0;
 static kmutex_t spl_free_manual_pressure_lock;
+static boolean_t spl_free_fast_pressure = FALSE;
 
 // Start and end address of kernel memory
 //http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L135
@@ -529,6 +530,7 @@ typedef struct spl_stats {
   kstat_named_t spl_spl_free;
   kstat_named_t spl_spl_free_minus_pressure;
   kstat_named_t spl_spl_free_manual_pressure;
+  kstat_named_t spl_spl_free_fast_pressure;
   kstat_named_t spl_spl_free_delta_ema;
   kstat_named_t spl_spl_free_negative_count;
 } spl_stats_t;
@@ -549,6 +551,7 @@ static spl_stats_t spl_stats = {
     {"spl_spl_free", KSTAT_DATA_UINT64},
     {"spl_spl_free_minus_pressure", KSTAT_DATA_UINT64},
     {"spl_spl_free_manual_pressure", KSTAT_DATA_UINT64},
+    {"spl_spl_free_fast_pressure", KSTAT_DATA_UINT64},
     {"spl_spl_free_delta_ema", KSTAT_DATA_UINT64},
     {"spl_spl_free_negative_count", KSTAT_DATA_UINT64},
 };
@@ -4098,6 +4101,21 @@ spl_free_set_pressure(int64_t p)
 {
   mutex_enter(&spl_free_manual_pressure_lock);
   spl_free_manual_pressure = p;
+  spl_free_fast_pressure = FALSE;
+  mutex_exit(&spl_free_manual_pressure_lock);
+}
+
+boolean_t
+spl_free_fast_pressure_wrapper()
+{
+  return(spl_free_fast_pressure);
+}
+
+static inline void
+spl_free_set_fast_pressure(boolean_t state)
+{
+  mutex_enter(&spl_free_manual_pressure_lock);
+  spl_free_fast_pressure = state;
   mutex_exit(&spl_free_manual_pressure_lock);
 }
 
@@ -4121,7 +4139,17 @@ reap_thread()
 
     mutex_enter(&reap_now_lock);
     uint64_t om = segkmem_total_mem_allocated;
-    if(om > previous_segkmem_total_mem_allocated &&
+    if (reap_now && spl_free_fast_pressure_wrapper() != 0) {
+      reap_now = 0;
+      mutex_exit(&reap_now_lock);
+      printf("SPL: %s: spl_fast_pressure set and reap_now set, delta %llu since %llu seconds ago\n",
+	     __func__, om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz);
+      last_reap = zfs_lbolt();
+      previous_segkmem_total_mem_allocated = om;
+      kmem_reap();
+      kmem_reap_idspace();
+      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+    } else if(om > previous_segkmem_total_mem_allocated &&
        om > (total_memory * 90ULL / 100ULL) &&
        zfs_lbolt() - last_reap > (hz*10)) {
       reap_now = 0;
@@ -4365,6 +4393,15 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		    mutex_exit(&reap_now_lock);
 		  }
 	  }
+
+	  if(ks->spl_spl_free_fast_pressure.value.i64 != spl_free_fast_pressure) {
+	    if(spl_free_wrapper()!=0) {
+	      spl_free_set_fast_pressure(TRUE);
+	      mutex_enter(&reap_now_lock);
+	      reap_now = TRUE;
+	      mutex_exit(&reap_now_lock);
+	    }
+	  }
 		
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
@@ -4376,6 +4413,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_spl_free.value.i64 = spl_free;
 		ks->spl_spl_free_minus_pressure.value.ui64 = spl_free - spl_free_manual_pressure;
 		ks->spl_spl_free_manual_pressure.value.i64 = spl_free_manual_pressure;
+		ks->spl_spl_free_fast_pressure.value.i64 = spl_free_fast_pressure;
 		ks->spl_spl_free_delta_ema.value.i64 = spl_free_delta_ema;
 	}
 
