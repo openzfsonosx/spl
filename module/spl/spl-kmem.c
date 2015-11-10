@@ -3986,6 +3986,54 @@ kmem_cache_fini(int pass, int use_large_pages)
 	}
 }
 
+
+// this is intended to substitute for kmem_avail() in arc.c
+int64_t
+spl_free_wrapper(void)
+{
+  return(spl_free);
+}
+
+// this is intended to substitute for kmem_avail() in arc.c
+// when arc_reclaim_thread() calls spl_free_set_pressure(0);
+int64_t
+spl_free_manual_pressure_wrapper(void)
+{
+  return(spl_free_manual_pressure);
+}
+
+void
+spl_free_set_pressure(int64_t p)
+{
+  mutex_enter(&spl_free_manual_pressure_lock);
+  spl_free_manual_pressure = p;
+  spl_free_fast_pressure = FALSE;
+  mutex_exit(&spl_free_manual_pressure_lock);
+}
+
+static inline void
+spl_free_set_emergency_pressure(int64_t p)
+{
+  mutex_enter(&spl_free_manual_pressure_lock);
+  spl_free_manual_pressure=p;
+  spl_free_fast_pressure = TRUE;
+  mutex_exit(&spl_free_manual_pressure_lock);
+}
+
+boolean_t
+spl_free_fast_pressure_wrapper()
+{
+  return(spl_free_fast_pressure);
+}
+
+static inline void
+spl_free_set_fast_pressure(boolean_t state)
+{
+  mutex_enter(&spl_free_manual_pressure_lock);
+  spl_free_fast_pressure = state;
+  mutex_exit(&spl_free_manual_pressure_lock);
+}
+
 static void
 spl_free_thread()
 {
@@ -4009,7 +4057,9 @@ spl_free_thread()
   while(!spl_free_thread_exit) {
     mutex_exit(&spl_free_thread_lock);
     bool lowmem = false;
+    bool emergency_lowmem = false;
     int64_t base;
+    
 
     spl_stats.spl_free_wake_count.value.ui64++;
 
@@ -4034,7 +4084,7 @@ spl_free_thread()
       spl_free -= PAGESIZE * (int64_t)(VM_PAGE_FREE_MIN -
 				       (vm_page_free_count + vm_page_speculative_count));
       spl_free += PAGESIZE * (int64_t)(vm_page_speculative_count >> 1);
-      lowmem=true;
+      lowmem = true;
     }
 
     // leave slop in kmem for non-arc, back way down if kmem is nearly full
@@ -4046,6 +4096,9 @@ spl_free_thread()
       if(pct_used >= 98 && spl_free > 0) {
 	spl_free = -1;
       }
+
+      if(pct_used > 99)
+	emergency_lowmem = true;
 
       // subtract 0.1% of total_memory per percentage used above 85%;
       //                             this may or may not go negative.
@@ -4064,14 +4117,15 @@ spl_free_thread()
       spl_free -= 128*1024*1024;
     }
 
-    // if we have abundant memory, put pressure on other xnu memory users (buffer cache for example)
-    if(!lowmem) {
-      spl_free += SMALL_PRESSURE_INCURSION_PAGES * PAGESIZE;
-    }
-
     double delta = spl_free - base;
 
     mutex_exit(&spl_free_lock);
+
+    if(emergency_lowmem) {
+      // shove this right into arc_reclaim_thread, rather than waiting for eventual reaction
+      // to a negative spl_free.
+      spl_free_set_emergency_pressure((int64_t)total_memory / 100LL);
+    }
 
     if(spl_free < 0)
       spl_stats.spl_spl_free_negative_count.value.ui64++;
@@ -4098,44 +4152,6 @@ spl_free_thread()
   CALLB_CPR_EXIT(&cpr);
   printf("SPL: %s thread_exit\n", __func__);
   thread_exit();
-}
-
-// this is intended to substitute for kmem_avail() in arc.c
-int64_t
-spl_free_wrapper(void)
-{
-  return(spl_free);
-}
-
-// this is intended to substitute for kmem_avail() in arc.c
-// when arc_reclaim_thread() calls spl_free_set_pressure(0);
-int64_t
-spl_free_manual_pressure_wrapper(void)
-{
-  return(spl_free_manual_pressure);
-}
-
-void
-spl_free_set_pressure(int64_t p)
-{
-  mutex_enter(&spl_free_manual_pressure_lock);
-  spl_free_manual_pressure = p;
-  spl_free_fast_pressure = FALSE;
-  mutex_exit(&spl_free_manual_pressure_lock);
-}
-
-boolean_t
-spl_free_fast_pressure_wrapper()
-{
-  return(spl_free_fast_pressure);
-}
-
-static inline void
-spl_free_set_fast_pressure(boolean_t state)
-{
-  mutex_enter(&spl_free_manual_pressure_lock);
-  spl_free_fast_pressure = state;
-  mutex_exit(&spl_free_manual_pressure_lock);
 }
 
 static void
