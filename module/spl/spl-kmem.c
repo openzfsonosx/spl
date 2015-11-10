@@ -3931,6 +3931,18 @@ static void memory_monitor_thread()
 				//printf("pressure: new target %llu\n", newtarget);
 			}
 
+			// leave slop in kmem for non-arc, add pressure if kmem is nearly full
+			// (os_mem_alloc sysctl is segkmem_total_mem_allocated)
+			extern uint64_t total_memory; // from spl-osx.c
+			uint64_t nearly_total_memory = total_memory * 98ULL / 100ULL;
+			if (segkmem_total_mem_allocated > nearly_total_memory) {
+			  uint64_t ntarget = kmem_used() - (segkmem_total_mem_allocated - nearly_total_memory);
+			  if(!pressure_bytes_target || (ntarget < pressure_bytes_target)) {
+			    pressure_bytes_target = ntarget;
+			    //printf("pressure: high kmem usage, new target %llu", ntarget);
+			  }
+			}
+
 			// Figure out if we should reap as well
 			if (zfs_lbolt() - last_reap >= (hz * 60)) {
 				last_reap = zfs_lbolt();
