@@ -4039,16 +4039,19 @@ spl_free_thread()
 
     // leave slop in kmem for non-arc, back way down if kmem is nearly full
     // os_mem_alloc sysctl is segkmem_total_mem_allocated
-    if(segkmem_total_mem_allocated > total_memory * 90ULL / 100ULL) {
+    if(segkmem_total_mem_allocated > total_memory * 85ULL / 100ULL) {
       int64_t big_used = segkmem_total_mem_allocated * 100LL;
-      int64_t pct_used = big_used / total_memory;  // range is 90+
+      int64_t pct_used = big_used / (int64_t)total_memory;  // range is 85+
 
-      if(pct_used >= 99 && spl_free > 0) {
+      if(pct_used >= 98 && spl_free > 0) {
 	spl_free = -1;
-	pct_used = 99;
       }
-	
-      spl_free -= (pct_used / 8) * 1024 * 1024;
+
+      // subtract 0.1% of total_memory per percentage used above 85%;
+      //                             this may or may not go negative.
+      // above 98% we go negative for sure, so we are demanding back 1.4%
+
+      spl_free -= (pct_used - 84) * (int64_t)(total_memory / 1000ULL);
 	
       lowmem = true;
     }
