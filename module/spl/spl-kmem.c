@@ -4017,6 +4017,9 @@ spl_free_thread()
 
     last_spl_free = spl_free;
 
+    // start with actual pages free plus half of speculative pages
+    // but if we are paging, start with -number_of_pages
+
     spl_free = (int64_t)(vm_page_free_count + (vm_page_speculative_count >> 1))*PAGESIZE;
 
     if(vm_page_free_wanted > 0) {
@@ -4026,10 +4029,7 @@ spl_free_thread()
 
     base = spl_free;
 
-    if(!lowmem) {
-      spl_free += SMALL_PRESSURE_INCURSION_PAGES * PAGESIZE;
-    }
-
+    //adjustment in low-memory conditions
     if((vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
       spl_free -= PAGESIZE * (int64_t)(VM_PAGE_FREE_MIN -
 				       (vm_page_free_count + vm_page_speculative_count));
@@ -4037,17 +4037,33 @@ spl_free_thread()
       lowmem=true;
     }
 
+    // leave slop in kmem for non-arc, back way down if kmem is nearly full
+    // os_mem_alloc sysctl is segkmem_total_mem_allocated
     if(segkmem_total_mem_allocated > total_memory * 90ULL / 100ULL) {
-      spl_free -= 8*1024*1024;
+      int64_t big_used = segkmem_total_mem_allocated * 100LL;
+      int64_t pct_used = big_used / total_memory;  // range is 90+
+
+      if(pct_used >= 99 && spl_free > 0) {
+	spl_free = -1;
+	pct_used = 99;
+      }
+	
+      spl_free -= (pct_used / 8) * 1024 * 1024;
+	
       lowmem = true;
     }
 
+    // stop arc from grabbing allll the memory near startup and after a big evacuation of memory
+    if(spl_free > total_memory) { // total_memory is 80% of real_total_memory
+      spl_free -= 128*1024*1024;
+    }
     if(spl_free > real_total_memory * 90ULL / 100ULL) {
-      spl_free -= 2*1024*1024;
+      spl_free -= 128*1024*1024;
     }
 
-    if(spl_free > total_memory) { // total_memory is 80% of real_total_memory
-      spl_free -= 16*1024*1024;
+    // if we have abundant memory, put pressure on other xnu memory users (buffer cache for example)
+    if(!lowmem) {
+      spl_free += SMALL_PRESSURE_INCURSION_PAGES * PAGESIZE;
     }
 
     double delta = spl_free - base;
