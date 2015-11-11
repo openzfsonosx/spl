@@ -3141,11 +3141,18 @@ kmem_cache_stat(kmem_cache_t *cp, char *name)
 
 // TRUE if we have more than a critical minimum of memory
 // used in arc_memory_throttle; if FALSE, we throttle
-static inline int32_t
+static inline bool
 spl_minimal_physmem_p_logic()
 {
-  return(!vm_page_free_wanted &&
-	 (vm_page_free_count > (vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES)));
+  // do we have enough memory to avoid throttling?
+  if (vm_page_free_wanted > 0)
+    return false;
+  if (vm_page_free_count > (vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES))
+    return false;
+  if (segkmem_total_mem_allocated > total_memory * 99ULL / 100ULL)
+    return false;
+
+  return true;
 }
 
 int32_t
