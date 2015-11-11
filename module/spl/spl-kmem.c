@@ -4097,7 +4097,7 @@ spl_free_thread()
 
     // leave slop in kmem for non-arc, back way down if kmem is nearly full
     // os_mem_alloc sysctl is segkmem_total_mem_allocated
-    if(segkmem_total_mem_allocated > total_memory * 85ULL / 100ULL) {
+    if(segkmem_total_mem_allocated > total_memory * 95ULL / 100ULL) {
       int64_t big_used = segkmem_total_mem_allocated * 100LL;
       int64_t pct_used = big_used / (int64_t)total_memory;  // range is 85+
 
@@ -4108,16 +4108,19 @@ spl_free_thread()
       if(pct_used > 99)
 	emergency_lowmem = true;
 
-      // subtract 0.1% of total_memory per percentage used above 85%;
+      // subtract 0.1% of total_memory per percentage used above 95%;
       //                             this may or may not go negative.
-      // above 98% we go negative for sure, so we are demanding back 1.4%
+      // above 98% we go negative for sure, so we are demanding back 0.3%
+      //                             and that may continue for 1/10 second,
+      //                             so it's a big shrink.
 
-      spl_free -= (pct_used - 84) * (int64_t)(total_memory / 1000ULL);
+      spl_free -= (pct_used - 95) * (int64_t)(total_memory / 1000ULL);
 	
       lowmem = true;
     }
 
     // stop arc from grabbing allll the memory near startup and after a big evacuation of memory
+    // (e.g. fast I/O small memory)
     if(spl_free > total_memory) { // total_memory is 80% of real_total_memory
       spl_free -= 128*1024*1024;
     }
@@ -4132,7 +4135,7 @@ spl_free_thread()
     if(emergency_lowmem) {
       // shove this right into arc_reclaim_thread, rather than waiting for eventual reaction
       // to a negative spl_free.
-      spl_free_set_emergency_pressure((int64_t)total_memory / 100LL);
+      spl_free_set_emergency_pressure((int64_t)total_memory / 200LL);
     }
 
     if(spl_free < 0)
