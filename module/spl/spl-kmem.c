@@ -102,6 +102,8 @@ static int64_t spl_free_manual_pressure = 0;
 static kmutex_t spl_free_manual_pressure_lock;
 static boolean_t spl_free_fast_pressure = FALSE;
 
+static int64_t spl_minimal_uses_spl_free = TRUE;
+
 // Start and end address of kernel memory
 //http://fxr.watson.org/fxr/source/osfmk/vm/vm_resident.c?v=xnu-2050.18.24;im=excerpts#L135
 extern vm_offset_t virtual_space_start;
@@ -528,11 +530,11 @@ typedef struct spl_stats {
   kstat_named_t spl_vm_page_free_min_min;
   kstat_named_t spl_free_wake_count;
   kstat_named_t spl_spl_free;
-  kstat_named_t spl_spl_free_minus_pressure;
   kstat_named_t spl_spl_free_manual_pressure;
   kstat_named_t spl_spl_free_fast_pressure;
   kstat_named_t spl_spl_free_delta_ema;
   kstat_named_t spl_spl_free_negative_count;
+  kstat_named_t spl_spl_minimal_uses_spl_free;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -549,11 +551,11 @@ static spl_stats_t spl_stats = {
     {"vm_page_free_min_min", KSTAT_DATA_UINT64},
     {"spl_free_wake_count", KSTAT_DATA_UINT64},
     {"spl_spl_free", KSTAT_DATA_UINT64},
-    {"spl_spl_free_minus_pressure", KSTAT_DATA_UINT64},
     {"spl_spl_free_manual_pressure", KSTAT_DATA_UINT64},
     {"spl_spl_free_fast_pressure", KSTAT_DATA_UINT64},
     {"spl_spl_free_delta_ema", KSTAT_DATA_UINT64},
     {"spl_spl_free_negative_count", KSTAT_DATA_UINT64},
+    {"spl_spl_minimal_uses_spl_free", KSTAT_DATA_INT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -3162,6 +3164,10 @@ spl_minimal_physmem_p(void)
   // arc will throttle throttle if we are paging, otherwise
   // we want a small bit of pressure here so that we can compete a little with the xnu buffer cache
 
+  if(spl_minimal_uses_spl_free) {
+    return(spl_free > 0);
+  }
+
   if(spl_minimal_physmem_p_logic()) {
     return 1;
   } else {
@@ -4448,6 +4454,10 @@ spl_kstat_update(kstat_t *ksp, int rw)
 	      mutex_exit(&reap_now_lock);
 	    }
 	  }
+
+	  if(ks->spl_spl_minimal_uses_spl_free.value.i64 != spl_minimal_uses_spl_free) {
+	    spl_minimal_uses_spl_free = ks->spl_spl_minimal_uses_spl_free.value.i64;
+	  }
 		
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
@@ -4457,10 +4467,10 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_vm_page_free_min_multiplier.value.ui64 = (uint64_t)vm_page_free_min_multiplier;
 		ks->spl_vm_page_free_min_min.value.ui64 = (uint64_t)vm_page_free_min_min;
 		ks->spl_spl_free.value.i64 = spl_free;
-		ks->spl_spl_free_minus_pressure.value.ui64 = spl_free - spl_free_manual_pressure;
 		ks->spl_spl_free_manual_pressure.value.i64 = spl_free_manual_pressure;
 		ks->spl_spl_free_fast_pressure.value.i64 = spl_free_fast_pressure;
 		ks->spl_spl_free_delta_ema.value.i64 = spl_free_delta_ema;
+		ks->spl_spl_minimal_uses_spl_free.value.i64 = spl_minimal_uses_spl_free;
 	}
 
 	return (0);
