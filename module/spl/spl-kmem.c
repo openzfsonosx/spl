@@ -4229,6 +4229,7 @@ reap_thread()
       mutex_exit(&reap_now_lock);
       printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
 	     __func__, (zfs_lbolt() - last_reap)/hz, om);
+      last_reap = zfs_lbolt();
       previous_segkmem_total_mem_allocated = om;
       kmem_reap();
       kmem_reap_idspace();
@@ -4238,8 +4239,8 @@ reap_thread()
       mutex_exit(&reap_now_lock);
       printf("SPL: reap thread, segkmem_total_mem_allocated delta %llu since %llu seconds ago\n",
 	     om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz);
-      previous_segkmem_total_mem_allocated = om;
       last_reap = zfs_lbolt();
+      previous_segkmem_total_mem_allocated = om;
       kmem_reap();
       kmem_reap_idspace();
       spl_stats.spl_reap_thread_reaped_count.value.ui64++;
