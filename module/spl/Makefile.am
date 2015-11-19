@@ -4,6 +4,7 @@ INFO_PLIST = Info.plist
 PLIST_STRING = InfoPlist.strings
 
 SUBDIRS = KernelExports
+AUTOMAKE_OPTIONS = subdir-objects
 
 CFLAGS_KMOD = \
 	${AM_CFLAGS} \
@@ -35,6 +36,11 @@ noinst_PROGRAMS = spl
 spl_kext_SOURCE =
 
 spl_SOURCES = 	\
+	crypto/edonr/edonr.c \
+	crypto/skein/skein.c \
+	crypto/skein/skein_iv.c \
+	crypto/skein/skein_block.c \
+	crypto/sha2/sha2.c \
 	spl-atomic.c \
 	spl-avl.c \
 	spl-condvar.c \
