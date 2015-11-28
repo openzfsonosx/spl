@@ -45,6 +45,8 @@ extern void tsd_create(uint_t *, dtor_func_t);
 extern void tsd_destroy(uint_t *);
 extern void tsd_exit(void);
 
+uint64_t spl_tsd_size(void);
+void tsd_thread_exit(void);
 int spl_tsd_init(void);
 void spl_tsd_fini(void);
 

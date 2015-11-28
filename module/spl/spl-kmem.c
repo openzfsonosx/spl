@@ -480,6 +480,7 @@ typedef struct spl_stats {
     kstat_named_t spl_active_rwlock;
     kstat_named_t spl_monitor_thread_wake_count;
     kstat_named_t spl_simulate_pressure;
+    kstat_named_t spl_active_tsd;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -489,6 +490,7 @@ static spl_stats_t spl_stats = {
     {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
     {"simulate_pressure", KSTAT_DATA_UINT64},
+    {"active_tsd", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -3979,6 +3981,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_active_mutex.value.ui64 = zfs_active_mutex;
 		ks->spl_active_rwlock.value.ui64 = zfs_active_rwlock;
 		ks->spl_simulate_pressure.value.ui64 = 0;
+		ks->spl_active_tsd.value.ui64 = spl_tsd_size();
 	}
 
 	return (0);

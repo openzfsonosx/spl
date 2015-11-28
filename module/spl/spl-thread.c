@@ -90,5 +90,6 @@ void spl_thread_exit(void)
 {
         atomic_dec_64(&zfs_threads);
 
+		tsd_thread_exit();
         (void) thread_terminate(current_thread());
 }
