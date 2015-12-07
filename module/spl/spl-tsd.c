@@ -94,6 +94,7 @@ static kmutex_t spl_tsd_mutex;
  * This function has been optimized to be fast for the update case.
  * When setting the tsd initially it will be slower due to additional
  * required locking and potential memory allocations.
+ * If the value is set to NULL, we also release it.
  */
 int
 tsd_set(uint_t key, void *value)
@@ -123,11 +124,26 @@ tsd_set(uint_t key, void *value)
 	mutex_exit(&spl_tsd_mutex);
 
 	if (entry) {
+
+		/* If value is set to NULL, release it as well */
+		if (value == NULL) {
+			mutex_enter(&spl_tsd_mutex);
+			avl_remove(&tsd_tree, entry);
+			mutex_exit(&spl_tsd_mutex);
+
+			kmem_free(entry, sizeof(*entry));
+			return 0;
+		}
+
 		entry->tsd_value = value;
 		return 0;
 	}
 
 	/* No node, we need to create a new one and insert it. */
+	/* But if the value is NULL, then why create one eh? */
+	if (value == NULL)
+		return 0;
+
 	entry = kmem_alloc(sizeof(spl_tsd_node_t), KM_SLEEP);
 
 	entry->tsd_key    = i;
