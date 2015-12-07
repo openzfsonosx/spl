@@ -49,6 +49,12 @@
     (((uint32_t)BE_IN16(xa) << 16) | BE_IN16((uint8_t *)(xa)+2))
 
 
+/* 10.8 is lacking in htonll */
+#if !defined(htonll)
+#define htonll(x)       __DARWIN_OSSwapInt64(x)
+#endif
+
+
 
 #ifdef __LITTLE_ENDIAN__
 #define _LITTLE_ENDIAN
