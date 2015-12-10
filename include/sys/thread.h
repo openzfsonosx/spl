@@ -54,7 +54,7 @@ typedef struct kthread kthread_t;
 typedef void (*thread_func_t)(void *);
 
 
-#define   curthread       (current_thread())      /* current thread pointer */
+#define   curthread       ((struct kthread *)current_thread())      /* current thread pointer */
 #define   curproj         (ttoproj(curthread))    /* current project pointer */
 
 #define thread_join(t)			VERIFY(0)

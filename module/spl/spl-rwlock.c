@@ -37,8 +37,12 @@ static lck_grp_t  *zfs_rwlock_group = NULL;
 
 uint64_t zfs_active_rwlock = 0;
 
+/* We run rwlock with DEBUG on for now, as it protects against
+ * uninitialised access etc, and almost no cost.
+ */
+#ifndef DEBUG
 #define DEBUG
-
+#endif
 
 #ifdef DEBUG
 int rw_isinit(krwlock_t *rwlp)

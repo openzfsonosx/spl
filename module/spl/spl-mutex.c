@@ -366,7 +366,7 @@ int spl_mutex_owned(kmutex_t *mp)
     return (mp->m_owner == current_thread());
 }
 
-struct thread *spl_mutex_owner(kmutex_t *mp)
+struct kthread *spl_mutex_owner(kmutex_t *mp)
 {
     return (mp->m_owner);
 }

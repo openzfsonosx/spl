@@ -544,7 +544,6 @@ static spl_stats_t spl_stats = {
     {"active_mutex", KSTAT_DATA_UINT64},
     {"active_rwlock", KSTAT_DATA_UINT64},
     {"monitor_thread_wake_count", KSTAT_DATA_UINT64},
-    {"simulate_pressure", KSTAT_DATA_UINT64},
     {"active_tsd", KSTAT_DATA_UINT64},
     {"reap_thread_wake_count", KSTAT_DATA_UINT64},
     {"reap_thread_reaped_count", KSTAT_DATA_UINT64},
@@ -2590,7 +2589,7 @@ kmem_alloc_tryhard(size_t size, size_t *asize, int kmflag)
 static void
 kmem_cache_reap(kmem_cache_t *cp)
 {
-    //ASSERT(taskq_member(kmem_taskq, curthread));
+    ASSERT(taskq_member(kmem_taskq, curthread));
 
 	//return;
 
@@ -2972,7 +2971,7 @@ kmem_cache_update(kmem_cache_t *cp)
 	 ((debug_rand % kmem_mtb_reap) == 0)) {
 	// no mutex above, so no need to give it up as in kmem_cache_scan()
 	//printf("SPL: kmem_cache_update random debug reap %u, doing %s\n", ++kmem_mtb_reap_count, cp->cache_name);
-	kmem_cache_reap(cp);
+	// kmem_cache_reap(cp); // XXX
       }
     }
 #endif
@@ -3247,7 +3246,7 @@ kmem_partial_slab_cmp(const void *pp0, const void *pp1)
     ASSERT(KMEM_SLAB_IS_PARTIAL(s1));
     ASSERT(s0->slab_cache == s1->slab_cache);
     cp = s1->slab_cache;
-    ASSERT(MUTEX_HELD(&cp->cache_lock));
+    ASSERT(MUTEX_HELD((struct kmutex *)&cp->cache_lock));
     binshift = cp->cache_partial_binshift;
 
     /* weight of first slab */
@@ -4482,14 +4481,14 @@ spl_kstat_update(kstat_t *ksp, int rw)
 }
 
 void
-spl_kmem_init(uint64_t total_memory)
+spl_kmem_init(uint64_t xtotal_memory)
 {
     //kmem_cache_t *cp;
     int old_kmem_flags = kmem_flags;
     int use_large_pages = 0;
     size_t maxverify, minfirewall;
 
-    printf("SPL: Total memory %llu\n", total_memory);
+    printf("SPL: Total memory %llu\n", xtotal_memory);
 
 	sysctl_register_oid(&sysctl__spl);
 	sysctl_register_oid(&sysctl__spl_kext_version);
@@ -5967,7 +5966,7 @@ kmem_cache_scan(kmem_cache_t *cp)
                 KMEM_STAT_ADD(kmem_move_stats.kms_debug_reaps);
 		kmem_mtb_reap_count++;
 		//printf("SPL: kmem_cache_scan random debug reap %llu\n", kmem_move_stats.kms_debug_reaps);
-                kmem_cache_reap(cp);
+		//kmem_cache_reap(cp); // XXX
                 return;
             } else if ((debug_rand % kmem_mtb_move) == 0) {
                 KMEM_STAT_ADD(kmem_move_stats.kms_scans);
@@ -5986,7 +5985,7 @@ kmem_cache_scan(kmem_cache_t *cp)
 
     if (reap) {
         KMEM_STAT_ADD(kmem_move_stats.kms_scan_depot_ws_reaps);
-        kmem_depot_ws_reap(cp);
+        //kmem_depot_ws_reap(cp);  // XXX
     }
 }
 

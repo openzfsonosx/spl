@@ -1484,7 +1484,7 @@ taskq_resume(taskq_t *tq)
 }
 
 int
-taskq_member(taskq_t *tq, kthread_t *thread)
+taskq_member(taskq_t *tq, struct kthread *thread)
 {
 #ifdef __APPLE__
 	int i;

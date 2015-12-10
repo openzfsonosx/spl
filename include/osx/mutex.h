@@ -93,7 +93,7 @@ void spl_mutex_destroy(kmutex_t *mp);
 void spl_mutex_exit(kmutex_t *mp);
 int  spl_mutex_tryenter(kmutex_t *mp);
 int  spl_mutex_owned(kmutex_t *mp);
-struct thread *spl_mutex_owner(kmutex_t *mp);
+struct kthread *spl_mutex_owner(kmutex_t *mp);
 
 int  spl_mutex_subsystem_init(void);
 void spl_mutex_subsystem_fini(void);
