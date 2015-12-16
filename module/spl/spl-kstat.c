@@ -214,7 +214,7 @@ static int kstat_handle_i64 SYSCTL_HANDLER_ARGS
         }
 
         /* Copy the new value from user space */
-        named->value.i64 = (*(int64_t*)(req->newptr));
+		copyin(req->newptr, &named->value.i64, sizeof(named->value.i64));
 
         /* and invoke the update operation */
         if (ksp->ks_update) {
@@ -261,7 +261,7 @@ static int kstat_handle_ui64 SYSCTL_HANDLER_ARGS
         }
 
         /* Copy the new value from user space */
-        named->value.ui64 = (*(uint64_t*)(req->newptr));
+		copyin(req->newptr, &named->value.ui64, sizeof(named->value.ui64));
 
         /* and invoke the update operation */
         if (ksp->ks_update) {
@@ -308,6 +308,8 @@ static int kstat_handle_string SYSCTL_HANDLER_ARGS
         }
 
         /* Copy the new value from user space */
+		/* This should use copyinstr when copying in string from userland
+		 * Fix this before attempting to use type STRING with kstat */
         named->value.string.addr.ptr = (char *)(req->newptr);
 		named->value.string.len = strlen((char *)(req->newptr))+1;
 
