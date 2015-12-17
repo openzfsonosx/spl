@@ -61,12 +61,6 @@ uint64_t  real_total_memory = 0;
 #include <IOKit/IOLib.h>
 
 
-/* SMAP */
-#include <i386/proc_reg.h>
-#include <i386/cpuid.h>
-#include <Availability.h>
-static int spl_cpufeature_smap = 0;
-
 // Size in bytes of the memory allocated in seg_kmem
 extern uint64_t		segkmem_total_mem_allocated;
 
@@ -361,20 +355,12 @@ ddi_copyin(const void *from, void *to, size_t len, int flags)
 {
 	int ret = 0;
 
-	/* stac/clac defined from 10.10, but only enforced from 10.10.3 */
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
-	if (spl_cpufeature_smap) stac();
-#endif
-
     /* Fake ioctl() issued by kernel, 'from' is a kernel address */
     if (flags & FKIOCTL)
 		bcopy(from, to, len);
 	else
 		ret = copyin((user_addr_t)from, (void *)to, len);
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
-	if (spl_cpufeature_smap) clac();
-#endif
 	return ret;
 }
 
@@ -383,10 +369,6 @@ ddi_copyout(const void *from, void *to, size_t len, int flags)
 {
 	int ret = 0;
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
-	if (spl_cpufeature_smap) stac();
-#endif
-
     /* Fake ioctl() issued by kernel, 'from' is a kernel address */
     if (flags & FKIOCTL) {
 		bcopy(from, to, len);
@@ -394,26 +376,17 @@ ddi_copyout(const void *from, void *to, size_t len, int flags)
 		ret = copyout(from, (user_addr_t)to, len);
 	}
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
-	if (spl_cpufeature_smap) clac();
-#endif
 	return ret;
 }
 
 /* Technically, this call does not exist in IllumOS, but we use it for
- * consistency, and SMAP wrappers.
+ * consistency.
  */
 int ddi_copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done)
 {
 	int ret;
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
-	if (spl_cpufeature_smap) stac();
-#endif
 	ret = copyinstr((user_addr_t)uaddr, kaddr, len, done);
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
-	if (spl_cpufeature_smap) clac();
-#endif
 	return ret;
 }
 
@@ -424,13 +397,6 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     //max_ncpus = processor_avail_count;
     int ncpus;
     size_t len = sizeof(ncpus);
-
-	/* We need to check if cpuid SMAP is enabled */
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101000 // __MAC_10_10 and up
-	if (get_cr4() & CR4_SMAP)
-		spl_cpufeature_smap = 1;
-#endif
-
 
     sysctlbyname("hw.logicalcpu_max", &max_ncpus, &len, NULL, 0);
     len = sizeof(total_memory);
@@ -471,10 +437,9 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 	spl_kmem_mp_init();
 
     IOLog("SPL: Loaded module v%s-%s%s, "
-          "(ncpu %d, memsize %llu, pages %llu) %s\n",
+          "(ncpu %d, memsize %llu, pages %llu)\n",
           SPL_META_VERSION, SPL_META_RELEASE, SPL_DEBUG_STR,
-		max_ncpus, total_memory, physmem,
-		spl_cpufeature_smap ? "SMAP" : "");
+		  max_ncpus, total_memory, physmem);
 
 	return KERN_SUCCESS;
 }
@@ -491,10 +456,10 @@ kern_return_t spl_stop (kmod_info_t * ki, void * d)
 	spl_kstat_fini();
     spl_mutex_subsystem_fini();
     IOLog("SPL: Unloaded module v%s-%s "
-          "(os_mem_alloc: %llu) %s\n",
+          "(os_mem_alloc: %llu)\n",
           SPL_META_VERSION, SPL_META_RELEASE,
-		  segkmem_total_mem_allocated,
-		  spl_cpufeature_smap ? "SMAP" : "");
+		  segkmem_total_mem_allocated);
+
     return KERN_SUCCESS;
 }
 
