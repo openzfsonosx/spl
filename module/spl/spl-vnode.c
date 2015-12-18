@@ -563,3 +563,19 @@ int spl_build_path(struct vnode *vp, char *buff, int buflen, int *outlen,
 {
 	return build_path(vp, buff, buflen, outlen, flags, ctx);
 }
+
+/*
+ * vnode_notify was moved from KERNEL_PRIVATE to KERNEL in 10.11, but to be
+ * backward compatible, we keep the wrapper for now.
+ */
+extern int vnode_notify(struct vnode *, uint32_t, struct vnode_attr*);
+int spl_vnode_notify(struct vnode *vp, uint32_t type, struct vnode_attr *vap)
+{
+	return vnode_notify(vp, type, vap);
+}
+
+extern int	vfs_get_notify_attributes(struct vnode_attr *vap);
+int	spl_vfs_get_notify_attributes(struct vnode_attr *vap)
+{
+	return vfs_get_notify_attributes(vap);
+}

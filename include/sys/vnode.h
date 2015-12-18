@@ -317,6 +317,7 @@ int spl_vn_rdwr(
 
 vfs_context_t vfs_context_kernel(void);
 vfs_context_t spl_vfs_context_kernel(void);
-
+extern int spl_vnode_notify(struct vnode *vp, uint32_t type, struct vnode_attr *vap);
+extern int spl_vfs_get_notify_attributes(struct vnode_attr *vap);
 
 #endif /* SPL_VNODE_H */

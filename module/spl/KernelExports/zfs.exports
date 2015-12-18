@@ -24,3 +24,5 @@ _kvtophys
 __mh_execute_header
 _gLoadedKextSummaries
 _VNOP_LOOKUP
+_vnode_notify
+_vfs_get_notify_attributes
