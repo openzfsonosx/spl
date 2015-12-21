@@ -20,6 +20,7 @@ AC_DEFUN([SPL_AC_CONFIG_KERNEL], [
 	SPL_AC_DEBUG_KMEM_TRACKING
 	SPL_AC_DEBUG_MUTEX
 	SPL_AC_TEST_MODULE
+	SPL_AC_KERNEL_DEPENDENCIES
 ])
 
 AC_DEFUN([SPL_AC_KERNEL], [
@@ -562,4 +563,24 @@ AC_DEFUN([SPL_AC_DEBUG_MUTEX], [
 	AC_SUBST(SPL_DEBUG_MUTEX)
 	AC_MSG_CHECKING([whether mutex debug is enabled])
 	AC_MSG_RESULT([$enable_debug_mutex])
+])
+
+dnl #
+dnl # Assign a version number to the kernel dependencies
+dnl #
+AC_DEFUN([SPL_AC_KERNEL_DEPENDENCIES], [
+	AC_MSG_CHECKING([kernel dependencies version])
+	AC_SUBST(SPL_KERNEL_DEPENDENCIES)
+	SPL_KERNEL_DEPENDENCIES="0"
+	if test -f ./module/spl/KernelExports/zfs.exports && git rev-parse --git-dir > /dev/null 2>&1; then
+		_revcount=$(git rev-list --count HEAD -- ./module/spl/KernelExports/zfs.exports)
+		if test -n "${_revcount}"; then
+			SPL_KERNEL_DEPENDENCIES=${_revcount}
+		fi
+	fi
+	AC_DEFINE_UNQUOTED([SPL_KERNEL_DEPENDENCIES],
+		["$SPL_KERNEL_DEPENDENCIES"],
+		[Define the kernel dependencies version.]
+	)
+	AC_MSG_RESULT([$SPL_KERNEL_DEPENDENCIES])
 ])
