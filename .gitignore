@@ -25,6 +25,7 @@
 *.swp
 .*.cmd
 .deps
+.dirstamp
 .libs
 .DS_Store
 modules.order
