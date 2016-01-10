@@ -27,6 +27,8 @@
  */
 
 #include <sys/cred.h>
+#include <sys/kmem.h>
+#include <sys/kauth.h>
 
 /* Return the effective user id */
 uid_t
@@ -92,4 +94,48 @@ crgetfsgid(const cred_t *cr)
 	return -1;
 }
 
+
+extern int kauth_cred_getgroups(kauth_cred_t _cred, gid_t *_groups, int *_groupcount);
+/*
+ * Unfortunately, to get the count of groups, we have to call XNU which
+ * memcpy's them over. No real clean way to get around that, but at least
+ * these calls are done sparingly.
+ */
+int crgetngroups(const cred_t *cr)
+{
+	gid_t gids[NGROUPS];
+	int count = NGROUPS;
+	int ret;
+
+	ret = kauth_cred_getgroups((kauth_cred_t) cr, gids, &count);
+
+	if (!ret) return count;
+
+	return 0;
+}
+
+
+/*
+ * We always allocate NGROUPs here, since we don't know how many there will
+ * be until after the call. Unlike IllumOS, the ptr returned is allocated
+ * and must be returned by a call to crgetgroupsfree().
+ */
+gid_t *crgetgroups(const cred_t *cr)
+{
+	gid_t *gids;
+	int count = NGROUPS;
+
+	gids = kmem_zalloc(sizeof(gid_t) * count, KM_SLEEP);
+	if (!gids) return NULL;
+
+	kauth_cred_getgroups((kauth_cred_t) cr, gids, &count);
+
+	return gids;
+}
+
+void crgetgroupsfree(gid_t *gids)
+{
+	if (!gids) return;
+	kmem_free(gids, sizeof(gid_t) * NGROUPS);
+}
 
