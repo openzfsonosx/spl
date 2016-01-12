@@ -57,5 +57,11 @@ typedef struct callb_cpr {
 #define CALLOUT_FLAG_HRESTIME           0x4
 #define CALLOUT_FLAG_32BIT              0x8
 
+/* Move me to more correct "sys/callo.h" file when convenient. */
+#define CALLOUT_NORMAL 1
+typedef uint64_t callout_id_t;
+callout_id_t timeout_generic(int, void (*)(void *), void *, hrtime_t, hrtime_t,
+							 int);
+
 
 #endif  /* _SPL_CALLB_H */

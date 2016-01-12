@@ -32,6 +32,8 @@
 #include <sys/tsd.h>
 #include <spl-debug.h>
 #include <sys/vnode.h>
+#include <sys/callb.h>
+#include <sys/systm.h>
 
 uint64_t zfs_threads = 0;
 
@@ -92,4 +94,22 @@ void spl_thread_exit(void)
 
 		tsd_thread_exit();
         (void) thread_terminate(current_thread());
+}
+
+
+/*
+ * IllumOS has callout.c - place it here until we find a better place
+ */
+callout_id_t
+timeout_generic(int type, void (*func)(void *), void *arg,
+				hrtime_t expiration, hrtime_t resolution, int flags)
+{
+	struct timespec ts;
+	hrt2ts(expiration, &ts);
+	bsd_timeout(func, arg, &ts);
+	/* bsd_untimeout() requires func and arg to cancel the timeout, so
+	 * pass it back as the callout_id. If we one day were to implement
+	 * untimeout_generic() they would pass it back to us
+	 */
+	return (callout_id_t)arg;
 }
