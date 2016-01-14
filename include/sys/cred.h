@@ -61,6 +61,7 @@ extern gid_t crgetfsgid(const cred_t *cr);
 extern int crgetngroups(const cred_t *cr);
 extern gid_t * crgetgroups(const cred_t *cr);
 extern void crgetgroupsfree(gid_t *gids);
+extern int spl_cred_ismember_gid(cred_t *cr, gid_t gid);
 
 #define crgetsid(cred, i)       (NULL)
 

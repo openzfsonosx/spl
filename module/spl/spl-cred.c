@@ -139,3 +139,14 @@ void crgetgroupsfree(gid_t *gids)
 	kmem_free(gids, sizeof(gid_t) * NGROUPS);
 }
 
+/*
+ * Return true if "cr" belongs in group "gid".
+ */
+int spl_cred_ismember_gid(cred_t *cr, gid_t gid)
+{
+	int ret = 0; // Is not member.
+	kauth_cred_ismember_gid((kauth_cred_t)cr, gid, &ret);
+	if (ret == 1)
+		return TRUE;
+	return FALSE;
+}
