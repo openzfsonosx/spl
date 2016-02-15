@@ -108,12 +108,26 @@
  * Copyright (c) 2014 Brendon Humphrey (brendon.humphrey@mac.com)
  */
 
+//vm_tag_t
+//vm_tag_alloc(vm_allocation_site_t * site);
+// static vm_allocation_site_t site = { VM_KERN_MEMORY_KALLOC, VM_TAG_BT };
+
 #ifdef _KERNEL
+#define XNU_KERNEL_PRIVATE
+#include <mach/vm_types.h>
 extern vm_map_t kernel_map;
 
-extern kern_return_t kernel_memory_allocate(vm_map_t map, void **addrp,
-                                            vm_size_t size, vm_offset_t mask, int flags);
+/*
+ * These extern prototypes has to be carefully checked against XNU source
+ * in case Apple changes them. They are not defined in the "allowed" parts
+ * of the kernel.framework
+ */
+typedef uint8_t vm_tag_t;
 
+extern kern_return_t kernel_memory_allocate(vm_map_t map, void **addrp,
+                                            vm_size_t size, vm_offset_t mask,
+											int flags, vm_tag_t tag);
+#define SPL_TAG 6 /* VM_KERN_MEMORY_KEXT - mach_vm_statistics.h */
 extern void kmem_free(vm_map_t map, void *addr, vm_size_t size);
 
 #endif /* _KERNEL */
@@ -247,7 +261,7 @@ osif_malloc(uint64_t size)
     void *tr;
     kern_return_t kr;
 
-    kr = kernel_memory_allocate(kernel_map, &tr, size, KMEM_QUANTUM-1, 0);
+    kr = kernel_memory_allocate(kernel_map, &tr, size, KMEM_QUANTUM-1, 0, SPL_TAG);
 
     if (kr == KERN_SUCCESS) {
         atomic_add_64(&segkmem_total_mem_allocated, size);
