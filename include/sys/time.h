@@ -47,6 +47,9 @@
 #define MICROSEC			1000000
 #define NANOSEC				1000000000
 
+#define        NSEC2SEC(n)     ((n) / (NANOSEC / SEC))
+#define        SEC2NSEC(m)     ((hrtime_t)(m) * (NANOSEC / SEC))
+
 /* Already defined in include/linux/time.h */
 #undef CLOCK_THREAD_CPUTIME_ID
 #undef CLOCK_REALTIME
