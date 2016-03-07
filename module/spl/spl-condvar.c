@@ -91,18 +91,25 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, int flags,
 {
     struct timespec ts;
     int result;
+	uint64_t timenow;
 
     if (msg != NULL && msg[0] == '&')
         ++msg;  /* skip over '&' prefixes */
 
-    ts.tv_sec = MAX(1, (tim - zfs_lbolt()) / hz);
+	timenow = zfs_lbolt();
+
+	// Check for events already in the past
+	if (tim < timenow)
+		tim = timenow;
+
+    ts.tv_sec = MAX(1, (tim - timenow) / hz);
     ts.tv_nsec = 0;
 #if 1
     if (ts.tv_sec < 1)
         ts.tv_nsec = 100;
 #endif
     if (ts.tv_sec > 400) {
-        printf("cv_timedwait: will wait %lds\n", ts.tv_sec);
+        printf("cv_timedwait: would wait %lds\n", ts.tv_sec);
 		ts.tv_sec = 5;
 	}
 #ifdef SPL_DEBUG_MUTEX
@@ -153,7 +160,7 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
 	}
 
     if (ts.tv_nsec > 400L * NSEC_PER_SEC) {
-        printf("cv_timedwait_hires: will wait %lds -> forced to 5s\n", ts.tv_nsec/NSEC_PER_SEC);
+        printf("cv_timedwait_hires: will wait %llus -> forced to 5s\n", ts.tv_nsec/NSEC_PER_SEC);
 		ts.tv_nsec = 5 * NSEC_PER_SEC;
 	}
 
