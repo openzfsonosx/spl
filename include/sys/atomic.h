@@ -126,6 +126,11 @@ atomic_add_32(volatile uint32_t *target, int32_t delta)
 {
     __sync_add_and_fetch(target, delta);
 }
+static inline uint32_t
+atomic_add_32_nv(volatile uint32_t *target, int32_t delta)
+{
+    return  __sync_add_and_fetch(target, delta);
+}
 static inline void
 atomic_add_64(volatile uint64_t *target, int64_t delta)
 {
