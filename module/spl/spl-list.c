@@ -77,15 +77,23 @@ list_destroy(list_t *list)
 void
 list_insert_after(list_t *list, void *object, void *nobject)
 {
-	list_node_t *lold = list_d2l(list, object);
-	list_insert_after_node(list, lold, nobject);
+	if (object == NULL) {
+		list_insert_head(list, nobject);
+	} else {
+		list_node_t *lold = list_d2l(list, object);
+		list_insert_after_node(list, lold, nobject);
+	}
 }
 
 void
 list_insert_before(list_t *list, void *object, void *nobject)
 {
-	list_node_t *lold = list_d2l(list, object);
-	list_insert_before_node(list, lold, nobject)
+	if (object == NULL) {
+		list_insert_tail(list, nobject);
+	} else {
+		list_node_t *lold = list_d2l(list, object);
+		list_insert_before_node(list, lold, nobject);
+	}
 }
 
 void
