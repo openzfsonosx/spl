@@ -152,20 +152,32 @@ rw_tryenter(krwlock_t *rwlp, krw_t rw)
 int
 rw_tryupgrade(krwlock_t *rwlp)
 {
+#if 0
 	/* Not supported */
 	return 0;
-#if 0
-    atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
+#else
+	if (rwlp->rw_owner == current_thread())
+		panic("rw_enter: locking against myself!");
 
 	if (lck_rw_lock_shared_to_exclusive(
-			(lck_rw_t *)&rwlp->rw_lock[0]) == FALSE) {
-		printf("upgrade failed, waiting for SHARED lock again\n");
-		rw_enter(rwlp, RW_READER);
-		return 0;
+			(lck_rw_t *)&rwlp->rw_lock[0])) {
+
+		/* We dropped a READ lock, so decrement readers
+		 * and gained a WRITE lock, so assign owner.
+		 */
+		atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
+		rwlp->rw_owner = current_thread();
+		return (1);
 	}
 
-	rwlp->rw_owner = current_thread();
-    return (1);
+	/*
+	 * Upgrade to WRITE failed, so we lost the READ lock as well.
+	 * We have to decrement the readers (incase there are waiters)
+	 * and attempt to re-acquire the READ lock
+	 */
+    atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
+	rw_enter(rwlp, RW_READER);
+	return 0;
 #endif
 }
 
