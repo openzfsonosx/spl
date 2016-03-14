@@ -32,7 +32,7 @@
 #include <sys/sysctl.h>
 #include <sys/mutex.h>
 
-#define KSTAT_STRLEN            31
+#define KSTAT_STRLEN            63
 
 /* For reference valid classes are:
  * disk, tape, net, controller, vm, kvm, hat, streams, kstat, misc
