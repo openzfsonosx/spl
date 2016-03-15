@@ -159,23 +159,22 @@ rw_tryupgrade(krwlock_t *rwlp)
 	if (rwlp->rw_owner == current_thread())
 		panic("rw_enter: locking against myself!");
 
+	/* No matter the outcome of shared_to_exclusive, we lose the READ
+	 * lock, so decrement the counter now
+	 */
+	atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
 	if (lck_rw_lock_shared_to_exclusive(
 			(lck_rw_t *)&rwlp->rw_lock[0])) {
 
-		/* We dropped a READ lock, so decrement readers
-		 * and gained a WRITE lock, so assign owner.
-		 */
-		atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
 		rwlp->rw_owner = current_thread();
 		return (1);
 	}
 
 	/*
 	 * Upgrade to WRITE failed, so we lost the READ lock as well.
-	 * We have to decrement the readers (incase there are waiters)
-	 * and attempt to re-acquire the READ lock
+	 * Attempt to re-acquire the READ lock as ZFS assumed we still
+	 * hold the READ lock (and will call rw_exit)
 	 */
-    atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
 	rw_enter(rwlp, RW_READER);
 	return 0;
 #endif
