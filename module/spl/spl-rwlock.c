@@ -67,7 +67,6 @@ rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
 	rwlp->rw_pad = 0x012345678;
 #endif
 	atomic_inc_64(&zfs_active_rwlock);
-
 }
 
 void
@@ -78,6 +77,8 @@ rw_destroy(krwlock_t *rwlp)
 	rwlp->rw_pad = 0x99;
 #endif
 	atomic_dec_64(&zfs_active_rwlock);
+	ASSERT(rwlp->rw_owner == NULL);
+	ASSERT(rwlp->rw_readers == 0);
 }
 
 void
@@ -144,40 +145,47 @@ rw_tryenter(krwlock_t *rwlp, krw_t rw)
  * Solaris/FreeBSD. We could re-acquire the lock in this situation,
  * but it enters a possibility of blocking, when tryupgrade is meant
  * to be non-blocking.
- * It is simpler to let ZFS think tryupgrade always fails, and it will
- * grab exclusive lock with the blocking call.
- * We end up blocking forever in lck_rw_lock_shared_to_exclusive_success
- * waiting for READERS to drain.
+ * Also note that XNU's lck_rw_lock_shared_to_exclusive() is always
+ * blocking (when waiting on readers), which means we can not use it.
  */
 int
 rw_tryupgrade(krwlock_t *rwlp)
 {
-#if 0
-	/* Not supported */
-	return 0;
-#else
+    int held = 0;
+
 	if (rwlp->rw_owner == current_thread())
 		panic("rw_enter: locking against myself!");
 
-	/* No matter the outcome of shared_to_exclusive, we lose the READ
-	 * lock, so decrement the counter now
+	/* More readers than us? give up */
+	if (rwlp->rw_readers != 1) return 0;
+
+	/*
+	 * It is ON. We need to drop our READER lock, and try to
+	 * grab the WRITER as quickly as possible.
 	 */
 	atomic_dec_32((volatile uint32_t *)&rwlp->rw_readers);
-	if (lck_rw_lock_shared_to_exclusive(
-			(lck_rw_t *)&rwlp->rw_lock[0])) {
+	lck_rw_unlock_shared((lck_rw_t *)&rwlp->rw_lock[0]);
 
+	/* Grab the WRITER lock */
+	held = lck_rw_try_lock((lck_rw_t *)&rwlp->rw_lock[0],
+						   LCK_RW_TYPE_EXCLUSIVE);
+
+	if (held) {
+		/* Looks like we won */
 		rwlp->rw_owner = current_thread();
-		return (1);
+        ASSERT(rwlp->rw_readers == 0);
+		return 1;
 	}
 
 	/*
-	 * Upgrade to WRITE failed, so we lost the READ lock as well.
-	 * Attempt to re-acquire the READ lock as ZFS assumed we still
-	 * hold the READ lock (and will call rw_exit)
+	 * The worst has happened, we failed to grab WRITE lock, either
+	 * due to another WRITER lock, or, some READER came along.
+	 * IllumOS implementation returns with the READER lock again
+	 * so we need to grab it.
 	 */
 	rw_enter(rwlp, RW_READER);
 	return 0;
-#endif
+
 }
 
 void
@@ -213,6 +221,8 @@ rw_write_held(krwlock_t *rwlp)
 void
 rw_downgrade(krwlock_t *rwlp)
 {
+	if (rwlp->rw_owner != current_thread())
+		panic("SPL: rw_downgrade not WRITE lock held\n");
     rwlp->rw_owner = NULL;
     lck_rw_lock_exclusive_to_shared((lck_rw_t *)&rwlp->rw_lock[0]);
     atomic_inc_32((volatile uint32_t *)&rwlp->rw_readers);
@@ -236,4 +246,6 @@ void spl_rwlock_fini(void)
 
     lck_attr_free(zfs_rwlock_attr);
     zfs_rwlock_attr = NULL;
+
+	ASSERT(zfs_active_rwlock == 0);
 }
