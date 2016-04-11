@@ -217,7 +217,14 @@ void vn_rele_async(struct vnode *vp, void *taskq);
 #define vn_exists(vp)
 #define vn_is_readonly(vp)  vnode_vfsisrdonly(vp)
 
-#define vnode_pager_setsize(vp, sz)  ubc_setsize((vp),(sz))
+static inline void vnode_pager_setsize(struct vnode *vp, uint64_t sz)
+{
+	uint64_t befsz = ubc_getsize((vp));
+	ubc_setsize((vp),(sz));
+	if ((sz) > befsz)  {
+		ubc_msync((vp), 0, sz, NULL, UBC_INVALIDATE);
+	}
+}
 
 #define VATTR_NULL(v) do { } while(0)
 
@@ -319,5 +326,7 @@ vfs_context_t vfs_context_kernel(void);
 vfs_context_t spl_vfs_context_kernel(void);
 extern int spl_vnode_notify(struct vnode *vp, uint32_t type, struct vnode_attr *vap);
 extern int spl_vfs_get_notify_attributes(struct vnode_attr *vap);
+extern void spl_ubc_upl_range_needed(upl_t upl, int index, int count);
+
 
 #endif /* SPL_VNODE_H */

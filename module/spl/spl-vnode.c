@@ -579,3 +579,12 @@ int	spl_vfs_get_notify_attributes(struct vnode_attr *vap)
 {
 	return vfs_get_notify_attributes(vap);
 }
+
+void
+spl_ubc_upl_range_needed(
+	upl_t           upl,
+	int             index,
+	int             count)
+{
+	ubc_upl_range_needed(upl, index, count);
+}
