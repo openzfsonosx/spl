@@ -49,7 +49,7 @@
 //#define PRINT_CACHE_STATS 1
 
 // Uncomment to turn on kmems' debug features.
-#define DEBUG 1
+//#define DEBUG 1
 #define dprintf if(0) printf
 
 //===============================================================
@@ -4642,13 +4642,15 @@ spl_kmem_init(uint64_t xtotal_memory)
 
     if (kmem_flags & (KMF_AUDIT | KMF_RANDOMIZE)) {
         if (kmem_transaction_log_size == 0)
-            kmem_transaction_log_size = kmem_maxavail() / 50;
+            kmem_transaction_log_size = MIN(kmem_maxavail() / 50ULL,
+											KMEM_QUANTUM<<4);
         kmem_transaction_log = kmem_log_init(kmem_transaction_log_size);
     }
 
     if (kmem_flags & (KMF_CONTENTS | KMF_RANDOMIZE)) {
         if (kmem_content_log_size == 0)
-            kmem_content_log_size = kmem_maxavail() / 50;
+            kmem_content_log_size = MIN(kmem_maxavail() / 50ULL,
+										KMEM_QUANTUM<<4);
         kmem_content_log = kmem_log_init(kmem_content_log_size);
     }
 
