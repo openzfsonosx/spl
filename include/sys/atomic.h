@@ -247,7 +247,7 @@ atomic_swap_64(volatile uint64_t *_target, uint64_t _new)
 
 extern void *atomic_cas_ptr(volatile void *_target, void *_cmp, void *_new);
 
-static inline void membar_producer(void) { /* nothing */ }
+static inline void membar_producer(void) { __c11_atomic_thread_fence(__ATOMIC_SEQ_CST); }
 
 #ifdef	__cplusplus
 }

@@ -23,6 +23,7 @@
  *
  * Copyright (C) 2008 MacZFS Project
  * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
+ * Copyright (C) 2017 Sean Doran <smd@use.net>
  *
  */
 
@@ -50,6 +51,7 @@ extern uint64_t physmem;
 #define	KM_PUSHPAGE	0x0004	/* can block for memory; may use reserve */
 #define	KM_NORMALPRI 0x0008  /* with KM_NOSLEEP, lower priority allocation */
 #define KM_NODEBUG  0x0010  /* NOT IMPLEMENTED ON OSX */
+#define KM_NO_VBA   0x0020  /* OSX: don't descend to the bucket layer */
 #define	KM_VMFLAGS	0x00ff	/* flags that must match VM_* flags */
 
 #define	KM_FLAGS	0xffff	/* all settable kmem flags */
@@ -85,6 +87,8 @@ extern uint64_t physmem;
   int64_t spl_free_manual_pressure_wrapper(void);
   boolean_t spl_free_fast_pressure_wrapper(void);
   void spl_free_set_pressure(int64_t);
+	void spl_free_set_fast_pressure(boolean_t);
+	uint64_t spl_free_last_pressure_wrapper(void);
 
 #define KMC_NOTOUCH     0x00010000
 #define KMC_NODEBUG     0x00020000
@@ -131,6 +135,7 @@ extern uint64_t physmem;
     char *kmem_asprintf(const char *fmt, ...);
     void strfree(char *str);
     char *kmem_vasprintf(const char *fmt, va_list ap);
+	char *kmem_strstr(const char *in, const char *str);
 	void strident_canon(char *s, size_t n);
 
 

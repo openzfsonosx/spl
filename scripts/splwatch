@@ -1,0 +1,2 @@
+#!/bin/bash
+/opt/local/bin/watch -d /usr/local/bin/splstat

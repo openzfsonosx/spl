@@ -63,8 +63,8 @@ extern "C" {
 //	extern int segkmem_reloc;	/* enable/disable segkmem relocatable pages */
 //	extern vmem_t *static_arena;	/* arena for caches to import static memory */
 //	extern vmem_t *static_alloc_arena;	/* arena for allocating static memory */
-	extern vmem_t *zio_arena;	/* arena for zio caches */
-	extern vmem_t *zio_alloc_arena;	/* arena for zio caches */
+	extern vmem_t *zio_arena;	/* arena for zio caches for file blocks */
+	extern vmem_t *zio_metadata_arena;	/* arena for zio caches for (zfs) metadata blocks */
 //	extern struct vnode kvps[];
 	/*
 	 * segkmem page vnodes
@@ -87,14 +87,14 @@ extern "C" {
 
 //	extern void *boot_alloc(void *, size_t, uint_t);
 //	extern void boot_mapin(caddr_t addr, size_t size);
-	extern void kernelheap_init(void *, void *, char *, void *, void *);
+	extern void kernelheap_init(void);
 	extern void kernelheap_fini(void);
 //	extern void segkmem_gc(void);
 
 	extern void *segkmem_zio_alloc(vmem_t *, size_t, int);
 //	extern int segkmem_zio_create(struct seg *);
 	extern void segkmem_zio_free(vmem_t *, void *, size_t);
-	extern void segkmem_zio_init(void *, void*);
+	extern void segkmem_zio_init(void);
 	extern void segkmem_zio_fini(void);
 
 	/*

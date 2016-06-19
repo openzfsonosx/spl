@@ -206,7 +206,7 @@ extern "C" {
 (cp)->cache_magtype->mt_cache)
 
 #define	KMEM_MAGAZINE_VALID(cp, mp)	\
-(((kmem_slab_t *)P2END((uintptr_t)(mp), KMEM_QUANTUM) - 1)->slab_cache == \
+(((kmem_slab_t *)P2END((uintptr_t)(mp), PAGESIZE) - 1)->slab_cache == \
 (cp)->cache_magtype->mt_cache)
 
 #define	KMEM_SLAB_OFFSET(sp, buf)	\
@@ -371,6 +371,10 @@ extern "C" {
 		uint64_t			cache_depot_contention;		/* mutex contention count */
 		uint64_t			cache_depot_contention_prev; /* previous snapshot */
         uint64_t			cache_alloc_count;			/* Number of allocations in cache */
+	    uint64_t no_vba_success; /* successful calls with KM_NO_VBA flag set */
+	    uint64_t no_vba_fail;
+	    uint64_t arc_no_grow_set; /* number of times we set arc growth suppression time */
+	    uint64_t arc_no_grow; /* number of times spl_zio_is_suppressed returned true for this cache */
 
 		/*
 		 * Cache properties

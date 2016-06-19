@@ -1,0 +1,2 @@
+#!/bin/bash
+/usr/local/bin/arcstat.pl -f Time,read,miss,miss%,redirt,l2hits,l2miss,l2write,dmis,dm%,pmis,pm%,mmis,mm%,size,tsize,ovrhd,comprs,uncomp,rat%

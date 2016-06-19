@@ -34,7 +34,9 @@ extern "C" {
 
 
 // BGH - Back to 512k users reporting glitching, beachballing etc.
-#define KMEM_QUANTUM (PAGESIZE<<7) 
+//#define KMEM_QUANTUM (PAGESIZE<<7)
+
+#define KMEM_QUANTUM (PAGESIZE) // (<<5, 128k, has been running for months (as of 23 sept 2015), lower does glitch
 
 
 
@@ -46,6 +48,8 @@ extern "C" {
 #define	VM_PANIC		0x00000002	/* same as KM_PANIC */
 #define	VM_PUSHPAGE		0x00000004	/* same as KM_PUSHPAGE */
 #define	VM_NORMALPRI	0x00000008	/* same as KM_NORMALPRI */
+#define VM_NODEBUG      0x00000010      /* matches KM_NODE~BUG, not implemented on OSX */
+#define VM_NO_VBA               0x00000020      /* OSX: do not descend to the bucket layer */
 #define	VM_KMFLAGS		0x000000ff	/* flags that must match KM_* flags */
 
 #define	VM_BESTFIT		0x00000100
@@ -81,7 +85,12 @@ extern "C" {
 #define	VMC_POPULATOR	0x00010000
 #define	VMC_NO_QCACHE	0x00020000	/* cannot use quantum caches */
 #define	VMC_IDENTIFIER	0x00040000	/* not backed by memory */
+	// VMC_XALLOC   0x00080000 below
+	// VMC_XALIGN   0x00100000 below
 #define	VMC_DUMPSAFE	0x00200000	/* can use alternate dump memory */
+	// KMC_IDENTIFIER == 0x00400000
+	// KMC_PREFILL ==    0x00800000
+#define VMC_TIMEFREE    0x01000000      /* keep span creation time, old spans freelist heads */
 	/*
 	 * internal use only;	the import function uses the vmem_ximport_t interface
 	 *			and may increase the request size if it so desires.
@@ -152,6 +161,8 @@ extern "C" {
 	extern int vmem_contains(vmem_t *, void *, size_t);
 	extern void vmem_walk(vmem_t *, int, void (*)(void *, void *, size_t), void *);
 	extern size_t vmem_size(vmem_t *, int);
+	extern size_t vmem_size_locked(vmem_t *, int);
+	extern size_t vmem_size_semi_atomic(vmem_t *, int);
 	extern void vmem_qcache_reap(vmem_t *vmp);
 
 #ifdef	__cplusplus

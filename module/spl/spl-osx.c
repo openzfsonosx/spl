@@ -41,7 +41,7 @@
 
 #include <kern/processor.h>
 
-//#define DEBUG 1
+#define DEBUG 1  // for backtrace debugging info
 
 struct utsname utsname = { { 0 } };
 
@@ -73,7 +73,23 @@ extern char hostname[MAXHOSTNAMELEN];
 void
 osx_delay(int ticks)
 {
-	IODelay(ticks * 10000);
+	if (ticks < 2) {
+		// IODelay spins and takes microseconds as an argument
+		// don't spend more than 10msec spinning.
+		IODelay(ticks * 10000);
+		return;
+	}
+
+	int64_t ticks_to_go = (int64_t) ticks * 10LL; // ticks are 10 msec units
+	int64_t start_tick = (int64_t) zfs_lbolt();   // zfs_lbolt() is in 10 mec units
+	int64_t end_tick = start_tick + (int64_t) ticks_to_go;
+
+	do {
+		IOSleep(ticks_to_go);
+		int64_t cur_tick = (int64_t) zfs_lbolt();
+		ticks_to_go = (end_tick - cur_tick);
+	} while (ticks_to_go > 0);
+
 }
 
 
@@ -410,7 +426,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 	 * the OS X allocator. We internally add pressure if we step over it
 	 */
     real_total_memory = total_memory;
-	total_memory = total_memory * 80ULL / 100ULL;
+    total_memory = total_memory * 50ULL / 100ULL; // smd: experiment with 50%, 8GiB
     physmem = total_memory / PAGE_SIZE;
 
     len = sizeof(utsname.sysname);
