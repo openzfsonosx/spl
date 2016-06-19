@@ -41,6 +41,8 @@
 
 #include <kern/processor.h>
 
+#include <net/init.h>
+
 //#define DEBUG 1
 
 struct utsname utsname = { { 0 } };
@@ -390,17 +392,30 @@ int ddi_copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done)
 	return ret;
 }
 
+extern unsigned int       current_debugger;
+#define KDP_CUR_DB      0x1
 
+extern uint64_t		max_mem;
 
-kern_return_t spl_start (kmod_info_t * ki, void * d)
+void spl_start_real(void)
 {
     //max_ncpus = processor_avail_count;
     int ncpus;
     size_t len = sizeof(ncpus);
 
+	printf("SPL: start\n");
+
+	//if (current_debugger != KDP_CUR_DB) {
+	//	current_debugger = KDP_CUR_DB;
+	//}
+
     sysctlbyname("hw.logicalcpu_max", &max_ncpus, &len, NULL, 0);
-    len = sizeof(total_memory);
+	if (!max_ncpus) max_ncpus = 1;
+
+	len = sizeof(total_memory);
     sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
+	printf("SPL: sysctl memory %llu\n", total_memory);
+	if (!total_memory) total_memory = max_mem;
 
 	/*
 	 * Setting the total memory to physmem * 80% here, since kmem is
@@ -441,9 +456,20 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
           SPL_META_VERSION, SPL_META_RELEASE, SPL_DEBUG_STR,
 		  max_ncpus, total_memory, physmem);
 
-	return KERN_SUCCESS;
 }
 
+kern_return_t spl_start (kmod_info_t * ki, void * d)
+{
+	printf("SPL: delaying init\n");
+
+	/* If we are loaded during boot, we need to delay the init.
+	 * net_init_add() returns error if we have already booted
+	 */
+	if (net_init_add(spl_start_real) != 0)
+		spl_start_real();
+
+	return KERN_SUCCESS;
+}
 
 kern_return_t spl_stop (kmod_info_t * ki, void * d)
 {

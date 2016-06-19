@@ -579,3 +579,60 @@ int	spl_vfs_get_notify_attributes(struct vnode_attr *vap)
 {
 	return vfs_get_notify_attributes(vap);
 }
+
+
+extern struct vfstable *vfsconf;
+struct vfstable {
+        void *vfc_vfsops;     /* filesystem operations vector */
+        char    vfc_name[MFSNAMELEN];   /* filesystem type name */
+        int     vfc_typenum;            /* historic filesystem type number */
+        int     vfc_refcount;           /* number mounted of this type */
+        int     vfc_flags;              /* permanent flags */
+        int     (*vfc_mountroot)(mount_t, vnode_t, vfs_context_t);      /* if != NULL, routine to mount root */
+        struct  vfstable *vfc_next;     /* next in list */
+        int32_t vfc_reserved1;
+        int32_t vfc_reserved2;
+        int       vfc_vfsflags;   /* for optional types */
+        void     *vfc_descptr;    /* desc table allocated address */
+        int       vfc_descsize;   /* size allocated for desc table */
+        void     *vfc_sysctl;    /* dynamically registered sysctl node */
+};
+
+void spl_hijack_mountroot(void *func)
+{
+	struct vfstable *vfsp;
+
+	printf("SPL: Attempting to set mountroot\n");
+
+	/* HIJACK the vfs_mountroot() call to call us instead. */
+	for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next) {
+		printf("SPL: '%s' %p\n", vfsp->vfc_name, vfsp->vfc_mountroot);
+		if ((vfsp->vfc_name[0] == 'z') &&
+			(vfsp->vfc_name[1] == 'f') &&
+			(vfsp->vfc_name[2] == 's')) {
+			vfsp->vfc_mountroot = func;
+			printf("SPL: vfc_mountroot set to %p\n", func);
+		} else
+			vfsp->vfc_mountroot = NULL;
+	}
+}
+
+extern	struct vnode *rootvnode;
+void spl_setrootvnode(struct vnode *vp)
+{
+	rootvnode = vp;
+}
+
+/* Root directory vnode for the system a.k.a. '/' */
+/* Must use vfs_rootvnode() to acquire a reference, and
+ * vnode_put() to release it
+ */
+struct vnode *
+getrootdir(void)
+{
+	if (!rootvnode) return NULL;
+	struct vnode *rvnode = vfs_rootvnode();
+	if (rvnode)
+		vnode_put(rvnode);
+	return rvnode;
+}

@@ -582,6 +582,20 @@ kstat_delete(kstat_t *ksp)
 	kfree(e, e->e_size);
 }
 
+void
+kstat_named_setstr(kstat_named_t *knp, const char *src)
+{
+	if (knp->data_type != KSTAT_DATA_STRING)
+		panic("kstat_named_setstr('%p', '%p'): "
+			  "named kstat is not of type KSTAT_DATA_STRING",
+			  (void *)knp, (void *)src);
+
+	KSTAT_NAMED_STR_PTR(knp) = (char *)src;
+	if (src != NULL)
+		KSTAT_NAMED_STR_BUFLEN(knp) = strlen(src) + 1;
+	else
+		KSTAT_NAMED_STR_BUFLEN(knp) = 0;
+}
 
 void
 kstat_waitq_enter(kstat_io_t *kiop)
