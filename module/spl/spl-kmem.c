@@ -908,7 +908,7 @@ kmem_log_init(size_t logsize)
 
     mutex_init(&lhp->lh_lock, NULL, MUTEX_DEFAULT, NULL);
     lhp->lh_nchunks = nchunks;
-    lhp->lh_chunksize = P2ROUNDUP(logsize / nchunks + 1, KMEM_QUANTUM);
+    lhp->lh_chunksize = P2ROUNDUP(logsize / nchunks + 1, PAGESIZE);
     lhp->lh_base = vmem_alloc(kmem_log_arena,
                               lhp->lh_chunksize * nchunks, VM_SLEEP);
     lhp->lh_free = vmem_alloc(kmem_log_arena,
@@ -4522,30 +4522,26 @@ spl_kmem_init(uint64_t xtotal_memory)
     list_create(&kmem_caches, sizeof (kmem_cache_t),
                 offsetof(kmem_cache_t, cache_link));
 
-	// Initialise seg_kmem, only the first two parameters are valid for us.
-	kernelheap_init((void*)((virtual_space_start + KMEM_QUANTUM)&~(KMEM_QUANTUM-1)),
-					(void*)((virtual_space_end - KMEM_QUANTUM)&~(KMEM_QUANTUM-1)),
-					0, 0, 0);
+	kernelheap_init();
 
-    kmem_metadata_arena = vmem_create("kmem_metadata", NULL, 0, KMEM_QUANTUM,
+    kmem_metadata_arena = vmem_create("kmem_metadata", NULL, 0, PAGESIZE,
                                       vmem_alloc, vmem_free, heap_arena, 8 * PAGESIZE,
                                       VM_SLEEP | VMC_NO_QCACHE);
 
     kmem_msb_arena = vmem_create("kmem_msb", NULL, 0,
-                                 KMEM_QUANTUM, segkmem_alloc, segkmem_free, kmem_metadata_arena, 0,
+                                 PAGESIZE, segkmem_alloc, segkmem_free, kmem_metadata_arena, 0,
                                  VMC_DUMPSAFE | VM_SLEEP);
 
     kmem_cache_arena = vmem_create("kmem_cache", NULL, 0, KMEM_ALIGN,
-                                   segkmem_alloc, segkmem_free, kmem_metadata_arena, 0, VM_SLEEP);
+                                   vmem_alloc, vmem_free, kmem_metadata_arena, 0, VM_SLEEP);
 
     kmem_hash_arena = vmem_create("kmem_hash", NULL, 0, KMEM_ALIGN,
-                                  segkmem_alloc, segkmem_free, kmem_metadata_arena, 0, VM_SLEEP);
+                                  vmem_alloc, vmem_free, kmem_metadata_arena, 0, VM_SLEEP);
 
     kmem_log_arena = vmem_create("kmem_log", NULL, 0, KMEM_ALIGN,
-                                 segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
+                                 vmem_alloc, vmem_free, heap_arena, 0, VM_SLEEP);
 
-	segkmem_zio_init((void*)((virtual_space_start + KMEM_QUANTUM)&~(KMEM_QUANTUM-1)),
-					 (void*)((virtual_space_end - KMEM_QUANTUM)&~(KMEM_QUANTUM-1)));
+	segkmem_zio_init();
 
 #ifndef APPLE
 //    kmem_firewall_va_arena = vmem_create("kmem_firewall_va",
@@ -4559,8 +4555,8 @@ spl_kmem_init(uint64_t xtotal_memory)
 #endif
 
     /* temporary oversize arena for mod_read_system_file */
-    kmem_oversize_arena = vmem_create("kmem_oversize", NULL, 0, KMEM_QUANTUM,
-                                      segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
+    kmem_oversize_arena = vmem_create("kmem_oversize", NULL, 0, PAGESIZE,
+                                      vmem_alloc, vmem_free, heap_arena, 0, VM_SLEEP);
 
     // statically declared above kmem_reap_interval = 15 * hz;
 
@@ -4628,8 +4624,8 @@ spl_kmem_init(uint64_t xtotal_memory)
 //    } else {
 #if 0
         kmem_oversize_arena = vmem_create("kmem_oversize",
-                                          NULL, 0, KMEM_QUANTUM,
-                                          segkmem_alloc, segkmem_free,
+                                          NULL, 0, PAGESIZE,
+                                          vmem_alloc, vmem_free,
 //										  kmem_minfirewall < ULONG_MAX?
 //                                          kmem_firewall_va_arena : heap_arena,
 										  heap_arena,
@@ -4643,14 +4639,14 @@ spl_kmem_init(uint64_t xtotal_memory)
     if (kmem_flags & (KMF_AUDIT | KMF_RANDOMIZE)) {
         if (kmem_transaction_log_size == 0)
             kmem_transaction_log_size = MIN(kmem_maxavail() / 50ULL,
-											KMEM_QUANTUM<<4);
+											PAGESIZE<<4);
         kmem_transaction_log = kmem_log_init(kmem_transaction_log_size);
     }
 
     if (kmem_flags & (KMF_CONTENTS | KMF_RANDOMIZE)) {
         if (kmem_content_log_size == 0)
             kmem_content_log_size = MIN(kmem_maxavail() / 50ULL,
-										KMEM_QUANTUM<<4);
+										PAGESIZE<<4);
         kmem_content_log = kmem_log_init(kmem_content_log_size);
     }
 
