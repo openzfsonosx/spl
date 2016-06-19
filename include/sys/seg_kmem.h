@@ -87,14 +87,14 @@ extern "C" {
 
 //	extern void *boot_alloc(void *, size_t, uint_t);
 //	extern void boot_mapin(caddr_t addr, size_t size);
-	extern void kernelheap_init(void *, void *, char *, void *, void *);
+	extern void kernelheap_init(void);
 	extern void kernelheap_fini(void);
 //	extern void segkmem_gc(void);
 
 	extern void *segkmem_zio_alloc(vmem_t *, size_t, int);
 //	extern int segkmem_zio_create(struct seg *);
 	extern void segkmem_zio_free(vmem_t *, void *, size_t);
-	extern void segkmem_zio_init(void *, void*);
+	extern void segkmem_zio_init(void);
 	extern void segkmem_zio_fini(void);
 
 	/*
