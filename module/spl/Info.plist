@@ -55,5 +55,7 @@
 		<key>net.lundman.kernel.dependencies</key>
 		<string>12.5.0</string>
 	</dict>
+    <key>OSBundleRequired</key>
+    <string>Root</string>
 </dict>
 </plist>
