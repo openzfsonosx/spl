@@ -223,7 +223,8 @@
 //#include <sys/panic.h>
 
 #define	VMEM_INITIAL		10	/* early vmem arenas */
-#define	VMEM_SEG_INITIAL	200	/* early segments */
+#define	VMEM_SEG_INITIAL	400 
+//200	/* early segments */
 
 /*
  * Adding a new span to an arena requires two segment structures: one to
@@ -684,6 +685,8 @@ vmem_populate(vmem_t *vmp, int vmflag)
 	kmutex_t *lp;
 	int i;
 
+	printf("SPL:vmem_populate:npop=%u\n", vmem_populators);
+	
 	while (vmp->vm_nsegfree < VMEM_MINFREE &&
 	    (vsp = vmem_getseg_global()) != NULL)
 		vmem_putseg(vmp, vsp);
@@ -717,7 +720,7 @@ vmem_populate(vmem_t *vmp, int vmflag)
 	nseg = VMEM_MINFREE + vmem_populators * VMEM_POPULATE_RESERVE;
 	size = P2ROUNDUP(nseg * vmem_seg_size, vmem_seg_arena->vm_quantum);
 	nseg = size / vmem_seg_size;
-
+	
 	/*
 	 * The following vmem_alloc() may need to populate vmem_seg_arena
 	 * and all the things it imports from.  When doing so, it will tap
@@ -1812,6 +1815,7 @@ vmem_init(const char *heap_name,
 {
 	uint32_t id;
 	int nseg = VMEM_SEG_INITIAL;
+	vmem_t *heap_parent;
 	vmem_t *heap;
 
 	// XNU mutexes need initialisation
@@ -1825,31 +1829,54 @@ vmem_init(const char *heap_name,
 	while (--nseg >= 0)
 		vmem_putseg_global(&vmem_seg0[nseg]);
 
-	heap = vmem_create(heap_name,
-					   heap_start, heap_size, heap_quantum,
+		printf("vmem_init-a: npop=%u\n", vmem_populators);
+	
+	/*
+	 * On OSX we ultimately have to use the OS allocator 
+	 * as the source and sink of memory as it is allocated 
+	 * and freed.
+	 *
+	 * By adding the heap_parent arena that acts as a source
+	 * for the actual heap, the heap accumulates allocations
+	 * and statistics just as it would on illumos, while
+	 * using the heap_parent as a "source". The heap parent
+	 * arena never internally allocates memory as 
+	 * heap_alloc (segkmem_alloc) and heap_free (segkmem_free)
+	 * go direct to the OS.
+	 */
+	heap_parent = vmem_create("heap_parent",
+							  NULL, 0, heap_quantum,
 					   NULL, NULL, NULL, 0,
+					   VM_SLEEP);
+	
+	heap = vmem_create(heap_name,
+					   NULL, 0, heap_quantum,
+					   heap_alloc, heap_free, heap_parent, 0,
 					   VM_SLEEP | VMC_POPULATOR);
+	
 
 	vmem_metadata_arena = vmem_create("vmem_metadata",
 									  NULL, 0, heap_quantum,
-									  vmem_alloc, vmem_free, heap, 8 * heap_quantum,
+									  vmem_alloc, vmem_free, heap, 8 * PAGESIZE,
 									  VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
 
 	vmem_seg_arena = vmem_create("vmem_seg",
 								 NULL, 0, heap_quantum,
-								 heap_alloc, heap_free, vmem_metadata_arena, 0,
+								 vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								 VM_SLEEP | VMC_POPULATOR);
 
 	vmem_hash_arena = vmem_create("vmem_hash",
 								  NULL, 0, 8,
-								  heap_alloc, heap_free, vmem_metadata_arena, 0,
+								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 
 	vmem_vmem_arena = vmem_create("vmem_vmem",
 								  vmem0, sizeof (vmem0), 1,
-								  heap_alloc, heap_free, vmem_metadata_arena, 0,
+								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 
+	printf("vmem_init-b: npop=%u\n", vmem_populators);
+	
 	// 5 vmem_create before this line.
 	for (id = 0; id < vmem_id; id++) {
 		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
@@ -1857,6 +1884,8 @@ vmem_init(const char *heap_name,
 										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
 	}
 
+	printf("vmem_init-c: npop=%u\n", vmem_populators);
+	
 	vmem_update(NULL);
 
 	return (heap);
@@ -1894,6 +1923,8 @@ void vmem_fini(vmem_t *heap)
 
 	bsd_untimeout(vmem_update, NULL);
 
+	// FIXME - turn on cleanup again.
+#if 0
 	/* Create a list of slabs to free by walking the list of allocs */
 	list_create(&freelist, sizeof (struct free_slab),
 				offsetof(struct free_slab, next));
@@ -1925,7 +1956,8 @@ void vmem_fini(vmem_t *heap)
 	}
 	printf("SPL: Released %llu bytes from vmem_seg_arena\n", total);
 	list_destroy(&freelist);
-
+#endif
+	
 #if 0 // Don't release, panics
 	mutex_destroy(&vmem_panic_lock);
 	mutex_destroy(&vmem_pushpage_lock);

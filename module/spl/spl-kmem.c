@@ -3831,9 +3831,9 @@ kmem_cache_init(int pass, int use_large_pages)
 
     if (pass == 2) {
         kmem_va_arena = vmem_create("kmem_va",
-                                    NULL, 0, KMEM_QUANTUM,
+                                    NULL, 0, PAGESIZE,
                                     vmem_alloc, vmem_free, heap_arena,
-                                    8 * KMEM_QUANTUM, VM_SLEEP);
+                                    8 * PAGESIZE, VM_SLEEP);
 
 //        if (use_large_pages) {
 //            kmem_default_arena = vmem_xcreate("kmem_default",
@@ -3842,8 +3842,8 @@ kmem_cache_init(int pass, int use_large_pages)
 //                                              0, VMC_DUMPSAFE | VM_SLEEP);
 //        } else {
             kmem_default_arena = vmem_create("kmem_default",
-                                             NULL, 0, KMEM_QUANTUM,
-                                             segkmem_alloc, segkmem_free, kmem_va_arena,
+                                             NULL, 0, PAGESIZE,
+                                             vmem_alloc, vmem_free, kmem_va_arena,
                                              0, VMC_DUMPSAFE | VM_SLEEP);
 //        }
 
@@ -4528,7 +4528,7 @@ spl_kmem_init(uint64_t xtotal_memory)
 					0, 0, 0);
 
     kmem_metadata_arena = vmem_create("kmem_metadata", NULL, 0, KMEM_QUANTUM,
-                                      vmem_alloc, vmem_free, heap_arena, 8 * KMEM_QUANTUM,
+                                      vmem_alloc, vmem_free, heap_arena, 8 * PAGESIZE,
                                       VM_SLEEP | VMC_NO_QCACHE);
 
     kmem_msb_arena = vmem_create("kmem_msb", NULL, 0,
