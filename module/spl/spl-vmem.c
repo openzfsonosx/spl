@@ -685,7 +685,7 @@ vmem_populate(vmem_t *vmp, int vmflag)
 	kmutex_t *lp;
 	int i;
 
-	printf("SPL:vmem_populate:npop=%u\n", vmem_populators);
+//	printf("SPL:vmem_populate:npop=%u\n", vmem_populators);
 	
 	while (vmp->vm_nsegfree < VMEM_MINFREE &&
 	    (vsp = vmem_getseg_global()) != NULL)

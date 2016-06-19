@@ -204,7 +204,7 @@ osif_malloc(uint64_t size)
     void *tr;
     kern_return_t kr;
 
-	printf("osif_malloc: %llu\n", size);
+//	printf("osif_malloc: %llu\n", size);
 	
     kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0, SPL_TAG);
 
@@ -223,7 +223,7 @@ static void
 osif_free(void* buf, uint64_t size)
 {
 #ifdef _KERNEL
-	printf("osif_free: %llu\n", size);
+//	printf("osif_free: %llu\n", size);
     kmem_free(kernel_map, buf, size);
     atomic_sub_64(&segkmem_total_mem_allocated, size);
 #else
