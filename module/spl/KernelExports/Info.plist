@@ -30,5 +30,7 @@
 	<true/>
 	<key>OSBundleAllowUserLoad</key>
 	<true/>
+	<key>OSBundleRequired</key>
+    <string>Root</string>
 </dict>
 </plist>

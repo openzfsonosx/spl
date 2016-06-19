@@ -79,5 +79,4 @@ typedef struct fid {
     } un;
 } fid_t;
 
-
 #endif /* SPL_ZFS_H */
