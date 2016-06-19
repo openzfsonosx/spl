@@ -1,0 +1,6 @@
+#!/bin/sh
+PATH=/bin:/usr/bin:/sbin:/usr/sbin:/opt/local/bin
+export PATH
+export LC_ALL=en_GB.UTF-8
+
+watch -d sysctl -h kstat.vmem.vmem.zfs_file_data kstat.vmem.vmem.zfs_metadata kstat.vmem.vmem.bucket_heap.mem_inuse kstat.vmem.vmem.bucket_heap.mem_total kstat.vmem.vmem.bucket_heap.alloc kstat.vmem.vmem.bucket_heap.free kstat.vmem.vmem.bucket_heap.lookup kstat.vmem.vmem.bucket_heap.search kstat.vmem.vmem.bucket_heap.parent_alloc  kstat.vmem.vmem.bucket_heap.parent_free kstat.spl.misc.spl_misc.spl_osif_malloc_success kstat.spl.misc.spl_misc.spl_osif_free kstat.spl.misc.spl_misc.os_mem_alloc kstat.spl.misc.spl_misc.spl_spl_free kstat.unix.kmem_cache.kmem_slab_cache.reap

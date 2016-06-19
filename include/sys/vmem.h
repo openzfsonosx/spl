@@ -34,7 +34,9 @@ extern "C" {
 
 
 // BGH - Back to 512k users reporting glitching, beachballing etc.
-#define KMEM_QUANTUM (PAGESIZE<<7) 
+//#define KMEM_QUANTUM (PAGESIZE<<7)
+
+#define KMEM_QUANTUM (PAGESIZE) // (<<5, 128k, has been running for months (as of 23 sept 2015), lower does glitch
 
 
 
@@ -152,6 +154,8 @@ extern "C" {
 	extern int vmem_contains(vmem_t *, void *, size_t);
 	extern void vmem_walk(vmem_t *, int, void (*)(void *, void *, size_t), void *);
 	extern size_t vmem_size(vmem_t *, int);
+	extern size_t vmem_size_locked(vmem_t *, int);
+	extern size_t vmem_size_semi_atomic(vmem_t *, int);
 	extern void vmem_qcache_reap(vmem_t *vmp);
 
 #ifdef	__cplusplus

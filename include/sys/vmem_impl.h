@@ -37,11 +37,11 @@
 #ifdef	__cplusplus
 extern "C" {
 #endif
-	
+
 	typedef struct vmem_seg vmem_seg_t;
-	
+
 #define	VMEM_STACK_DEPTH	20
-	
+
 	struct vmem_seg {
 		/*
 		 * The first four fields must match vmem_freelist_t exactly.
@@ -50,7 +50,7 @@ extern "C" {
 		uintptr_t	vs_end;		/* end of segment (exclusive) */
 		vmem_seg_t	*vs_knext;	/* next of kin (alloc, free, span) */
 		vmem_seg_t	*vs_kprev;	/* prev of kin */
-		
+
 		vmem_seg_t	*vs_anext;	/* next in arena */
 		vmem_seg_t	*vs_aprev;	/* prev in arena */
 		uint8_t		vs_type;	/* alloc, free, span */
@@ -63,34 +63,34 @@ extern "C" {
 		hrtime_t	vs_timestamp;
 		pc_t		vs_stack[VMEM_STACK_DEPTH];
 	};
-	
+
 	typedef struct vmem_freelist {
 		uintptr_t	vs_start;	/* always zero */
 		uintptr_t	vs_end;		/* segment size */
 		vmem_seg_t	*vs_knext;	/* next of kin */
 		vmem_seg_t	*vs_kprev;	/* prev of kin */
 	} vmem_freelist_t;
-	
+
 #define	VS_SIZE(vsp)	((vsp)->vs_end - (vsp)->vs_start)
-	
+
 	/*
 	 * Segment hashing
 	 */
 #define	VMEM_HASH_INDEX(a, s, q, m)					\
 ((((a) + ((a) >> (s)) + ((a) >> ((s) << 1))) >> (q)) & (m))
-	
+
 #define	VMEM_HASH(vmp, addr)						\
 (&(vmp)->vm_hash_table[VMEM_HASH_INDEX(addr,			\
 (vmp)->vm_hash_shift, (vmp)->vm_qshift, (vmp)->vm_hash_mask)])
-	
+
 #define	VMEM_QCACHE_SLABSIZE(max) \
 MAX(1 << highbit(3 * (max)), 64)
-	
+
 #define	VMEM_NAMELEN		30
 #define	VMEM_HASH_INITIAL	16
 #define	VMEM_NQCACHE_MAX	16
 #define	VMEM_FREELISTS		(sizeof (void *) * 8)
-	
+
 	typedef struct vmem_kstat {
 		kstat_named_t	vk_mem_inuse;		/* memory in use */
 		kstat_named_t	vk_mem_import;		/* memory imported */
@@ -102,12 +102,15 @@ MAX(1 << highbit(3 * (max)), 64)
 		kstat_named_t	vk_fail;			/* number of allocations that failed */
 		kstat_named_t	vk_lookup;			/* hash lookup count */
 		kstat_named_t	vk_search;			/* freelist search count */
-		kstat_named_t	vk_populate_wait;	/* populates that waited */
 		kstat_named_t	vk_populate_fail;	/* populates that failed */
 		kstat_named_t	vk_contains;		/* vmem_contains() calls */
 		kstat_named_t	vk_contains_search;	/* vmem_contains() search cnt */
+		kstat_named_t	vk_parent_alloc;	/* called the source allocator */
+		kstat_named_t	vk_parent_free;	        /* called the source free function */
+		kstat_named_t   vk_threads_waiting;     /* threads in cv_wait in vmem allocator function */
+		kstat_named_t   vk_excess;              /* count of retained excess imports */
 	} vmem_kstat_t;
-	
+
 	struct vmem {
 		char			vm_name[VMEM_NAMELEN];	/* arena name */
 		kcondvar_t		vm_cv;				/* cv for blocking allocations */
@@ -137,7 +140,7 @@ MAX(1 << highbit(3 * (max)), 64)
 		vmem_freelist_t	vm_freelist[VMEM_FREELISTS + 1]; /* power-of-2 flists */
 		vmem_kstat_t	vm_kstat;		/* kstat data */
 	};
-	
+
 #ifdef	__cplusplus
 }
 #endif

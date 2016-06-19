@@ -221,9 +221,11 @@
 #include <sys/debug.h>
 #include <sys/types.h>
 //#include <sys/panic.h>
+#include <stdbool.h>
 
-#define	VMEM_INITIAL		10	/* early vmem arenas */
-#define	VMEM_SEG_INITIAL	200	/* early segments */
+#define	VMEM_INITIAL		21	/* early vmem arenas */
+#define	VMEM_SEG_INITIAL	800
+//200 //400	/* early segments */
 
 /*
  * Adding a new span to an arena requires two segment structures: one to
@@ -321,15 +323,28 @@ static kmutex_t vmem_sleep_lock;
 static kmutex_t vmem_nosleep_lock;
 static kmutex_t vmem_pushpage_lock;
 static kmutex_t vmem_panic_lock;
+static kmutex_t vmem_xnu_alloc_free_lock;
+static kcondvar_t vmem_xnu_alloc_free_cv;
 static vmem_t *vmem_list;
 static vmem_t *vmem_metadata_arena;
 static vmem_t *vmem_seg_arena;
 static vmem_t *vmem_hash_arena;
 static vmem_t *vmem_vmem_arena;
+vmem_t *spl_default_arena; // The bottom-most arena for SPL
+static vmem_t *spl_default_arena_parent; // dummy arena as a placeholder
+#define VMEM_BUCKETS 13
+#define VMEM_BUCKET_LOWBIT 12
+#define VMEM_BUCKET_HIBIT 24
+static vmem_t *vmem_bucket_arena[VMEM_BUCKETS];
+vmem_t *spl_heap_arena;
+static void *spl_heap_arena_initial_alloc;
+static size_t spl_heap_arena_initial_alloc_size = 0;
+#define NUMBER_OF_ARENAS_IN_VMEM_INIT 21
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
+// must match with include/sys/vmem_impl.h
 static vmem_kstat_t vmem_kstat_template = {
 	{ "mem_inuse",		KSTAT_DATA_UINT64 },
 	{ "mem_import",		KSTAT_DATA_UINT64 },
@@ -341,14 +356,14 @@ static vmem_kstat_t vmem_kstat_template = {
 	{ "fail",		KSTAT_DATA_UINT64 },
 	{ "lookup",		KSTAT_DATA_UINT64 },
 	{ "search",		KSTAT_DATA_UINT64 },
-	{ "populate_wait",	KSTAT_DATA_UINT64 },
 	{ "populate_fail",	KSTAT_DATA_UINT64 },
 	{ "contains",		KSTAT_DATA_UINT64 },
 	{ "contains_search",	KSTAT_DATA_UINT64 },
+	{ "parent_alloc",	KSTAT_DATA_UINT64 },
+	{ "parent_free",	KSTAT_DATA_UINT64 },
+	{ "threads_waiting",	KSTAT_DATA_UINT64 },
+	{ "excess",	KSTAT_DATA_UINT64 },
 };
-
-// Warning, we know its 5 from inside of vmem_init()
-static void *global_vmem_reap[5] = {NULL};
 
 
 /*
@@ -370,6 +385,55 @@ vmem_seg_t *_vnext = (vsp)->vs_##type##next;			\
 (_vprev)->vs_##type##next = (_vnext);				\
 (_vnext)->vs_##type##prev = (_vprev);				\
 }
+
+/// vmem thread block count
+uint64_t spl_vmem_threads_waiting = 0;
+
+// number of allocations > minalloc
+uint64_t spl_bucket_non_pow2_allocs = 0;
+
+// allocator kstats
+uint64_t spl_vmem_unconditional_allocs = 0;
+uint64_t spl_vmem_unconditional_alloc_bytes = 0;
+uint64_t spl_vmem_conditional_allocs = 0;
+uint64_t spl_vmem_conditional_alloc_bytes = 0;
+uint64_t spl_vmem_conditional_alloc_deny = 0;
+uint64_t spl_vmem_conditional_alloc_deny_bytes = 0;
+
+// bucket allocator kstat
+uint64_t spl_xat_success = 0;
+uint64_t spl_xat_late_success = 0;
+uint64_t spl_xat_late_success_nosleep = 0;
+uint64_t spl_xat_pressured = 0;
+uint64_t spl_xat_bailed = 0;
+uint64_t spl_xat_bailed_contended = 0;
+uint64_t spl_xat_lastalloc = 0;
+uint64_t spl_xat_lastfree = 0;
+uint64_t spl_xat_forced = 0;
+uint64_t spl_xat_sleep = 0;
+uint64_t spl_xat_late_deny = 0;
+uint64_t spl_xat_no_waiters = 0;
+
+uint64_t spl_vba_parent_memory_appeared = 0;
+uint64_t spl_vba_parent_memory_blocked = 0;
+uint64_t spl_vba_cv_timeout = 0;
+uint64_t spl_vba_loop_timeout = 0;
+uint64_t spl_vba_cv_timeout_blocked = 0;
+uint64_t spl_vba_loop_timeout_blocked = 0;
+uint64_t spl_vba_sleep = 0;
+uint64_t spl_vba_loop_entries = 0;
+
+// bucket minimum span size tunables
+uint64_t spl_bucket_tunable_large_span = 0;
+uint64_t spl_bucket_tunable_small_span = 0;
+
+// for XAT & XATB visibility into VBA queue
+static _Atomic uint32_t spl_vba_threads[VMEM_BUCKETS] = { 0 };
+static uint32_t vmem_bucket_id_to_bucket_number[NUMBER_OF_ARENAS_IN_VMEM_INIT] = { 0 };
+
+extern void spl_free_set_emergency_pressure(int64_t p);
+extern uint64_t segkmem_total_mem_allocated;
+extern uint64_t total_memory;
 
 /*
  * Get a vmem_seg_t from the global segfree list.
@@ -479,9 +543,9 @@ vmem_hash_insert(vmem_t *vmp, vmem_seg_t *vsp)
 	*bucket = vsp;
 
 	if (vmem_seg_size == sizeof (vmem_seg_t)) {
-//		vsp->vs_depth = (uint8_t)getpcstack(vsp->vs_stack,
-//											VMEM_STACK_DEPTH);
-//		vsp->vs_thread = curthread;
+		//		vsp->vs_depth = (uint8_t)getpcstack(vsp->vs_stack,
+		//											VMEM_STACK_DEPTH);
+		//		vsp->vs_thread = curthread;
 
 		vsp->vs_depth = 0;
 		vsp->vs_thread = 0;
@@ -513,8 +577,8 @@ vmem_hash_delete(vmem_t *vmp, uintptr_t addr, size_t size)
 	}
 
 	if (vsp == NULL)
-		panic("vmem_hash_delete(%p, %lx, %lu): bad free",
-			  (void *)vmp, addr, size);
+		panic("vmem_hash_delete(%p, %lx, %lu): bad free (name: %s, addr, size)",
+		    (void *)vmp, addr, size, vmp->vm_name);
 	if (VS_SIZE(vsp) != size)
 		panic("vmem_hash_delete(%p, %lx, %lu): wrong size (expect %lu)",
 			  (void *)vmp, addr, size, VS_SIZE(vsp));
@@ -568,8 +632,8 @@ vmem_span_create(vmem_t *vmp, void *vaddr, size_t size, uint8_t import)
 	ASSERT(MUTEX_HELD(&vmp->vm_lock));
 
 	if ((start | end) & (vmp->vm_quantum - 1))
-		panic("vmem_span_create(%p, %p, %lu): misaligned",
-			  (void *)vmp, vaddr, size);
+		panic("vmem_span_create(%p, %p, %lu): misaligned (%s)",
+		    (void *)vmp, vaddr, size, vmp->vm_name);
 
 	span = vmem_seg_create(vmp, vmp->vm_seg0.vs_aprev, start, end);
 	span->vs_type = VMEM_SPAN;
@@ -701,9 +765,9 @@ vmem_populate(vmem_t *vmp, int vmflag)
 
 	mutex_exit(&vmp->vm_lock);
 
-//	if (panic_thread == curthread)
-//		lp = &vmem_panic_lock;
-//	else
+	//	if (panic_thread == curthread)
+	//		lp = &vmem_panic_lock;
+	//	else
 
 	if (vmflag & VM_NOSLEEP)
 		lp = &vmem_nosleep_lock;
@@ -809,6 +873,7 @@ vmem_advance(vmem_t *vmp, vmem_seg_t *walker, vmem_seg_t *afterme)
 		ASSERT(size == VS_SIZE(vsp->vs_aprev));
 		vmem_freelist_delete(vmp, vsp);
 		vmem_span_destroy(vmp, vsp);
+		vmp->vm_kstat.vk_parent_free.value.ui64++;
 		mutex_exit(&vmp->vm_lock);
 		vmp->vm_source_free(vmp->vm_source, vaddr, size);
 		mutex_enter(&vmp->vm_lock);
@@ -822,6 +887,7 @@ vmem_advance(vmem_t *vmp, vmem_seg_t *walker, vmem_seg_t *afterme)
  * for allocating things like process IDs, where we want to cycle through
  * all values in order.
  */
+#define dprintf if (0) printf
 static void *
 vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 {
@@ -865,7 +931,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 	 * satisfy the allocation.
 	 */
 	for (;;) {
-		vmp->vm_kstat.vk_search.value.ui64++;
+		atomic_inc_64(&vmp->vm_kstat.vk_search.value.ui64);
 		if (vsp->vs_type == VMEM_FREE && VS_SIZE(vsp) >= size)
 			break;
 		vsp = vsp->vs_anext;
@@ -888,13 +954,23 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			 * Otherwise, wait until another thread frees something.
 			 */
 			if (vmp->vm_source_alloc != NULL ||
-				(vmflag & VM_NOSLEEP)) {
+			    (vmflag & VM_NOSLEEP)) {
 				mutex_exit(&vmp->vm_lock);
 				return (vmem_xalloc(vmp, size, vmp->vm_quantum,
-									0, 0, NULL, NULL, vmflag & VM_KMFLAGS));
+					0, 0, NULL, NULL, vmflag & (VM_KMFLAGS | VM_NEXTFIT)));
 			}
-			vmp->vm_kstat.vk_wait.value.ui64++;
+			atomic_inc_64(&vmp->vm_kstat.vk_wait.value.ui64);
+			atomic_inc_64(&vmp->vm_kstat.vk_threads_waiting.value.ui64);
+			atomic_inc_64(&spl_vmem_threads_waiting);
+			if (spl_vmem_threads_waiting > 1)
+				printf("SPL: %s: waiting for %lu sized alloc after full circle of  %s, "
+				    "waiting threads %llu, total threads waiting = %llu.\n",
+				    __func__, size, vmp->vm_name,
+				    vmp->vm_kstat.vk_threads_waiting.value.ui64,
+				    spl_vmem_threads_waiting);
 			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
+			atomic_dec_64(&spl_vmem_threads_waiting);
+			atomic_dec_64(&vmp->vm_kstat.vk_threads_waiting.value.ui64);
 			vsp = rotor->vs_anext;
 		}
 	}
@@ -933,9 +1009,102 @@ vmem_canalloc(vmem_t *vmp, size_t size)
 	if ((size & (size - 1)) == 0)
 		flist = lowbit(P2ALIGN(vmp->vm_freemap, size));
 	else if ((hb = highbit(size)) < VMEM_FREELISTS)
-		flist = lowbit(P2ALIGN(vmp->vm_freemap, 1UL << hb));
+		flist = lowbit(P2ALIGN(vmp->vm_freemap, 1ULL << hb));
 
 	return (flist);
+}
+
+// Convenience functions for use when gauging
+// allocation ability when not holding the lock.
+// These are unreliable because vmp->vm_freemap is
+// liable to change immediately after being examined.
+int
+vmem_canalloc_lock(vmem_t *vmp, size_t size)
+{
+	mutex_enter(&vmp->vm_lock);
+	int i = vmem_canalloc(vmp, size);
+	mutex_exit(&vmp->vm_lock);
+	return (i);
+}
+
+int
+vmem_canalloc_atomic(vmem_t *vmp, size_t size)
+{
+	int hb;
+	int flist = 0;
+
+	ulong_t freemap = __c11_atomic_load((_Atomic ulong_t *)&vmp->vm_freemap, __ATOMIC_SEQ_CST);
+
+	if (ISP2(size))
+		flist = lowbit(P2ALIGN(freemap, size));
+	else if ((hb = highbit(size)) < VMEM_FREELISTS)
+		flist = lowbit(P2ALIGN(freemap, 1ULL << hb));
+
+	return (flist);
+}
+
+static inline uint64_t
+spl_vmem_xnu_useful_bytes_free(void)
+{
+	extern volatile unsigned int vm_page_free_wanted;
+	extern volatile unsigned int vm_page_free_count;
+	extern volatile unsigned int vm_page_free_min;
+
+	if (vm_page_free_wanted > 0)
+		return (0);
+
+	uint64_t bytes_free = (uint64_t)vm_page_free_count * (uint64_t)PAGESIZE;
+	uint64_t bytes_min = (uint64_t)vm_page_free_min * (uint64_t)PAGESIZE;
+
+	if (bytes_free <= bytes_min)
+		return (0);
+
+	uint64_t useful_free = bytes_free - bytes_min;
+
+	return (useful_free);
+}
+
+static void *
+spl_vmem_malloc_unconditionally_unlocked(size_t size)
+{
+	extern void *osif_malloc(uint64_t);
+	atomic_inc_64(&spl_vmem_unconditional_allocs);
+	atomic_add_64(&spl_vmem_unconditional_alloc_bytes, size);
+	return(osif_malloc(size));
+}
+
+static void *
+spl_vmem_malloc_unconditionally(size_t size)
+{
+	mutex_enter(&vmem_xnu_alloc_free_lock);
+	void *m = spl_vmem_malloc_unconditionally_unlocked(size);
+	cv_broadcast(&vmem_xnu_alloc_free_cv);
+	mutex_exit(&vmem_xnu_alloc_free_lock);
+	return (m);
+}
+
+static void *
+spl_vmem_malloc_if_no_pressure(size_t size)
+{
+	// The mutex serializes concurrent callers, providing time for
+	// the variables in spl_vmem_xnu_useful_bytes_free() to be updated.
+	mutex_enter(&vmem_xnu_alloc_free_lock);
+	if (spl_vmem_xnu_useful_bytes_free() > (MAX(size,16ULL*1024ULL*1024ULL))) {
+		extern void *osif_malloc(uint64_t);
+		void *p = osif_malloc(size);
+		if (p != NULL) {
+			atomic_inc_64(&spl_vmem_conditional_allocs);
+			atomic_add_64(&spl_vmem_conditional_alloc_bytes, size);
+			cv_broadcast(&vmem_xnu_alloc_free_cv);
+		}
+		mutex_exit(&vmem_xnu_alloc_free_lock);
+		return (p);
+	} else {
+		mutex_exit(&vmem_xnu_alloc_free_lock);
+		atomic_inc_64(&spl_vmem_conditional_alloc_deny);
+		atomic_add_64(&spl_vmem_conditional_alloc_deny_bytes, size);
+		return (NULL);
+	}
 }
 
 /*
@@ -1018,7 +1187,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		for (vbest = NULL, vsp = (flist == 0) ? NULL :
 			 vmp->vm_freelist[flist - 1].vs_knext;
 			 vsp != NULL; vsp = vsp->vs_knext) {
-			vmp->vm_kstat.vk_search.value.ui64++;
+			atomic_inc_64(&vmp->vm_kstat.vk_search.value.ui64);
 			if (vsp->vs_start == 0) {
 				/*
 				 * We're moving up to a larger freelist,
@@ -1121,8 +1290,9 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 				ASSERT(!(vmp->vm_cflags & VMC_XALIGN) ||
 				    IS_P2ALIGNED(vaddr, align));
 			} else {
+				atomic_inc_64(&vmp->vm_kstat.vk_parent_alloc.value.ui64);
 				vaddr = vmp->vm_source_alloc(vmp->vm_source,
-											 asize, vmflag & VM_KMFLAGS);
+				    asize, vmflag & (VM_KMFLAGS | VM_NEXTFIT));
 			}
 			mutex_enter(&vmp->vm_lock);
 			vmp->vm_nsegfree += resv;	/* claim reservation */
@@ -1137,14 +1307,21 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 				 * order to save space, we return
 				 * excess imports immediately.
 				 */
+				// but if there are threads waiting below,
+				// do not return the excess import, rather
+				// wake those threads up so they can use it.
 				if (asize > aneeded &&
 					vmp->vm_source_free != NULL &&
+				        vmp->vm_kstat.vk_threads_waiting.value.ui64 == 0 &&
 					vmem_canalloc(vmp, aneeded)) {
 					ASSERT(resv >=
 					    VMEM_SEGS_PER_MIDDLE_ALLOC);
 					xvaddr = vaddr;
 					xsize = asize;
 					goto do_alloc;
+				} else if (vmp->vm_kstat.vk_threads_waiting.value.ui64 > 0) {
+					vmp->vm_kstat.vk_excess.value.ui64++;
+					cv_broadcast(&vmp->vm_cv);
 				}
 				vbest = vmem_span_create(vmp, vaddr, asize, 1);
 				addr = P2PHASEUP(vbest->vs_start, align, phase);
@@ -1168,20 +1345,38 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		if (vmflag & VM_ABORT)
 			break;
 		mutex_exit(&vmp->vm_lock);
-#if 1
-		//printf("vmem reaping\n");
+
 		if (vmp->vm_cflags & VMC_IDENTIFIER)
 			kmem_reap_idspace();
 		else
 			kmem_reap();
-		//printf("vmem reaping done\n");
-#endif
+
 		mutex_enter(&vmp->vm_lock);
 		if (vmflag & VM_NOSLEEP)
 			break;
-		vmp->vm_kstat.vk_wait.value.ui64++;
-		printf("vmem waiting for %lu sized alloc\n", size);
+		atomic_inc_64(&vmp->vm_kstat.vk_wait.value.ui64);
+		atomic_inc_64(&vmp->vm_kstat.vk_threads_waiting.value.ui64);
+		atomic_inc_64(&spl_vmem_threads_waiting);
+		if (spl_vmem_threads_waiting > 0) {
+			printf("SPL: %s: vmem waiting for %lu sized alloc for %s, "
+			    "waiting threads %llu, total threads waiting = %llu\n",
+			    __func__, size, vmp->vm_name,
+			    vmp->vm_kstat.vk_threads_waiting.value.ui64,
+			    spl_vmem_threads_waiting);
+			extern int64_t spl_free_set_and_wait_pressure(int64_t, boolean_t, clock_t);
+			extern int64_t spl_free_manual_pressure_wrapper(void);
+			mutex_exit(&vmp->vm_lock);
+			spl_free_set_pressure(0); // release other waiting threads
+			int64_t target_pressure = size * spl_vmem_threads_waiting;
+			int64_t delivered_pressure = spl_free_set_and_wait_pressure(target_pressure,
+			    TRUE, USEC2NSEC(500));
+			printf("SPL: %s: pressure %lld targeted, %lld delivered\n",
+			    __func__, target_pressure, delivered_pressure);
+			mutex_enter(&vmp->vm_lock);
+		}
 		cv_wait(&vmp->vm_cv, &vmp->vm_lock);
+		atomic_dec_64(&spl_vmem_threads_waiting);
+		atomic_dec_64(&vmp->vm_kstat.vk_threads_waiting.value.ui64);
 	}
 	if (vbest != NULL) {
 		ASSERT(vbest->vs_type == VMEM_FREE);
@@ -1193,8 +1388,10 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		}
 		(void) vmem_seg_alloc(vmp, vbest, addr, size);
 		mutex_exit(&vmp->vm_lock);
-		if (xvaddr)
+		if (xvaddr) {
+			atomic_inc_64(&vmp->vm_kstat.vk_parent_free.value.ui64);
 			vmp->vm_source_free(vmp->vm_source, xvaddr, xsize);
+		}
 		ASSERT(P2PHASE(addr, align) == phase);
 		ASSERT(!P2BOUNDARY(addr, size, nocross));
 		ASSERT(addr >= (uintptr_t)minaddr);
@@ -1260,6 +1457,7 @@ vmem_xfree(vmem_t *vmp, void *vaddr, size_t size)
 		size = VS_SIZE(vsp);
 		ASSERT(size == VS_SIZE(vsp->vs_aprev));
 		vmem_span_destroy(vmp, vsp);
+		vmp->vm_kstat.vk_parent_free.value.ui64++;
 		mutex_exit(&vmp->vm_lock);
 		vmp->vm_source_free(vmp->vm_source, vaddr, size);
 	} else {
@@ -1298,6 +1496,8 @@ vmem_alloc(vmem_t *vmp, size_t size, int vmflag)
 	if (vmflag & (VM_BESTFIT | VM_FIRSTFIT))
 		return (vmem_xalloc(vmp, size, vmp->vm_quantum, 0, 0,
 							NULL, NULL, vmflag));
+	if (vmp->vm_cflags & VM_NEXTFIT)
+		return (vmem_nextfit_alloc(vmp, size, vmflag));
 
 	/*
 	 * Unconstrained instant-fit allocation from the segment list.
@@ -1438,14 +1638,60 @@ vmem_walk(vmem_t *vmp, int typemask,
 size_t
 vmem_size(vmem_t *vmp, int typemask)
 {
-	uint64_t size = 0;
+	int64_t size = 0;
 
 	if (typemask & VMEM_ALLOC)
-		size += vmp->vm_kstat.vk_mem_inuse.value.ui64;
+		size += (int64_t)vmp->vm_kstat.vk_mem_inuse.value.ui64;
 	if (typemask & VMEM_FREE)
-		size += vmp->vm_kstat.vk_mem_total.value.ui64 -
-		vmp->vm_kstat.vk_mem_inuse.value.ui64;
+		size += (int64_t)vmp->vm_kstat.vk_mem_total.value.ui64 -
+		    (int64_t)vmp->vm_kstat.vk_mem_inuse.value.ui64;
+	if (size < 0)
+		size = 0;
+
 	return ((size_t)size);
+}
+
+size_t
+vmem_size_locked(vmem_t *vmp, int typemask)
+{
+	boolean_t m = (mutex_owner(&vmp->vm_lock) == curthread);
+
+	if (!m)
+		mutex_enter(&vmp->vm_lock);
+	size_t s = vmem_size(vmp, typemask);
+	if (!m)
+		mutex_exit(&vmp->vm_lock);
+	return (s);
+}
+
+size_t
+vmem_size_semi_atomic(vmem_t *vmp, int typemask)
+{
+	int64_t size = 0;
+	uint64_t inuse = 0;
+	uint64_t total = 0;
+
+	__sync_swap(&total, vmp->vm_kstat.vk_mem_total.value.ui64);
+	__sync_swap(&inuse, vmp->vm_kstat.vk_mem_inuse.value.ui64);
+
+	int64_t inuse_signed = (int64_t)inuse;
+	int64_t total_signed = (int64_t)total;
+
+	if (typemask & VMEM_ALLOC)
+		size += inuse_signed;
+	if (typemask & VMEM_FREE)
+		size += total_signed - inuse_signed;
+
+	if (size < 0)
+		size = 0;
+
+	return ((size_t) size);
+}
+
+size_t
+spl_vmem_size(vmem_t *vmp, int typemask)
+{
+	return(vmem_size_locked(vmp, typemask));
 }
 
 /*
@@ -1536,8 +1782,12 @@ vmem_create_common(const char *name, void *base, size_t size, size_t quantum,
 	 * increase their imports, giving a similar effect.
 	 */
 	if (vmp->vm_cflags & VMC_NO_QCACHE) {
-		vmp->vm_min_import =
-		VMEM_QCACHE_SLABSIZE(nqcache << vmp->vm_qshift);
+		if (qcache_max > VMEM_NQCACHE_MAX && ISP2(qcache_max)) {
+			vmp->vm_min_import = qcache_max;
+		} else {
+			vmp->vm_min_import =
+			    VMEM_QCACHE_SLABSIZE(nqcache << vmp->vm_qshift);
+		}
 		nqcache = 0;
 	}
 
@@ -1547,7 +1797,7 @@ vmem_create_common(const char *name, void *base, size_t size, size_t quantum,
 		for (i = 0; i < nqcache; i++) {
 			char buf[VMEM_NAMELEN + 21];
 			(void) snprintf(buf, VMEM_NAMELEN + 20, "%s_%lu", vmp->vm_name,
-						   (i + 1) * quantum);
+							(i + 1) * quantum);
 			vmp->vm_qcache[i] = kmem_cache_create(buf,
 												  (i + 1) * quantum, quantum, NULL, NULL, NULL,
 												  NULL, vmp, KMC_QCACHE | KMC_NOTOUCH);
@@ -1629,9 +1879,9 @@ vmem_destroy(vmem_t *vmp)
 
 	leaked = vmem_size(vmp, VMEM_ALLOC);
 	if (leaked != 0)
-		printf( "vmem_destroy('%s'): leaked %lu %s\n",
-				vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
-				"identifiers" : "bytes");
+		printf( "SPL: vmem_destroy('%s'): leaked %lu %s\n",
+			   vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
+			   "identifiers" : "bytes");
 
 	if (vmp->vm_hash_table != vmp->vm_hash0)
 		vmem_free(vmem_hash_arena, vmp->vm_hash_table,
@@ -1678,11 +1928,12 @@ vmem_destroy_internal(vmem_t *vmp)
 
 	leaked = vmem_size(vmp, VMEM_ALLOC);
 	if (leaked != 0)
-		printf("vmem_destroy('%s'): leaked %lu %s\n",
-				vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
-				"identifiers" : "bytes");
+		printf("SPL: vmem_destroy('%s'): leaked %lu %s\n",
+			   vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
+			   "identifiers" : "bytes");
 
 	if (vmp->vm_hash_table != vmp->vm_hash0)
+	  if(vmem_hash_arena != NULL)
 		vmem_free(vmem_hash_arena, vmp->vm_hash_table,
 		    (vmp->vm_hash_mask + 1) * sizeof (void *));
 
@@ -1699,6 +1950,10 @@ vmem_destroy_internal(vmem_t *vmp)
 	while (vmp->vm_nsegfree > 0)
 		vmem_putseg_global(vmem_getseg(vmp));
 
+         if (!(vmp->vm_cflags & VMC_IDENTIFIER) && vmem_size(vmp, VMEM_ALLOC) != 0)
+	   printf("SPL: vmem_destroy('%s'): STILL %lu bytes at kstat_delete() time\n",
+		  vmp->vm_name, vmem_size(vmp, VMEM_ALLOC));
+
 	kstat_delete(vmp->vm_ksp);
 
 	mutex_destroy(&vmp->vm_lock);
@@ -1708,6 +1963,12 @@ vmem_destroy_internal(vmem_t *vmp)
 	// we release first.
 	//vmem_free(vmem_vmem_arena, vmp, sizeof (vmem_t));
 }
+
+/*
+ * Only shrink vmem hashtable if it is 1<<vmem_rescale_minshift times (8x)
+ * larger than necessary.
+ */
+int vmem_rescale_minshift = 3;
 
 /*
  * Resize vmp's hash table to keep the average lookup depth near 1.0.
@@ -1724,7 +1985,8 @@ vmem_hash_rescale(vmem_t *vmp)
 	new_size = MAX(VMEM_HASH_INITIAL, 1 << (highbit(3 * nseg + 4) - 2));
 	old_size = vmp->vm_hash_mask + 1;
 
-	if ((old_size >> 1) <= new_size && new_size <= (old_size << 1))
+	if ((old_size >> vmem_rescale_minshift) <= new_size &&
+	    new_size <= (old_size << 1))
 		return;
 
 	new_table = vmem_alloc(vmem_hash_arena, new_size * sizeof (void *),
@@ -1764,6 +2026,7 @@ vmem_hash_rescale(vmem_t *vmp)
 /*
  * Perform periodic maintenance on all vmem arenas.
  */
+
 void
 vmem_update(void *dummy)
 {
@@ -1801,9 +2064,754 @@ vmem_qcache_reap(vmem_t *vmp)
 			kmem_cache_reap_now(vmp->vm_qcache[i]);
 }
 
+/* given a size, return the appropriate vmem_bucket_arena[] entry */
+
+static inline uint16_t
+vmem_bucket_number(size_t size)
+{
+	// For VMEM_BUCKET_HIBIT == 12,
+        // vmem_bucket_arena[n] holds allocations from 2^[n+11]+1 to  2^[n+12],
+        // so for [n] = 0, 2049-4096, for [n]=5 65537-131072, for [n]=7 (256k+1)-512k
+
+        // set hb: 512k == 19, 256k+1 == 19, 256k == 18, ...
+        const int hb = highbit(size-1);
+
+        int bucket = hb - VMEM_BUCKET_LOWBIT;
+
+        // very large allocations go into the 16 MiB bucket
+        if (hb > VMEM_BUCKET_HIBIT)
+                bucket = VMEM_BUCKET_HIBIT - VMEM_BUCKET_LOWBIT;
+
+        // very small allocations go into the 4 kiB bucket
+        if (bucket < 0)
+                bucket = 0;
+
+	return (bucket);
+}
+
+static inline vmem_t *
+vmem_bucket_arena_by_size(size_t size)
+{
+	uint16_t bucket = vmem_bucket_number(size);
+
+        return(vmem_bucket_arena[bucket]);
+}
+
+static inline void
+vmem_bucket_wake_all_waiters(void)
+{
+	for (int i = VMEM_BUCKET_LOWBIT; i < VMEM_BUCKET_HIBIT; i++) {
+		const int bucket = i - VMEM_BUCKET_LOWBIT;
+		vmem_t *bvmp = vmem_bucket_arena[bucket];
+		cv_broadcast(&bvmp->vm_cv);
+	}
+	cv_broadcast(&spl_heap_arena->vm_cv);
+}
+
 /*
- * Prepare vmem for use.
+ * xnu_alloc_throttled_bail() : spin looking for memory
+ *
  */
+
+static inline void *
+xnu_alloc_throttled_bail(uint64_t now_ticks, vmem_t *calling_vmp, size_t size, int vmflags)
+{
+
+	// spin looking for memory
+
+	const uint64_t bigtarget = MAX(size,16ULL*1024ULL*1024ULL);
+
+	static volatile _Atomic bool alloc_lock = false;
+
+	static volatile _Atomic uint64_t force_time = 0;
+
+	uint64_t timeout_ticks = hz;
+	if (vmflags & VM_PUSHPAGE)
+		timeout_ticks = hz / 2;
+
+	uint64_t timeout_time = now_ticks + timeout_ticks;
+
+	for (uint32_t suspends = 0, blocked_suspends = 0, try_no_pressure = 0; ; ) {
+		if (force_time + timeout_ticks > timeout_time) {
+			// another thread has forced an allocation
+			// by timing out.  push our deadline into the future.
+			timeout_time = force_time + timeout_ticks;
+		}
+		if (alloc_lock) {
+			blocked_suspends++;
+			kpreempt(KPREEMPT_SYNC);
+		} else	if (spl_vmem_xnu_useful_bytes_free() >= bigtarget) {
+			alloc_lock = true;
+			try_no_pressure++;
+			void *m = spl_vmem_malloc_if_no_pressure(size);
+			if (m != NULL) {
+				uint64_t ticks = zfs_lbolt() - now_ticks;
+				printf("SPL: %s returning %llu bytes after "
+				    "%llu ticks (hz=%u, seconds = %llu), "
+				    "%u suspends, %u blocked, %u tries\n",
+				    __func__, (uint64_t)size,
+				    ticks, hz, ticks/hz, suspends,
+				    blocked_suspends, try_no_pressure);
+				alloc_lock = false;
+				return(m);
+			} else {
+				alloc_lock = false;
+				spl_free_set_emergency_pressure(bigtarget);
+				suspends++;
+				kpreempt(KPREEMPT_SYNC);
+			}
+		} else if (zfs_lbolt() > timeout_time) {
+			alloc_lock = true;
+			void *mp = spl_vmem_malloc_unconditionally(size);
+			uint64_t now = zfs_lbolt();
+			uint64_t ticks = now - now_ticks;
+			force_time = now;
+			printf("SPL: %s TIMEOUT %llu bytes after "
+			    "%llu ticks (hz=%u, seconds=%llu), "
+			    "%u suspends, %u blocked, %u tries\n",
+			    __func__, (uint64_t)size,
+			    ticks, hz, ticks/hz, suspends,
+			    blocked_suspends, try_no_pressure);
+			alloc_lock = false;
+			atomic_inc_64(&spl_xat_forced);
+			return(mp);
+		} else {
+			spl_free_set_emergency_pressure(bigtarget);
+			suspends++;
+			kpreempt(KPREEMPT_SYNC);
+		}
+	}
+}
+
+static void *
+xnu_alloc_throttled(vmem_t *null_vmp, size_t size, int vmflag)
+{
+
+	// the caller is one of the bucket arenas.
+	// null_vmp will be spl_default_arena_parent, which is just a placeholder.
+
+	vmem_t *bvmp = vmem_bucket_arena_by_size(size);
+
+	uint64_t now = zfs_lbolt();
+	const uint64_t entry_now = now;
+
+	void *m = spl_vmem_malloc_if_no_pressure(size);
+
+	if (m != NULL) {
+		atomic_inc_64(&spl_xat_success);
+		if (now > hz)
+			atomic_swap_64(&spl_xat_lastalloc,  now / hz);
+		// wake up waiters on all the arena condvars
+		// since there is apparently no memory shortage.
+		vmem_bucket_wake_all_waiters();
+		return (m);
+	} else {
+		spl_free_set_emergency_pressure((int64_t)size);
+	}
+
+	if (vmflag & VM_PANIC) {
+		// force an allocation now to avoid a panic
+		atomic_swap_64(&spl_xat_lastalloc,  now / hz);
+		spl_free_set_emergency_pressure(4LL * (int64_t)size);
+		void *p = spl_vmem_malloc_unconditionally(size);
+		// p cannot be NULL (unconditional kernel malloc always works or panics)
+		// therefore: success, wake all waiters on alloc|free condvar
+		// wake up arena waiters to let them know there is memory
+		// available in the arena; let waiters on other bucket arenas
+		// continue sleeping.
+		cv_broadcast(&bvmp->vm_cv);
+		return (p);
+	}
+
+	if (vmflag & VM_NOSLEEP) {
+		spl_free_set_emergency_pressure(MAX(2LL * (int64_t)size,16LL*1024LL*1024LL));
+		kpreempt(KPREEMPT_SYNC); /* cheating a bit, but not really waiting */
+		void *p = spl_vmem_malloc_if_no_pressure(size);
+		if (p != NULL) {
+			atomic_inc_64(&spl_xat_late_success_nosleep);
+			cv_broadcast(&bvmp->vm_cv);
+			if (now > hz)
+				atomic_swap_64(&spl_xat_lastalloc,  now / hz);
+		}
+		// if p == NULL, then there will be an increment in the fail kstat
+		return (p);
+	}
+
+	/*
+	 * Loop for a while trying to satisfy VM_SLEEP allocations.
+	 *
+	 * If we are able to allocate memory, then return the pointer.
+	 *
+	 * We return NULL if some other thread's activity has caused
+	 * sufficient memory to appear in this arena that we can satisfy
+	 * the allocation.
+	 *
+	 * We call xnu_allocate_throttle_bail() after a few milliseconds of waiting;
+	 * it will either return a pointer to newly allocated memory or NULL.  We
+	 * return the result.
+	 *
+	 */
+
+	const uint32_t bucket_number = vmem_bucket_id_to_bucket_number[bvmp->vm_id];
+
+	static volatile _Atomic uint32_t waiters = 0;
+
+	waiters++;
+
+	if (waiters == 1UL)
+		atomic_inc_64(&spl_xat_no_waiters);
+
+	for (; ;) {
+		clock_t wait_time = USEC2NSEC(500UL * MAX(waiters,1UL));
+		mutex_enter(&bvmp->vm_lock);
+		spl_xat_sleep++;
+		(void) cv_timedwait_hires(&bvmp->vm_cv, &bvmp->vm_lock,
+		    wait_time, 0, 0);
+		now = zfs_lbolt();
+		mutex_exit(&bvmp->vm_lock);
+		// We may be here because of a broadcast to &vmp->vm_cv,
+		// causing xnu to schedule all the sleepers in priority-weighted FIFO
+		// order.  Because of the mutex_exit(), the sections below here may
+		// be entered concurrently.
+
+		// spl_vmem_malloc_if_no_pressure does a mutex, so avoid calling it
+		// unless there is a chance it will succeed.
+		if (spl_vmem_xnu_useful_bytes_free() > (MAX(size,16ULL*1024ULL*1024ULL))) {
+			void *a = spl_vmem_malloc_if_no_pressure(size);
+			if (a != NULL) {
+				atomic_inc_64(&spl_xat_late_success);
+				atomic_swap_64(&spl_xat_lastalloc,  now / hz);
+				waiters--;
+				// Wake up all waiters on the bucket arena locks,
+				// since the system apparently has memory again.
+				vmem_bucket_wake_all_waiters();
+				return (a);
+			} else {
+				// Probably vm_page_free_count changed while we were
+				// in the mutex queue in spl_vmem_malloc_if_no_pressure().
+				// There is therefore no point in doing the bail-out check
+				// below, so go back to the top of the for loop.
+				atomic_inc_64(&spl_xat_late_deny);
+				continue;
+			}
+		}
+		if (now > entry_now + hz / 4 || spl_vba_threads[bucket_number] > 1UL) {
+			// If there are other threads waiting for us in vba()
+			// then when we satisfy this allocation, we satisfy more than one
+			// thread, so invoke XATB().
+			// Otherwise, if we have had no luck for 250 ms, then
+			// switch to XATB() which is much more aggressive.
+			if (spl_vba_threads[bucket_number] > 1UL)
+				atomic_inc_64(&spl_xat_bailed_contended);
+			atomic_inc_64(&spl_xat_bailed);
+			void *b = xnu_alloc_throttled_bail(now, bvmp, size, vmflag);
+			atomic_swap_64(&spl_xat_lastalloc, now / hz);
+			// wake up waiters on the arena lock,
+			// since they now have memory they can use.
+			cv_broadcast(&bvmp->vm_cv);
+			// open turnstile after having bailed, rather than before
+			waiters--;
+			return (b);
+	        } else if (now - entry_now > 0 && ((now - entry_now) % (hz/10))) {
+			spl_free_set_emergency_pressure(MAX(size,16LL*1024LL*1024LL));
+			atomic_inc_64(&spl_xat_pressured);
+		}
+	}
+}
+
+static void
+xnu_free_throttled(vmem_t *vmp, void *vaddr, size_t size)
+{
+	extern void osif_free(void *, uint64_t);
+
+	// Serialize behind a (short) spin-sleep delay, giving
+	// xnu time to do freelist management and
+	// PT teardowns
+
+	// In the usual case there is only one thread in this function,
+	// so we proceed waitlessly to osif_free().
+
+	// When there are multiple threads here, we delay the 2nd and later.
+
+	// Explict race:
+	// The osif_free() is not protected by the vmem_xnu_alloc_free_lock
+	// mutex; that is just used for implementing the delay.   Consequently,
+	// the waiters on the same lock in spl_vmem_malloc_if_no_pressure may
+	// falsely see too small a value for vm_page_free_count.   We don't
+	// care in part because xnu performs poorly when doing
+	// free-then-allocate anwyay.
+
+	// a_waiters gauges the loop exit checking and sleep duration;
+	// it is a count of the number of threads trying to do work
+	// in this function.
+	static volatile _Atomic uint32_t a_waiters = 0;
+
+	// is_freeing protects the osif_free() call; see comment below
+	static volatile _Atomic bool is_freeing = false;
+
+	a_waiters++; // generates "lock incl ..."
+	for (uint32_t iter = 0; a_waiters > 1UL; iter++) {
+		// If are growing old in this loop, then see if
+		// anyone else is still in osif_free.  If not, we can exit.
+		if (iter > a_waiters && is_freeing == false) {
+			is_freeing = true;
+			break;
+		}
+		// There is a queue waiting for the mutex, sleep.
+		mutex_enter(&vmem_xnu_alloc_free_lock);
+		clock_t wait_time = USEC2NSEC(90UL + (10UL * MAX(a_waiters,1UL)));
+		(void) cv_timedwait_hires(&vmem_xnu_alloc_free_cv,
+		    &vmem_xnu_alloc_free_lock,
+		    wait_time, 0, 0);
+		// We may have been awakened by a cv_broadcast or by
+		// a timeout.   If we are now the only waiter, we will
+		// simply exit the loop after the mutex drop.
+		// However, if we are in a gang of awakened waiters,
+		// then only one may exit, and this is decided by xnu's
+		// wake-and-get-mutex order, which is hignly fair.
+		mutex_exit(&vmem_xnu_alloc_free_lock);
+	}
+	// If there is more than one thread in this function, osif_free() is
+	// protected by is_freeing.   Release it after the osif_free()
+	// call has been made and the lastfree bookkeeping has been done.
+	osif_free(vaddr, size);
+	uint64_t now = zfs_lbolt();
+	atomic_swap_64(&spl_xat_lastfree,  now / hz);
+	is_freeing = false;
+	a_waiters--;
+	// Schedule all other threads in this function.
+	cv_broadcast(&vmem_xnu_alloc_free_cv);
+	// since we just gave back xnu enough to satisfy an allocation
+	// in at least the smaller buckets, let's wake up anyone in
+	// the cv_wait() in vmem_xalloc([bucket_#], ...)
+	vmem_bucket_wake_all_waiters();
+}
+
+// return 0 if the bit was unset before the atomic OR.
+static inline bool
+vba_atomic_lock_bucket(volatile _Atomic uint16_t *bbap, uint16_t bucket_bit)
+{
+
+	// We use a test-and-set of the appropriate bit
+	// in buckets_busy_allocating; if it was not set,
+	// then break out of the loop.
+	//
+	// This compiles into an orl, cmpxchgw instruction pair.
+	// the return from __c11_atomic_fetch_or() is the
+	// previous value of buckets_busy_allocating.
+
+	uint16_t prev = __c11_atomic_fetch_or(bbap, bucket_bit, __ATOMIC_SEQ_CST);
+	if (prev & bucket_bit)
+		return (false); // we did not acquire the bit lock here
+	else
+		return (true); // we turned the bit from 0 to 1
+}
+
+static void *
+vmem_bucket_alloc(vmem_t *null_vmp, size_t size, const int vmflags)
+{
+
+	// caller is spl_heap_arena looking for memory.
+	// null_vmp will be spl_default_arena_parent, and so is just a placeholder.
+
+	vmem_t *calling_arena = spl_heap_arena;
+
+	if (!ISP2(size))
+		atomic_inc_64(&spl_bucket_non_pow2_allocs);
+
+	vmem_t *bvmp = vmem_bucket_arena_by_size(size);
+
+	// there are 13 buckets, so use a 16-bit scalar to hold
+	// a set of bits, where each bit corresponds to an in-progress
+	// vmem_alloc(bucket, ...) below.
+
+	static volatile _Atomic uint16_t buckets_busy_allocating = 0;
+	const uint16_t bucket_number = vmem_bucket_number(size);
+	const uint16_t bucket_bit = (uint16_t)1 << bucket_number;
+
+	spl_vba_threads[bucket_number]++;
+
+	static volatile _Atomic uint32_t waiters = 0;
+
+	// First, if we are VM_SLEEP, check for memory, try some pressure,
+	// and if that doesn't work, force entry into the loop below.
+
+	bool loop_once = false;
+
+	if ((vmflags & (VM_NOSLEEP | VM_PANIC | VM_ABORT)) == 0 &&
+	    ! vmem_canalloc_atomic(bvmp, size)) {
+		if (spl_vmem_xnu_useful_bytes_free() < (MAX(size,16ULL*1024ULL*1024ULL))) {
+			spl_free_set_emergency_pressure(size);
+			kpreempt(KPREEMPT_SYNC);
+			if (! vmem_canalloc_atomic(bvmp, size) &&
+			    (spl_vmem_xnu_useful_bytes_free() < (MAX(size,16ULL*1024ULL*1024ULL)))) {
+				loop_once = true;
+			}
+		}
+	}
+
+	// spin-sleep: if we would need to go to the xnu allocator.
+	//
+	// We want to avoid a burst of allocs from bucket_heap's children
+	// successively hitting a low-memory condition, or alternatively
+	// each successfully importing memory from xnu when they can share
+	// a single import.
+	//
+	// We also want to take advantage of any memory that becomes available
+	// in bucket_heap.
+	//
+	// If there is more than one thread in this function (~ few percent)
+	// then the subsequent threads are put into the loop below.   They
+	// can escape the loop if they are [1]non-waiting allocations, or
+	// [2]if they become the only waiting thread, or
+	// [3]if the cv_timedwait_hires returns -1 (which represents EWOULDBLOCK
+	// from msleep() which gets it from _sleep()'s THREAD_TIMED_OUT)
+	// allocating in the bucket, or [4]if this thread has (rare condition) spent
+	// a quarter of a second in the loop.
+
+	if (waiters++ > 1 || loop_once) {
+		atomic_inc_64(&spl_vba_loop_entries);
+	}
+
+	for (uint64_t loop_timeout = zfs_lbolt() + (hz/4), timedout = 0;
+	     waiters > 1UL || loop_once; ) {
+		loop_once = false;
+		// non-waiting allocations should proceeed to vmem_alloc() immediately
+		if (vmflags & (VM_NOSLEEP | VM_PANIC | VM_ABORT)) {
+			break;
+		}
+		if (vmem_canalloc_atomic(bvmp, size)) {
+			// We can probably vmem_alloc(bvmp, size, vmflags).
+			// At worst case it will give us a NULL and we will
+			// end up on the vmp's cv_wait.
+			//
+			// We can have threads with different bvmp
+			// taking this exit, and will proceed concurrently.
+			//
+			// However, we should protect against a burst of
+			// callers hitting the same bvmp before the allocation
+			// results are reflected in vmem_canalloc_atomic(bvmp, ...)
+			if (vba_atomic_lock_bucket(&buckets_busy_allocating, bucket_bit)) {
+				atomic_inc_64(&spl_vba_parent_memory_appeared);
+				break;
+				// The vmem_alloc() should return extremely quickly from
+				// an INSTANTFIT allocation that canalloc predicts will succeed.
+			} else {
+				// another thread is trying to use the free memory in the
+				// bucket_## arena; there might still be free memory there after
+				// its allocation is completed, and there might be excess in the
+				// bucket_heap arena, so stick around in this loop.
+				atomic_inc_64(&spl_vba_parent_memory_blocked);
+				cv_broadcast(&bvmp->vm_cv);
+			}
+		}
+		if (timedout > 0) {
+			if (vba_atomic_lock_bucket(&buckets_busy_allocating, bucket_bit)) {
+				if (timedout & 1)
+					atomic_inc_64(&spl_vba_cv_timeout);
+				if (timedout & 2 || zfs_lbolt() >= loop_timeout)
+					atomic_inc_64(&spl_vba_loop_timeout);
+				break;
+			} else {
+				if (timedout & 1) {
+					atomic_inc_64(&spl_vba_cv_timeout_blocked);
+				}
+				if (timedout & 2) {
+					atomic_inc_64(&spl_vba_loop_timeout_blocked);
+				} else if (zfs_lbolt() > loop_timeout) {
+					timedout |= 2;
+				}
+				// flush the current thread in xat() out of
+				// xat()'s for() loop and into xat_bail()
+				cv_broadcast(&bvmp->vm_cv);
+			}
+		}
+		// The bucket is already allocating, or the bucket needs
+		// more memory to satisfy vmem_allocat(bvmp, size, VM_NOSLEEP), or
+		// we want to give the bucket some time to acquire more memory.
+		//
+		// substitute for the vmp arena's cv_wait in vmem_xalloc()
+		// (vmp is the bucket_heap AKA spl_heap_arena)
+		mutex_enter(&calling_arena->vm_lock);
+		spl_vba_sleep++;
+		clock_t wait_time = MSEC2NSEC(30);
+		if ((vmflags & VM_PUSHPAGE) == 0) {
+			wait_time *= 2; // lower-priority allocs to back of queue
+		}
+		int ret = cv_timedwait_hires(&calling_arena->vm_cv, &calling_arena->vm_lock,
+		    wait_time, 0, 0);
+		// We almost certainly have exited because of a signal/broadcast,
+		// but maybe just timed out.  Either way, recheck memory.
+		mutex_exit(&calling_arena->vm_lock);
+		if (ret == -1) {
+			timedout |= 1;
+			cv_broadcast(&bvmp->vm_cv);
+		} else if (timedout == 0) {
+			if (zfs_lbolt() >= loop_timeout) {
+				timedout |= 2;
+				extern uint64_t real_total_memory;
+				spl_free_set_emergency_pressure(real_total_memory / 64LL);
+				// flush the current thread in xat() out of
+				// xat()'s for() loop and into xat_bail()
+				cv_broadcast(&bvmp->vm_cv);
+			}
+		}
+	}
+
+	/*
+	 * Turn on the exclusion bit in buckets_busy_allocating, to
+	 * prevent multiple threads from calling vmem_alloc() on the
+	 * same bucket arena concurrently rather than serially.
+	 *
+	 * This principally reduces the liklihood of asking xnu for
+	 * more memory when other memory is or becomes available.
+	 *
+	 * This exclusion only applies to VM_SLEEP allocations;
+	 * others (VM_PANIC, VM_NOSLEEP, VM_ABORT) will go to
+	 * vmem_alloc() concurrently with any other threads.
+	 *
+	 * Since we aren't doing a test-and-set operation like above,
+	 * we can just use |= and &= below and get correct atomic
+	 * results, instead of using:
+	 *
+	 * __c11_atomic_fetch_or(&buckets_busy_allocating,
+	 * bucket_bit, __ATOMIC_SEQ_CST);
+	 * with the &= down below being written as
+	 * __c11_atomic_fetch_and(&buckets_busy_allocating,
+	 * ~bucket_bit, __ATOMIC_SEQ_CST);
+	 *
+	 * and this makes a difference with no optimization either
+	 * compiling the whole file or with __attribute((optnone))
+	 * in front of the function decl.   In particular, the non-
+	 * optimized version that uses the builtin __c11_atomic_fetch_{and,or}
+	 * preserves the C program order in the machine language output,
+	 * inersting cmpxchgws, while all optimized versions, and the
+	 * non-optimized version using the plainly-written version, reorder
+	 * the "orw regr, memory" and "andw register, memory" (these are atomic
+	 * RMW operations in x86-64 when the memory is naturally aligned) so that
+	 * the strong memory model x86-64 promise that later loads see the
+	 * results of earlier stores.
+	 *
+	 * clang+llvm simply are good at optimizing _Atomics and
+	 * the optimized code differs only in line numbers and
+	 * among all three approaches (as plainly written, using
+	 * the __c11_atomic_fetch_{or,and} with sequential consistency,
+	 * or when compiling with at least -O optimization so an
+	 * atomic_or_16(&buckets_busy_allocating) built with GCC intrinsics
+	 * is actually inlined rather than a function call).
+	 *
+	 */
+
+	// in case we left the loop by being the only waiter, stop the
+	// next thread arriving from leaving the for loop because
+	// vmem_canalloc(bvmp, that_thread's_size) is true.
+
+	buckets_busy_allocating |= bucket_bit;
+
+	// There is memory in this bucket, or there are no other waiters,
+	// or we aren't a VM_SLEEP allocation,  or we iterated out of the for loop.
+	//
+	// vmem_alloc() and vmem_xalloc() do their own mutex serializing
+	// on bvmp->vm_lock, so we don't have to here.
+	//
+	// vmem_alloc may take some time to return (especially for VM_SLEEP
+	// allocations where we did not take the vm_canalloc(bvmp...) break out
+	// of the for loop).  Therefore, if we didn't enter the for loop at all
+	// because waiters was 0 when we entered this function,
+	// subsequent callers will enter the for loop.
+
+	void *m = vmem_alloc(bvmp, size, vmflags);
+
+	// allow another vmem_canalloc() through for this bucket
+	// by atomically turning off the appropriate bit
+
+	/*
+	 * Except clang+llvm DTRT because of _Atomic, could be written as:
+	 *__c11_atomic_fetch_and(&buckets_busy_allocating,
+	 *~bucket_bit, __ATOMIC_SEQ_CST);
+	 *
+	 * On processors with more relaxed memory models, it might be
+	 * more efficient to do so with release semantics here, and
+	 * in the atomic |= above, with acquire semantics in the bit tests,
+	 * but on the other hand it may be hard to do better than clang+llvm.
+	 */
+
+	buckets_busy_allocating &= ~bucket_bit;
+
+	// if we got an allocation, wake up the arena cv waiters
+	// to let them try to exit the for(;;) loop above and
+	// exit the cv_wait() in vmem_xalloc(vmp, ...)
+
+	if (m != NULL) {
+		cv_broadcast(&calling_arena->vm_cv);
+	}
+
+	waiters--;
+	spl_vba_threads[bucket_number]--;
+	return (m);
+}
+
+static void
+vmem_bucket_free(vmem_t *null_vmp, void *vaddr, size_t size)
+{
+	vmem_t *calling_arena = spl_heap_arena;
+
+	vmem_free(vmem_bucket_arena_by_size(size), vaddr, size);
+
+	// wake up arena waiters to let them try an alloc
+	cv_broadcast(&calling_arena->vm_cv);
+}
+
+static inline int64_t
+vmem_bucket_arena_free(uint16_t bucket)
+{
+	VERIFY(bucket < VMEM_BUCKETS);
+	return((int64_t)vmem_size_semi_atomic(vmem_bucket_arena[bucket], VMEM_FREE));
+}
+
+static inline int64_t
+vmem_bucket_arena_used(int bucket)
+{
+	VERIFY(bucket < VMEM_BUCKETS);
+	return((int64_t)vmem_size_semi_atomic(vmem_bucket_arena[bucket], VMEM_ALLOC));
+}
+
+
+int64_t
+vmem_buckets_size(int typemask)
+{
+	int64_t total_size = 0;
+
+	for (int i = 0; i < VMEM_BUCKETS; i++) {
+		int64_t u = vmem_bucket_arena_used(i);
+		int64_t f = vmem_bucket_arena_free(i);
+		if (typemask & VMEM_ALLOC)
+			total_size += u;
+		if (typemask & VMEM_FREE)
+			total_size += f;
+	}
+	if (total_size < 0)
+		total_size = 0;
+
+	return((size_t) total_size);
+}
+
+static uint64_t
+spl_validate_bucket_span_size(uint64_t val)
+{
+	if (!ISP2(val)) {
+		printf("SPL: %s: WARNING %llu is not a power of two, not changing.\n",
+		    __func__, val);
+		return (0);
+	}
+	if (val < 128ULL*1024ULL || val > 16ULL*1024ULL*1024ULL) {
+		printf("SPL: %s: WARNING %llu is out of range [128k - 16M], not changing.\n",
+		    __func__, val);
+		return (0);
+	}
+	return (val);
+}
+
+static inline void
+spl_modify_bucket_span_size(int bucket, uint64_t size)
+{
+	vmem_t *bvmp = vmem_bucket_arena[bucket];
+
+	mutex_enter(&bvmp->vm_lock);
+	bvmp->vm_min_import = size;
+	mutex_exit(&bvmp->vm_lock);
+}
+
+static inline void
+spl_modify_bucket_array()
+{
+	for (int i = VMEM_BUCKET_LOWBIT; i < VMEM_BUCKET_HIBIT; i++) {
+		// i = 12, bucket = 0, contains allocs from 8192 to 16383 bytes,
+		// and should never ask xnu for < 16384 bytes, so as to avoid
+		// asking xnu for a non-power-of-two size.
+		const int bucket = i - VMEM_BUCKET_LOWBIT;
+		const uint32_t bucket_alloc_minimum_size = 1UL << (uint32_t)i;
+		const uint32_t bucket_parent_alloc_minimum_size = bucket_alloc_minimum_size * 2UL;
+
+		switch(i) {
+			// see vmem_init() below for details
+		case 16:
+		case 17:
+			spl_modify_bucket_span_size(bucket,
+			    MAX(spl_bucket_tunable_small_span, bucket_parent_alloc_minimum_size));
+			break;
+		default:
+			spl_modify_bucket_span_size(bucket,
+			    MAX(spl_bucket_tunable_large_span, bucket_parent_alloc_minimum_size));
+			break;
+		}
+	}
+}
+
+static inline void
+spl_printf_bucket_span_sizes(void)
+{
+	// this doesn't have to be super-exact
+	printf("SPL: %s: ", __func__);
+	for (int i = VMEM_BUCKET_LOWBIT; i < VMEM_BUCKET_HIBIT; i++) {
+		int bnum = i - VMEM_BUCKET_LOWBIT;
+		vmem_t *bvmp = vmem_bucket_arena[bnum];
+		printf("%llu ", (uint64_t)bvmp->vm_min_import);
+	}
+	printf("\n");
+}
+
+static inline void
+spl_set_bucket_spans(uint64_t l, uint64_t s)
+{
+	if (spl_validate_bucket_span_size(l) &&
+	    spl_validate_bucket_span_size(s)) {
+		atomic_swap_64(&spl_bucket_tunable_large_span, l);
+		atomic_swap_64(&spl_bucket_tunable_small_span, s);
+		spl_modify_bucket_array();
+	}
+}
+
+void
+spl_set_bucket_tunable_large_span(uint64_t size)
+{
+	uint64_t s = 0;
+
+	mutex_enter(&vmem_xnu_alloc_free_lock);
+	atomic_swap_64(&s, spl_bucket_tunable_small_span);
+	spl_set_bucket_spans(size, s);
+	mutex_exit(&vmem_xnu_alloc_free_lock);
+
+	spl_printf_bucket_span_sizes();
+}
+
+void
+spl_set_bucket_tunable_small_span(uint64_t size)
+{
+	uint64_t l = 0;
+
+	mutex_enter(&vmem_xnu_alloc_free_lock);
+	atomic_swap_64(&l, spl_bucket_tunable_large_span);
+	spl_set_bucket_spans(l, size);
+	mutex_exit(&vmem_xnu_alloc_free_lock);
+
+	spl_printf_bucket_span_sizes();
+}
+
+static void *
+spl_vmem_default_alloc(vmem_t *vmp, size_t size, int vmflags)
+{
+	extern void *osif_malloc(uint64_t);
+	return(osif_malloc(size));
+}
+
+static void
+spl_vmem_default_free(vmem_t *vmp, void *vaddr, size_t size)
+{
+	extern void osif_free(void *, uint64_t);
+	osif_free(vaddr, size);
+}
+
 vmem_t *
 vmem_init(const char *heap_name,
 		  void *heap_start, size_t heap_size, size_t heap_quantum,
@@ -1822,48 +2830,209 @@ vmem_init(const char *heap_name,
 	mutex_init(&vmem_pushpage_lock, "vmem_pushpage_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&vmem_panic_lock, "vmem_panic_lock", MUTEX_DEFAULT, NULL);
 
+	mutex_init(&vmem_xnu_alloc_free_lock, "vmem_xnu_alloc_free_lock", MUTEX_DEFAULT, NULL);
+	cv_init(&vmem_xnu_alloc_free_cv, "vmem_xnu_alloc_free_cv", CV_DEFAULT, NULL);
+
 	while (--nseg >= 0)
 		vmem_putseg_global(&vmem_seg0[nseg]);
 
-	heap = vmem_create(heap_name,
-					   heap_start, heap_size, heap_quantum,
-					   NULL, NULL, NULL, 0,
-					   VM_SLEEP | VMC_POPULATOR);
+	/*
+	 * On OSX we ultimately have to use the OS allocator
+	 * as the ource and sink of memory as it is allocated
+	 * and freed.
+	 *
+	 * The spl_root_arena_parent is needed in order to provide a
+	 * base arena with an always-NULL afunc and ffunc in order to
+	 * end the searches done by vmem_[x]alloc and vm_xfree; it
+	 * serves no other purpose; its stats will always be zero.
+	 *
+	 */
 
-	vmem_metadata_arena = vmem_create("vmem_metadata",
-									  NULL, 0, heap_quantum,
-									  vmem_alloc, vmem_free, heap, 8 * heap_quantum,
-									  VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
+	spl_default_arena_parent = vmem_create("spl_default_arena_parent",  // id 0
+	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP);
 
-	vmem_seg_arena = vmem_create("vmem_seg",
-								 NULL, 0, heap_quantum,
-								 heap_alloc, heap_free, vmem_metadata_arena, 0,
-								 VM_SLEEP | VMC_POPULATOR);
+	// illumos/openzfs has a gigantic pile of memory that it can use for its first arena;
+	// o3x is not so lucky, so we start with this
 
-	vmem_hash_arena = vmem_create("vmem_hash",
-								  NULL, 0, 8,
-								  heap_alloc, heap_free, vmem_metadata_arena, 0,
-								  VM_SLEEP);
+	static char initial_default_block[16ULL*1024ULL*1024ULL] __attribute__((aligned(4096))) = { 0 };
 
-	vmem_vmem_arena = vmem_create("vmem_vmem",
-								  vmem0, sizeof (vmem0), 1,
-								  heap_alloc, heap_free, vmem_metadata_arena, 0,
-								  VM_SLEEP);
+	// The default arena is very low-bandwidth; it supplies the initial large
+	// allocation for the heap arena below, and it serves as the parent of the
+	// vmem_metadata arena.   It will typically do only 2 or 3 parent_alloc calls
+	// (to spl_vmem_default_alloc) in total.
 
-	// 5 vmem_create before this line.
-	for (id = 0; id < vmem_id; id++) {
-		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
-									   1, 0, 0, &vmem0[id], &vmem0[id + 1],
-										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
+	spl_default_arena = vmem_create("spl_default_arena", // id 1
+	    initial_default_block, 16ULL*1024ULL*1024ULL,
+	    heap_quantum, spl_vmem_default_alloc, spl_vmem_default_free,
+	    spl_default_arena_parent, 16ULL*1024ULL*1024ULL, VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
+
+	// The bucket arenas satisfy allocations & frees from the bucket heap
+	// that are dispatched to the bucket whose power-of-two label is the
+	// smallest allocation that vmem_bucket_allocate will ask for.
+	//
+	// The bucket arenas in turn exchange memory with XNU's allocator/freer in
+	// large spans (> 1MiB).
+	//
+	// Segregating by size constrains internal fragmentation within the bucket and
+	// provides kstat.vmem visiblity and span-size policy to be applied to particular
+	// buckets (notably the 128k one).
+	//
+	// For VMEM_BUCKET_HIBIT == 12,
+	// vmem_bucket_arena[n] holds allocations from 2^[n+11]+1 to  2^[n+12],
+	// so for [n] = 0, 2049-4096, for [n]=5 65537-131072, for [n]=7 (256k+1)-512k
+	//
+	// so "kstat.vmvm.vmem.bucket_1048576" should be read as the bucket arena containing
+	// allocations 1 MiB and smaller, but larger than 512 kiB.
+
+	// create arenas for the VMEM_BUCKETS, id 2 - id 14
+	for (int32_t i = VMEM_BUCKET_LOWBIT; i <= VMEM_BUCKET_HIBIT; i++) {
+		const uint64_t bucket_largest_size = (1ULL << (uint64_t)i);
+		char *buf = vmem_alloc(spl_default_arena, VMEM_NAMELEN + 21, VM_SLEEP);
+		(void) snprintf(buf, VMEM_NAMELEN + 20, "%s_%llu",
+		    "bucket", bucket_largest_size);
+		printf("SPL: %s creating arena %s (i == %d)\n", __func__, buf, i);
+		extern uint64_t real_total_memory;
+		if (real_total_memory > 0) {
+			// adjust minimum bucket span size for memory size
+			// we do not want to be smaller than 1 MiB
+			const uint64_t k = 1024ULL;
+			const uint64_t m = 1024ULL* k;
+			const uint64_t b = MAX(real_total_memory / (k * 16ULL), m);
+			const uint64_t s = MAX(b / 2ULL, m);
+			spl_bucket_tunable_large_span = MIN(b, 16ULL * m);
+			spl_bucket_tunable_small_span = s;
+			printf("SPL: %s: real_total_memory %llu, large spans %llu, small spans %llu\n",
+			    __func__, real_total_memory,
+			    spl_bucket_tunable_large_span, spl_bucket_tunable_small_span);
+		}
+		size_t minimum_allocsize = 0;
+		switch (i) {
+		case 16:
+		case 17:
+			// The 128k bucket will generally be the most fragmented of all
+			// because it is one step larger than the maximum qcache size
+			// and is a popular size for the zio data and metadata arenas,
+			// with a small amount of va heap use.
+			//
+			// These static factors and the dynamism of a busy zfs system lead
+			// to interleaving 128k allocations with very different lifespans
+			// into the same xnu allocation, and at 16MiB this tends to
+			// leads to substantial (~ 1/2 GiB) waste.   That does not seem
+			// like much memory for most sytems, but it tends to represent holding
+			// ~ 4x more memory than the ideal case of 0 waste, thus the division by
+			// four of minimum_allocate compared to the 16 MiB default.   Additionally,
+			// this interleaving makes it harder to shrink the overall SPL memory
+			// use when memory is cruicially low.
+			//
+			// The trade off here is contributing to the fragmentation of
+			// the xnu freelist, so the step-down should not be even smaller.
+			//
+			// The 64k bucket is typically very low bandwidth and often holds just
+			// one or two spans thanks to qcaching so does not need to be large.
+			minimum_allocsize = MAX(spl_bucket_tunable_small_span,
+			    bucket_largest_size * 4);
+			break;
+		default:
+			// 16 MiB has proven to be a decent choice, with surprisingly
+			// little waste.   The greatest waste has in practice been in
+			// the 128k bucket (see above), the 256k bucket under unusual
+			// circumstances (although this is much  smaller as a percentage,
+			// and in particular less than 1/2, so a step change to 8 MiB would
+			// not be very worthwhile), the 64k bucket (see above), and the
+			// 2 MiB bucket (which will typically occupy only one span anyway).
+			minimum_allocsize = MAX(spl_bucket_tunable_large_span,
+			    bucket_largest_size * 4);
+			break;
+		}
+		printf("SPL: %s setting bucket %d (%d) to size %llu\n",
+		    __func__, i, (int)(1 << i), (uint64_t)minimum_allocsize);
+		const int bucket_number = i - VMEM_BUCKET_LOWBIT;
+		vmem_t *b = vmem_create(buf, NULL, 0, heap_quantum,
+		    xnu_alloc_throttled, xnu_free_throttled, spl_default_arena_parent,
+		    minimum_allocsize, VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
+		vmem_bucket_arena[bucket_number] = b;
+		vmem_bucket_id_to_bucket_number[b->vm_id] = bucket_number;
 	}
 
+	// spl_heap_arena, the bucket heap, is the primary interface to the vmem system
+
+	// all arenas not rooted to vmem_metadata will be rooted to spl_heap arena.
+
+	spl_heap_arena = vmem_create("bucket_heap", // id 15
+	    NULL, 0, heap_quantum,
+	    vmem_bucket_alloc, vmem_bucket_free, spl_default_arena_parent, 0,
+	    VM_SLEEP);
+
+	// add a fixed-sized allocation to spl_heap_arena; this reduces the
+	// need to talk to the bucket arenas by a substantial margin
+	// (kstat.vmem.vmem.bucket_heap.{alloc+free} is much greater than
+	// kstat.vmem.vmem.bucket_heap.parent_{alloc+free}, and improves with
+	// increasing initial fixed allocation size.
+
+	const size_t mib = 1024ULL * 1024ULL;
+	const size_t gib = 1024ULL * mib;
+	size_t resv_size = 128ULL * mib;
+	extern uint64_t real_total_memory;
+
+	if (real_total_memory >= 4ULL * gib)
+		resv_size = 256ULL * mib;
+	if (real_total_memory >= 8ULL * gib)
+		resv_size = 512ULL * mib;
+	if (real_total_memory >= 16ULL * gib)
+		resv_size = gib;
+
+	printf("SPL: %s adding fixed allocation of %llu to the bucket_heap\n",
+	    __func__, (uint64_t)resv_size);
+
+	spl_heap_arena_initial_alloc =  vmem_add(spl_heap_arena,
+	    vmem_alloc(spl_default_arena, resv_size, VM_SLEEP),
+	    resv_size, VM_SLEEP);
+
+	spl_heap_arena_initial_alloc_size = resv_size;
+
+	// kstat.vmem.vmem.heap : kmem_cache_alloc() and similar calls
+	// to handle in-memory datastructures other than arc and zio buffers.
+
+	heap = vmem_create(heap_name,  // id 16
+	    NULL, 0, heap_quantum,
+	    vmem_alloc, vmem_free, spl_heap_arena, 0,
+	    VM_SLEEP);
+
+	// Root all the low bandwidth metadata arenas to the default arena.
+	// The vmem_metadata allocations will all be 32 kiB or larger,
+	// and the total allocation will generally cap off around 24 MiB.
+
+	vmem_metadata_arena = vmem_create("vmem_metadata", // id 17
+	    NULL, 0, heap_quantum, vmem_alloc, vmem_free, spl_default_arena,
+	    8 * PAGESIZE, VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
+
+	vmem_seg_arena = vmem_create("vmem_seg", // id 18
+								 NULL, 0, heap_quantum,
+								 vmem_alloc, vmem_free, vmem_metadata_arena, 0,
+								 VM_SLEEP | VMC_POPULATOR);
+
+	vmem_hash_arena = vmem_create("vmem_hash", // id 19
+								  NULL, 0, 8,
+								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
+								  VM_SLEEP);
+
+	vmem_vmem_arena = vmem_create("vmem_vmem", // id 20
+								  vmem0, sizeof (vmem0), 1,
+								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
+								  VM_SLEEP);
+
+	// 21 (0-based) vmem_create before this line. - macroized NUMBER_OF_ARENAS_IN_VMEM_INIT
+	for (id = 0; id < vmem_id; id++) {
+	  (void) vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
+			     1, 0, 0, &vmem0[id], &vmem0[id + 1],
+			     VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
+	}
+
+	printf("SPL: starting vmem_update() thread\n");
 	vmem_update(NULL);
 
 	return (heap);
 }
-
-
-extern void segkmem_free(vmem_t *vmp, void *inaddr, size_t size);
 
 struct free_slab {
 	vmem_t *vmp;
@@ -1885,53 +3054,186 @@ static void vmem_fini_freelist(void *vmp, void *start, size_t size)
 	list_insert_tail(&freelist, fs);
 }
 
-
-void vmem_fini(vmem_t *heap)
+static void vmem_fini_void(void *vmp, void *start, size_t size)
 {
-	uint32_t id;
+	return;
+}
+
+void
+vmem_fini(vmem_t *heap)
+{
 	struct free_slab *fs;
 	uint64_t total;
 
 	bsd_untimeout(vmem_update, NULL);
+
+	printf("SPL: %s: stopped vmem_update.  Creating list and walking arenas.\n", __func__);
 
 	/* Create a list of slabs to free by walking the list of allocs */
 	list_create(&freelist, sizeof (struct free_slab),
 				offsetof(struct free_slab, next));
 
 	/* Walk to list of allocations */
+
+	// walking with VMEM_REENTRANT causes segment consolidation and freeing of spans
+	// the freelist contains a list of segments that are still allocated
+	// at the time of the walk; unfortunately the lists cannot be exact without
+	// complex multiple passes, locking,  and a more complex vmem_fini_freelist().
+	//
+	// Walking withoutu VMEM_REENTRANT can produce a nearly-exact list of unfreed
+	// spans, which Illumos would then free directly after the list is complete.
+	//
+	// Unfortunately in O3X, that lack of exactness can lead to a panic
+	// caused by attempting to free to xnu memory that we already freed to xnu.
+	// Fortunately, we can get a sense of what would have been destroyed
+	// after the (non-reentrant) walking, and we printf that at the end of this function.
+
+	// Walk all still-alive arenas from leaves to the root
+
+	vmem_walk(heap, VMEM_ALLOC | VMEM_REENTRANT, vmem_fini_void, heap);
+
+	vmem_walk(heap, VMEM_ALLOC, vmem_fini_freelist, heap);
+
+	printf("\nSPL: %s destroying heap\n", __func__);
+ 	vmem_destroy(heap); // PARENT: spl_heap_arena
+
+	printf("SPL: %s: walking spl_heap_arena, aka bucket_heap (pass 1)\n", __func__);
+
+	vmem_walk(spl_heap_arena, VMEM_ALLOC | VMEM_REENTRANT, vmem_fini_void, spl_heap_arena);
+
+	printf("SPL: %s: calling vmem_xfree(spl_default_arena, ptr, %llu);\n",
+	    __func__, (uint64_t)spl_heap_arena_initial_alloc_size);
+
+	// forcibly remove the initial alloc from spl_heap_arena arena, whether
+	// or not it is empty.  below this point, any activity on spl_default_arena
+	// other than a non-reentrant(!) walk and a destroy is unsafe (UAF or MAF).
+
+	// However, all the children of spl_heap_arena should now be destroyed.
+
+	vmem_xfree(spl_default_arena, spl_heap_arena_initial_alloc,
+	    spl_heap_arena_initial_alloc_size);
+
+	printf("SPL: %s: walking spl_heap_arena, aka bucket_heap (pass 2)\n", __func__);
+
+	vmem_walk(spl_heap_arena, VMEM_ALLOC, vmem_fini_freelist, spl_heap_arena);
+
+	printf("SPL: %s: walking bucket arenas...\n", __func__);
+
+	for (int i = VMEM_BUCKET_LOWBIT; i <= VMEM_BUCKET_HIBIT; i++) {
+		const int bucket = i - VMEM_BUCKET_LOWBIT;
+		vmem_walk(vmem_bucket_arena[bucket], VMEM_ALLOC | VMEM_REENTRANT,
+		    vmem_fini_void, vmem_bucket_arena[bucket]);
+
+		vmem_walk(vmem_bucket_arena[bucket], VMEM_ALLOC,
+		    vmem_fini_freelist, vmem_bucket_arena[bucket]);
+	}
+
+	printf("SPL: %s: walking vmem metadata-related arenas...\n", __func__);
+
+	vmem_walk(vmem_vmem_arena, VMEM_ALLOC | VMEM_REENTRANT,
+	    vmem_fini_void, vmem_vmem_arena);
+
+	vmem_walk(vmem_vmem_arena, VMEM_ALLOC,
+	    vmem_fini_freelist, vmem_vmem_arena);
+
+	// We should not do VMEM_REENTRANT on vmem_seg_arena or vmem_hash_arena or below
+	// to avoid causing work in vmem_seg_arena and vmem_hash_arena.
+
 	vmem_walk(vmem_seg_arena, VMEM_ALLOC,
 			  vmem_fini_freelist, vmem_seg_arena);
 
-	vmem_walk(heap, VMEM_ALLOC,
-			  vmem_fini_freelist, heap);
+	vmem_walk(vmem_hash_arena, VMEM_ALLOC,
+			  vmem_fini_freelist, vmem_hash_arena);
 
-	for (id = 0; id < 5; id++) {// From vmem_init, 5 vmem_create
-		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
+	vmem_walk(vmem_metadata_arena, VMEM_ALLOC,
+	    vmem_fini_freelist, vmem_metadata_arena);
+
+	printf("SPL: %s walking the root arena (spl_default_arena)...\n", __func__);
+
+	vmem_walk(spl_default_arena, VMEM_ALLOC,
+	    vmem_fini_freelist, spl_default_arena);
+
+	printf("SPL: %s destroying bucket heap\n", __func__);
+	vmem_destroy(spl_heap_arena); // PARENT: spl_default_arena_parent (but depends on buckets)
+
+	printf("SPL: %s destroying spl_bucket_arenas...", __func__);
+	for (int32_t i = VMEM_BUCKET_LOWBIT; i <= VMEM_BUCKET_HIBIT; i++) {
+		vmem_t *vmpt = vmem_bucket_arena[i - VMEM_BUCKET_LOWBIT];
+		printf(" %llu", (1ULL << i));
+		vmem_destroy(vmpt); // parent: spl_default_arena_parent
 	}
+	printf("\n");
 
-	vmem_destroy_internal(vmem_vmem_arena);
-	vmem_destroy_internal(vmem_hash_arena);
-	//vmem_destroy_internal(vmem_seg_arena);
-	vmem_destroy_internal(vmem_metadata_arena);
-	vmem_destroy_internal(heap);
+	// destroying the vmem_vmem arena and any arena afterwards
+	// requires the use of vmem_destroy_internal(), which does
+	// not talk to vmem_vmem_arena like vmem_destroy() does.
+	printf("SPL: %s destroying vmem_vmem_arena\n", __func__);
+	vmem_destroy_internal(vmem_vmem_arena); // parent: vmem_metadata_arena
+
+	// destroying the seg arena means we must no longer
+	// talk to vmem_populate()
+	printf("SPL: %s destroying vmem_seg_arena\n", __func__);
+	vmem_destroy_internal(vmem_seg_arena); // parent: vmem_metadata_arena
+
+        // vmem_hash_arena may be freed-to in vmem_destroy_internal()
+	// so it should be just before the vmem_metadata_arena.
+	printf("SPL: %s destroying vmem_hash_arena\n", __func__);
+	vmem_destroy_internal(vmem_hash_arena); // parent: vmem_metadata_arena
+	vmem_hash_arena = NULL;
+
+	// XXX: if we panic on unload below here due to destroyed mutex, vmem_init()
+	//      will need some reworking (e.g. have vmem_metadata_arena talk directly
+	//      to xnu), or alternatively a vmem_destroy_internal_internal()
+	//      function that does not touch vmem_hash_arena will need writing.
+
+	printf("SPL: %s destroying vmem_metadata_arena\n", __func__);
+	vmem_destroy_internal(vmem_metadata_arena); // parent: spl_default_arena
+
+	printf("\nSPL: %s destroying spl_default_arena\n", __func__);
+	vmem_destroy_internal(spl_default_arena); // parent: spl_default_arena_parent
+
+	printf("SPL: %s destroying spl_default_arena_parent\n", __func__);
+	vmem_destroy_internal(spl_default_arena_parent); // parent: NONE
+
+	printf("SPL: arenas removed, now try destroying mutexes... ");
+
+	printf("vmem_xnu_alloc_free_lock ");
+	mutex_destroy(&vmem_xnu_alloc_free_lock);
+	printf("vmem_panic_lock ");
+	mutex_destroy(&vmem_panic_lock);
+	printf("vmem_pushpage_lock ");
+	mutex_destroy(&vmem_pushpage_lock);
+	printf("vmem_nosleep_lock ");
+	mutex_destroy(&vmem_nosleep_lock);
+	printf("vmem_sleep_lock ");
+	mutex_destroy(&vmem_sleep_lock);
+	printf("vmem_segfree_lock ");
+	mutex_destroy(&vmem_segfree_lock);
+	printf("vmem_list_lock ");
+	mutex_destroy(&vmem_list_lock);
+
+	printf("\nSPL: %s: walking list of live slabs at time of call to %s\n",
+	       __func__, __func__);
+
+	// annoyingly, some of these should be returned to xnu, but
+	// we have no idea which have already been freed to xnu, and
+	// freeing a second time results in a panic.
 
 	/* Now release the list of allocs to built above */
 	total = 0;
+	uint64_t total_count = 0;
 	while((fs = list_head(&freelist))) {
+	        total_count++;
 		total+=fs->slabsize;
 		list_remove(&freelist, fs);
-		segkmem_free(fs->vmp, fs->slab, fs->slabsize);
+		//extern void segkmem_free(vmem_t *, void *, size_t);
+		//segkmem_free(fs->vmp, fs->slab, fs->slabsize);
 		FREE(fs, M_TEMP);
 	}
-	printf("SPL: Released %llu bytes from vmem_seg_arena\n", total);
+	printf("SPL: WOULD HAVE released %llu bytes (%llu spans) from arenas\n",
+	       total, total_count);
 	list_destroy(&freelist);
-
-#if 0 // Don't release, panics
-	mutex_destroy(&vmem_panic_lock);
-	mutex_destroy(&vmem_pushpage_lock);
-	mutex_destroy(&vmem_nosleep_lock);
-	mutex_destroy(&vmem_sleep_lock);
-	mutex_destroy(&vmem_segfree_lock);
-	mutex_destroy(&vmem_list_lock);
-#endif
+	printf("SPL: %s: Brief delay for readability...\n", __func__);
+	delay(hz);
+	printf("SPL: %s: done!\n", __func__);
 }

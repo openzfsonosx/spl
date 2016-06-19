@@ -85,6 +85,7 @@ extern uint64_t physmem;
   int64_t spl_free_manual_pressure_wrapper(void);
   boolean_t spl_free_fast_pressure_wrapper(void);
   void spl_free_set_pressure(int64_t);
+	void spl_free_set_fast_pressure(boolean_t);
 
 #define KMC_NOTOUCH     0x00010000
 #define KMC_NODEBUG     0x00020000
@@ -131,6 +132,7 @@ extern uint64_t physmem;
     char *kmem_asprintf(const char *fmt, ...);
     void strfree(char *str);
     char *kmem_vasprintf(const char *fmt, va_list ap);
+	char *kmem_strstr(const char *in, const char *str);
 	void strident_canon(char *s, size_t n);
 
 

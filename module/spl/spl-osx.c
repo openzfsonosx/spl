@@ -41,7 +41,7 @@
 
 #include <kern/processor.h>
 
-//#define DEBUG 1
+#define DEBUG 1  // for backtrace debugging info 
 
 struct utsname utsname = { { 0 } };
 
@@ -410,7 +410,7 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 	 * the OS X allocator. We internally add pressure if we step over it
 	 */
     real_total_memory = total_memory;
-	total_memory = total_memory * 80ULL / 100ULL;
+    total_memory = total_memory * 50ULL / 100ULL; // smd: experiment with 50%, 8GiB
     physmem = total_memory / PAGE_SIZE;
 
     len = sizeof(utsname.sysname);
