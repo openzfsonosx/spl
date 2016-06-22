@@ -73,11 +73,8 @@ thread_issignal(struct proc *, thread_t, sigset_t);
 static __inline__ int
 issig(int why)
 {
-    if (why == JUSTLOOKING)
-        return (1);
-    else
-        return (thread_issignal(current_proc(), current_thread(),
-                                threadmask));
+	return (thread_issignal(current_proc(), current_thread(),
+							threadmask));
 }
 
 #endif /* SPL_SIGNAL_H */
