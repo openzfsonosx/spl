@@ -621,8 +621,8 @@ secpolicy_vnode_setattr(cred_t *cr, vnode_t *vp, struct vattr *vap,
 }
 #elif defined(__APPLE__)
 int
-secpolicy_vnode_setattr(cred_t *cr, struct vnode *vp, struct vattr *vap,
-        const struct vattr *ovap, int flags,
+secpolicy_vnode_setattr(cred_t *cr, struct vnode *vp, vattr_t *vap,
+        const vattr_t *ovap, int flags,
         int unlocked_access(void *, int, cred_t *),
         void *node)
 {
@@ -764,7 +764,7 @@ secpolicy_setid_setsticky_clear(vnode_t *vp, struct vattr *vap,
 }
 #elif defined(__APPLE__)
 int
-secpolicy_setid_setsticky_clear(vnode_t *vp, struct vattr *vap, const struct vattr *ovap,
+secpolicy_setid_setsticky_clear(vnode_t *vp, vattr_t *vap, const vattr_t *ovap,
     cred_t *cr)
 {
 	// FIXME
@@ -806,13 +806,13 @@ int secpolicy_vnode_setid_retain( struct vnode *vp, const cred_t *cr,
 	return (0);
 }
 
-int secpolicy_xvattr(struct vnode *dvp, struct vattr *vap, uid_t uid,
+int secpolicy_xvattr(struct vnode *dvp, vattr_t *vap, uid_t uid,
                      const cred_t *cr, enum vtype ty)
 {
 	return (0);
 }
 
-int secpolicy_setid_clear(struct vattr *vap, struct vnode *vp,
+int secpolicy_setid_clear(vattr_t *vap, struct vnode *vp,
                           const cred_t *cr)
 {
 	return (0);
