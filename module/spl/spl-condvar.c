@@ -160,7 +160,8 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
 	}
 
     if (ts.tv_nsec > 400L * NSEC_PER_SEC) {
-        printf("cv_timedwait_hires: will wait %llus -> forced to 5s\n", ts.tv_nsec/NSEC_PER_SEC);
+        printf("cv_timedwait_hires: will wait %llus -> forced to 5s\n",
+			   (uint64_t)ts.tv_nsec/NSEC_PER_SEC);
 		ts.tv_nsec = 5 * NSEC_PER_SEC;
 	}
 
