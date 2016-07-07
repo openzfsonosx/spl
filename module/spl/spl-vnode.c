@@ -581,6 +581,7 @@ int	spl_vfs_get_notify_attributes(struct vnode_attr *vap)
 }
 
 
+#if ZFS_BOOT
 extern struct vfstable *vfsconf;
 struct vfstable {
         void *vfc_vfsops;     /* filesystem operations vector */
@@ -598,6 +599,13 @@ struct vfstable {
         void     *vfc_sysctl;    /* dynamically registered sysctl node */
 };
 
+
+/*
+ * Hijacking vfc_mountroot require us to match the structures to each
+ * XNU release, so it is not enabled by default. Compile with
+ * --enable-boot
+ * It would be super if Apple would let us set mountroot.
+ */
 void spl_hijack_mountroot(void *func)
 {
 	struct vfstable *vfsp;
@@ -606,14 +614,12 @@ void spl_hijack_mountroot(void *func)
 
 	/* HIJACK the vfs_mountroot() call to call us instead. */
 	for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next) {
-		printf("SPL: '%s' %p\n", vfsp->vfc_name, vfsp->vfc_mountroot);
 		if ((vfsp->vfc_name[0] == 'z') &&
 			(vfsp->vfc_name[1] == 'f') &&
 			(vfsp->vfc_name[2] == 's')) {
 			vfsp->vfc_mountroot = func;
-			printf("SPL: vfc_mountroot set to %p\n", func);
-		} else
-			vfsp->vfc_mountroot = NULL;
+			printf("SPL: zfs->vfc_mountroot set to %p\n", func);
+		}
 	}
 }
 
@@ -622,6 +628,7 @@ void spl_setrootvnode(struct vnode *vp)
 {
 	rootvnode = vp;
 }
+#endif /* ZFS_BOOT */
 
 /* Root directory vnode for the system a.k.a. '/' */
 /* Must use vfs_rootvnode() to acquire a reference, and
@@ -630,7 +637,9 @@ void spl_setrootvnode(struct vnode *vp)
 struct vnode *
 getrootdir(void)
 {
+#if ZFS_BOOT
 	if (!rootvnode) return NULL;
+#endif
 	struct vnode *rvnode = vfs_rootvnode();
 	if (rvnode)
 		vnode_put(rvnode);

@@ -82,6 +82,7 @@ spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	@cp -f KernelExports/KernelExports spl.kext/Contents/PlugIns/KernelExports.kext/
 	cp -f KernelExports/Info.plist spl.kext/Contents/PlugIns/KernelExports.kext/
 	/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier net.lundman.kernel.dependencies.$(SPL_KERNEL_DEPENDENCIES)" spl.kext/Contents/PlugIns/KernelExports.kext/Info.plist
+	if [ "0$(ZFS_BOOT)" -eq 1 ]; then /usr/libexec/PlistBuddy -c "Add :OSBundleRequired string Root" spl.kext/Contents/Info.plist; fi
 	cp -f KernelExports/version.plist spl.kext/Contents/PlugIns/KernelExports.kext/
 	mkdir -p KernelExports.kext
 	cp -f spl.kext/Contents/PlugIns/KernelExports.kext/KernelExports KernelExports.kext/
