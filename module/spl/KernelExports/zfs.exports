@@ -27,8 +27,5 @@ _VNOP_LOOKUP
 _vnode_notify
 _vfs_get_notify_attributes
 _kauth_cred_getgroups
-_current_debugger
-_kdp_init
-_max_mem
 _vfsconf
 _rootvnode
