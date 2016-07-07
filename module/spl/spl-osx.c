@@ -41,7 +41,7 @@
 
 #include <kern/processor.h>
 
-//#define DEBUG 1
+#define DEBUG 1  // for backtrace debugging info 
 
 struct utsname utsname = { { 0 } };
 
