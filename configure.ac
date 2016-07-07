@@ -55,6 +55,8 @@ SPL_AC_CONFIG
 AM_CONDITIONAL([CONFIG_KERNEL], [ true ])
 AM_CONDITIONAL([CONFIG_USER], [ true ])
 
+ZFS_AC_BOOT
+
 AC_CONFIG_FILES([
 	Makefile
 	module/Makefile
