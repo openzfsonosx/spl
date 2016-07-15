@@ -38,7 +38,7 @@ AC_DEFUN([SPL_AC_META], [
 		if git rev-parse --git-dir > /dev/null 2>&1; then
 			_match="${SPL_META_NAME}-${SPL_META_VERSION}*"
 			_alias=$(git describe --match=${_match} 2>/dev/null)
-			_release=$(echo ${_alias}|cut -f3- -d'-'|sed 's/-/_/g')
+			_release=$(echo ${_alias}|cut -f3- -d'-')
 			if test -n "${_release}"; then
 				SPL_META_RELEASE=${_release}
 				_spl_ac_meta_type="git describe"
