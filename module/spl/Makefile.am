@@ -87,6 +87,7 @@ spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	mkdir -p KernelExports.kext
 	cp -f spl.kext/Contents/PlugIns/KernelExports.kext/KernelExports KernelExports.kext/
 	cp -f spl.kext/Contents/PlugIns/KernelExports.kext/Info.plist  KernelExports.kext/
+	if [ "0$(ZFS_BOOT)" -eq 1 ]; then /usr/libexec/PlistBuddy -c "Add :OSBundleRequired string Root" spl.kext/Contents/PlugIns/KernelExports.kext/Info.plist; fi
 	@kextlibs -undef-symbols -xml spl.kext/ || echo "Ignoring errors.."
 
 install-exec-local: spl.kext
