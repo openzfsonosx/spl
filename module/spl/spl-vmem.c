@@ -327,6 +327,7 @@ static vmem_t *vmem_metadata_arena;
 static vmem_t *vmem_seg_arena;
 static vmem_t *vmem_hash_arena;
 static vmem_t *vmem_vmem_arena;
+static vmem_t *heap_parent; // This is a proxy arena that is a thin wrapper around the OS allocator
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
@@ -1815,7 +1816,6 @@ vmem_init(const char *heap_name,
 {
 	uint32_t id;
 	int nseg = VMEM_SEG_INITIAL;
-	vmem_t *heap_parent;
 	vmem_t *heap;
 
 	// XNU mutexes need initialisation
@@ -1846,8 +1846,8 @@ vmem_init(const char *heap_name,
 	 */
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
-					   NULL, NULL, NULL, 0,
-					   VM_SLEEP);
+							  NULL, NULL, NULL, 0,
+							  VM_SLEEP);
 	
 	heap = vmem_create(heap_name,
 					   NULL, 0, heap_quantum,
@@ -1855,9 +1855,12 @@ vmem_init(const char *heap_name,
 					   VM_SLEEP | VMC_POPULATOR);
 	
 
+	// Root all the low bandwidth metadata arenas off heap_parent,
+	// which is essentially the OS heap. This may give us some
+	// chance of cleaning up in an orderly manner.
 	vmem_metadata_arena = vmem_create("vmem_metadata",
 									  NULL, 0, heap_quantum,
-									  vmem_alloc, vmem_free, heap, 8 * PAGESIZE,
+									  heap_alloc, heap_free, heap_parent, 8 * PAGESIZE,
 									  VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
 
 	vmem_seg_arena = vmem_create("vmem_seg",
@@ -1924,7 +1927,7 @@ void vmem_fini(vmem_t *heap)
 	bsd_untimeout(vmem_update, NULL);
 
 	// FIXME - turn on cleanup again.
-#if 0
+#if 1
 	/* Create a list of slabs to free by walking the list of allocs */
 	list_create(&freelist, sizeof (struct free_slab),
 				offsetof(struct free_slab, next));
@@ -1940,11 +1943,12 @@ void vmem_fini(vmem_t *heap)
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
 	}
 
-	vmem_destroy_internal(vmem_vmem_arena);
-	vmem_destroy_internal(vmem_hash_arena);
+	//vmem_destroy_internal(vmem_vmem_arena);
+	//vmem_destroy_internal(vmem_hash_arena);
 	//vmem_destroy_internal(vmem_seg_arena);
-	vmem_destroy_internal(vmem_metadata_arena);
+	//vmem_destroy_internal(vmem_metadata_arena);
 	vmem_destroy_internal(heap);
+	vmem_destroy_internal(heap_parent);
 
 	/* Now release the list of allocs to built above */
 	total = 0;

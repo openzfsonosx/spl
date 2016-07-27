@@ -43,6 +43,7 @@
 #include <kern/sched_prim.h>
 #include <sys/callb.h>
 #include <stdbool.h>
+
 //===============================================================
 // Options
 //===============================================================
@@ -152,6 +153,9 @@ extern uint64_t            total_memory;
 extern uint64_t		real_total_memory;
 
 #define MULT 1
+
+static const char *KMEM_VA_PREFIX = "kmem_va";
+static const char *KMEM_MAGAZINE_PREFIX = "kmem_magazine_";
 
 static char kext_version[64] = SPL_META_VERSION "-" SPL_META_RELEASE SPL_DEBUG_STR;
 
@@ -1607,13 +1611,10 @@ kmem_magazine_destroy(kmem_cache_t *cp, kmem_magazine_t *mp, int nrounds)
         }
 
         kmem_slab_free(cp, buf);
-
 		kpreempt(KPREEMPT_SYNC);
-
     }
     ASSERT(KMEM_MAGAZINE_VALID(cp, mp));
     kmem_cache_free(cp->cache_magtype->mt_cache, mp);
-
 }
 
 /*
@@ -2253,6 +2254,7 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
      * Any changes to this logic should be reflected in kmem_slab_prefill()
      */
     for (;;) {
+			//printf("kmem_cache_free: loop top\n");
         /*
          * If there's a slot available in the current CPU's
          * loaded magazine, just put the object there and return.
@@ -2264,6 +2266,13 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
             return;
         }
 
+		/*
+		 * If the magazine layer is disabled, break out now.
+		 */
+		if (ccp->cc_magsize == 0) {
+			break;
+		}
+		
         /*
          * The loaded magazine is full.  If the previously loaded
          * magazine was empty, exchange them and try again.
@@ -2272,13 +2281,7 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
             kmem_cpu_reload(ccp, ccp->cc_ploaded, ccp->cc_prounds);
             continue;
         }
-
-        /*
-         * If the magazine layer is disabled, break out now.
-         */
-        if (ccp->cc_magsize == 0)
-            break;
-
+		
         if (!kmem_cpucache_magazine_alloc(ccp, cp)) {
             /*
              * We couldn't free our constructed object to the
@@ -2750,9 +2753,10 @@ kmem_cache_magazine_purge(kmem_cache_t *cp)
         ccp->cc_prounds = -1;
         ccp->cc_magsize = 0;
         mutex_exit(&ccp->cc_lock);
-
+		
         if (mp)
             kmem_magazine_destroy(cp, mp, rounds);
+		
         if (pmp)
             kmem_magazine_destroy(cp, pmp, prounds);
     }
@@ -3696,6 +3700,7 @@ kmem_cache_destroy(kmem_cache_t *cp)
 
     if (kmem_taskq != NULL)
         taskq_wait(kmem_taskq);
+	
     if (kmem_move_taskq != NULL)
         taskq_wait(kmem_move_taskq);
 
@@ -3798,6 +3803,90 @@ kmem_alloc_caches_create(const int *array, size_t count,
     ASSERT(size > maxbuf);		/* i.e. maxbuf <= max(cache_size) */
 }
 
+static void
+kmem_alloc_caches_destroy()
+{
+	kmem_cache_t *cache_to_destroy = NULL;
+	kmem_cache_t *cp = NULL;
+	
+	do {
+		cache_to_destroy = NULL;
+		
+		// Locate the first cache that has the KMC_KMEM_ALLOC flag.
+		mutex_enter(&kmem_cache_lock);
+		
+		for (cp = list_head(&kmem_caches); cp != NULL;
+			 cp = list_next(&kmem_caches, cp)) {
+			if ( cp->cache_cflags & KMC_KMEM_ALLOC) {
+				cache_to_destroy = cp;
+				break;
+			}
+		}
+		
+		mutex_exit(&kmem_cache_lock);
+		
+		// Destroy the cache
+		if (cache_to_destroy) {
+			kmem_cache_destroy(cache_to_destroy);
+		}
+		
+	} while ( cache_to_destroy );
+}
+
+// FIXME - surely we have strstr in kernel???
+static char *
+kmem_strstr(const char *in, const char *str)
+{
+	char c;
+	size_t len;
+	
+	c = *str++;
+	if (!c)
+		return (char *) in;	// Trivial empty string case
+	
+	len = strlen(str);
+	do {
+		char sc;
+		
+		do {
+			sc = *in++;
+			if (!sc)
+				return (char *) 0;
+		} while (sc != c);
+	} while (strncmp(in, str, len) != 0);
+	
+	return (char *) (in - 1);
+}
+
+static void
+kmem_destroy_cache_by_name(const char *substr)
+{
+	kmem_cache_t *cache_to_destroy = NULL;
+	kmem_cache_t *cp = NULL;
+	
+	do {
+		cache_to_destroy = NULL;
+		
+		// Locate the first cache that has the KMC_KMEM_ALLOC flag.
+		mutex_enter(&kmem_cache_lock);
+		
+		for (cp = list_head(&kmem_caches); cp != NULL;
+			 cp = list_next(&kmem_caches, cp)) {
+			if ( kmem_strstr(cp->cache_name, substr) ) {
+				cache_to_destroy = cp;
+				break;
+			}
+		}
+		
+		mutex_exit(&kmem_cache_lock);
+		
+		// Destroy the cache
+		if (cache_to_destroy) {
+			kmem_cache_destroy(cache_to_destroy);
+		}
+		
+	} while ( cache_to_destroy );
+}
 
 static void
 kmem_cache_init(int pass, int use_large_pages)
@@ -3810,7 +3899,7 @@ kmem_cache_init(int pass, int use_large_pages)
         char name[KMEM_CACHE_NAMELEN + 1];
 
         mtp = &kmem_magtype[i];
-        (void) snprintf(name, KMEM_CACHE_NAMELEN, "kmem_magazine_%d", mtp->mt_magsize);
+        (void) snprintf(name, KMEM_CACHE_NAMELEN, "%s%d", KMEM_MAGAZINE_PREFIX, mtp->mt_magsize);
         mtp->mt_cache = kmem_cache_create(name,
                                           (mtp->mt_magsize + 1) * sizeof (void *),
                                           mtp->mt_align, NULL, NULL, NULL, NULL,
@@ -3830,7 +3919,7 @@ kmem_cache_init(int pass, int use_large_pages)
                                                 kmem_msb_arena, KMC_NOHASH);
 
     if (pass == 2) {
-        kmem_va_arena = vmem_create("kmem_va",
+        kmem_va_arena = vmem_create(KMEM_VA_PREFIX,
                                     NULL, 0, PAGESIZE,
                                     vmem_alloc, vmem_free, heap_arena,
                                     8 * PAGESIZE, VM_SLEEP);
@@ -3896,8 +3985,6 @@ kmem_cache_init(int pass, int use_large_pages)
 
     kmem_big_alloc_table_max = maxbuf >> KMEM_BIG_SHIFT;
 }
-
-
 
 struct free_slab {
 	vmem_t *vmp;
@@ -3970,10 +4057,9 @@ kmem_cache_fini(int pass, int use_large_pages)
 				offsetof(struct free_slab, next));
 
     mutex_enter(&kmem_cache_lock);
-	// lund
-
 
 	while((cp = list_head(&kmem_caches))) {
+		//printf("cache:%s\n", cp->cache_name);
 			list_remove(&kmem_caches, cp);
 			mutex_exit(&kmem_cache_lock);
 			kmem_cache_build_slablist(cp);
@@ -3982,8 +4068,6 @@ kmem_cache_fini(int pass, int use_large_pages)
 
 	mutex_exit(&kmem_cache_lock);
 
-
-	//printf("Releasing slabs\n");
 	i = 0;
 	while((fs = list_head(&freelist))) {
 		i++;
@@ -3994,11 +4078,6 @@ kmem_cache_fini(int pass, int use_large_pages)
 	}
 	printf("SPL: Released %u slabs\n", i);
 	list_destroy(&freelist);
-
-	if (pass == 2) {
-		vmem_destroy(kmem_default_arena);
-		vmem_destroy(kmem_va_arena);
-	}
 }
 
 
@@ -4176,104 +4255,104 @@ spl_free_thread()
 static void
 reap_thread()
 {
-  callb_cpr_t cpr;
-  uint64_t last_reap = zfs_lbolt();
-  uint64_t previous_segkmem_total_mem_allocated = segkmem_total_mem_allocated;
-
-  CALLB_CPR_INIT(&cpr, &reap_thread_lock, callb_generic_cpr, FTAG);
-
-  mutex_enter(&reap_thread_lock);
-
-  printf("SPL: beginning reap_thread() loop\n");
-
-  while(!reap_thread_exit) {
-    mutex_exit(&reap_thread_lock);
-
-    spl_stats.spl_reap_thread_wake_count.value.ui64++;
-
-    mutex_enter(&reap_now_lock);
-    uint64_t om = segkmem_total_mem_allocated;
-    if (reap_now && spl_free_fast_pressure_wrapper() != 0) {
-      reap_now = 0;
-      mutex_exit(&reap_now_lock);
-      printf("SPL: %s: spl_fast_pressure set and reap_now set, delta %llu since %llu seconds ago\n",
-	     __func__, om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz);
-      last_reap = zfs_lbolt();
-      previous_segkmem_total_mem_allocated = om;
-      kmem_reap();
-      kmem_reap_idspace();
-      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-    } else if(om > previous_segkmem_total_mem_allocated &&
-       om > (total_memory * 90ULL / 100ULL) &&
-       zfs_lbolt() - last_reap > (hz*10)) {
-      reap_now = 0;
-      mutex_exit(&reap_now_lock);
-      printf("SPL: %s, reap_now not set but delta %llu since %llu seconds ago and high segkmem use %llu\n",
-	     __func__, om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz, om);
-      last_reap = zfs_lbolt();
-      previous_segkmem_total_mem_allocated = om;
-      kmem_reap();
-      kmem_reap_idspace();
-      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-    } else if(om > (total_memory * 90ULL / 100ULL) &&
-	      zfs_lbolt() - last_reap > (hz*60)) {
-      reap_now = 0;
-      mutex_exit(&reap_now_lock);
-      printf("SPL: %s, last reap %llu seconds ago and high segkmem use %llu\n",
-	     __func__, (zfs_lbolt() - last_reap)/hz, om);
-      last_reap = zfs_lbolt();
-      previous_segkmem_total_mem_allocated = om;
-      kmem_reap();
-      kmem_reap_idspace();
-      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-    } else if(zfs_lbolt() - last_reap > (hz*3600)) {
-      reap_now = 0;
-      mutex_exit(&reap_now_lock);
-      printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
-	     __func__, (zfs_lbolt() - last_reap)/hz, om);
-      last_reap = zfs_lbolt();
-      previous_segkmem_total_mem_allocated = om;
-      kmem_reap();
-      kmem_reap_idspace();
-      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-    } else if(reap_now && om > previous_segkmem_total_mem_allocated) {
-      reap_now = 0;
-      mutex_exit(&reap_now_lock);
-      printf("SPL: reap thread, segkmem_total_mem_allocated delta %llu since %llu seconds ago\n",
-	     om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz);
-      last_reap = zfs_lbolt();
-      previous_segkmem_total_mem_allocated = om;
-      kmem_reap();
-      kmem_reap_idspace();
-      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-    } else if(reap_now && zfs_lbolt() - last_reap > (hz*30)) {
-      reap_now = 0;
-      mutex_exit(&reap_now_lock);
-      printf("SPL: reap thread, last reap %llu seconds ago\n",
-	     (zfs_lbolt() - last_reap)/hz);
-      last_reap = zfs_lbolt();
-      previous_segkmem_total_mem_allocated = segkmem_total_mem_allocated;
-      kmem_reap();
-      kmem_reap_idspace();
-      spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-    } else {
-      reap_now = 0;
-      mutex_exit(&reap_now_lock);
-      if(previous_segkmem_total_mem_allocated > om)
-	previous_segkmem_total_mem_allocated = om;
-      spl_stats.spl_reap_thread_miss.value.ui64++;
-    }
-    mutex_enter(&reap_thread_lock);
-    CALLB_CPR_SAFE_BEGIN(&cpr);
-    (void)cv_timedwait(&reap_thread_cv, &reap_thread_lock, ddi_get_lbolt() + (10 * hz));
-    CALLB_CPR_SAFE_END(&cpr, &reap_thread_lock);
-  }
-  reap_thread_exit = FALSE;
-  printf("SPL: reap_thread_exit set to FALSE and exiting: cv_broadcasting\n");
-  cv_broadcast(&reap_thread_cv);
-  CALLB_CPR_EXIT(&cpr);
-  printf("SPL: %s thread exit\n", __func__);
-  thread_exit();
+	callb_cpr_t cpr;
+	uint64_t last_reap = zfs_lbolt();
+	uint64_t previous_segkmem_total_mem_allocated = segkmem_total_mem_allocated;
+	
+	CALLB_CPR_INIT(&cpr, &reap_thread_lock, callb_generic_cpr, FTAG);
+	
+	mutex_enter(&reap_thread_lock);
+	
+	printf("SPL: beginning reap_thread() loop\n");
+	
+	while(!reap_thread_exit) {
+		mutex_exit(&reap_thread_lock);
+		
+		spl_stats.spl_reap_thread_wake_count.value.ui64++;
+		
+		mutex_enter(&reap_now_lock);
+		uint64_t om = segkmem_total_mem_allocated;
+		if (reap_now && spl_free_fast_pressure_wrapper() != 0) {
+			reap_now = 0;
+			mutex_exit(&reap_now_lock);
+			printf("SPL: %s: spl_fast_pressure set and reap_now set, delta %llu since %llu seconds ago\n",
+				   __func__, om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz);
+			last_reap = zfs_lbolt();
+			previous_segkmem_total_mem_allocated = om;
+			kmem_reap();
+			kmem_reap_idspace();
+			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+		} else if(om > previous_segkmem_total_mem_allocated &&
+				  om > (total_memory * 90ULL / 100ULL) &&
+				  zfs_lbolt() - last_reap > (hz*10)) {
+			reap_now = 0;
+			mutex_exit(&reap_now_lock);
+			printf("SPL: %s, reap_now not set but delta %llu since %llu seconds ago and high segkmem use %llu\n",
+				   __func__, om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz, om);
+			last_reap = zfs_lbolt();
+			previous_segkmem_total_mem_allocated = om;
+			kmem_reap();
+			kmem_reap_idspace();
+			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+		} else if(om > (total_memory * 90ULL / 100ULL) &&
+				  zfs_lbolt() - last_reap > (hz*60)) {
+			reap_now = 0;
+			mutex_exit(&reap_now_lock);
+			printf("SPL: %s, last reap %llu seconds ago and high segkmem use %llu\n",
+				   __func__, (zfs_lbolt() - last_reap)/hz, om);
+			last_reap = zfs_lbolt();
+			previous_segkmem_total_mem_allocated = om;
+			kmem_reap();
+			kmem_reap_idspace();
+			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+		} else if(zfs_lbolt() - last_reap > (hz*3600)) {
+			reap_now = 0;
+			mutex_exit(&reap_now_lock);
+			printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
+				   __func__, (zfs_lbolt() - last_reap)/hz, om);
+			last_reap = zfs_lbolt();
+			previous_segkmem_total_mem_allocated = om;
+			kmem_reap();
+			kmem_reap_idspace();
+			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+		} else if(reap_now && om > previous_segkmem_total_mem_allocated) {
+			reap_now = 0;
+			mutex_exit(&reap_now_lock);
+			printf("SPL: reap thread, segkmem_total_mem_allocated delta %llu since %llu seconds ago\n",
+				   om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz);
+			last_reap = zfs_lbolt();
+			previous_segkmem_total_mem_allocated = om;
+			kmem_reap();
+			kmem_reap_idspace();
+			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+		} else if(reap_now && zfs_lbolt() - last_reap > (hz*30)) {
+			reap_now = 0;
+			mutex_exit(&reap_now_lock);
+			printf("SPL: reap thread, last reap %llu seconds ago\n",
+				   (zfs_lbolt() - last_reap)/hz);
+			last_reap = zfs_lbolt();
+			previous_segkmem_total_mem_allocated = segkmem_total_mem_allocated;
+			kmem_reap();
+			kmem_reap_idspace();
+			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
+		} else {
+			reap_now = 0;
+			mutex_exit(&reap_now_lock);
+			if(previous_segkmem_total_mem_allocated > om)
+				previous_segkmem_total_mem_allocated = om;
+			spl_stats.spl_reap_thread_miss.value.ui64++;
+		}
+		mutex_enter(&reap_thread_lock);
+		CALLB_CPR_SAFE_BEGIN(&cpr);
+		(void)cv_timedwait(&reap_thread_cv, &reap_thread_lock, ddi_get_lbolt() + (10 * hz));
+		CALLB_CPR_SAFE_END(&cpr, &reap_thread_lock);
+	}
+	reap_thread_exit = FALSE;
+	printf("SPL: reap_thread_exit set to FALSE and exiting: cv_broadcasting\n");
+	cv_broadcast(&reap_thread_cv);
+	CALLB_CPR_EXIT(&cpr);
+	printf("SPL: %s thread exit\n", __func__);
+	thread_exit();
 }
 
 static void
@@ -4291,57 +4370,57 @@ spl_mach_pressure_monitor_thread()
 
   printf("SPL: beginning %s\n", __func__);
 
-  while(!spl_mach_pressure_monitor_thread_exit) {
-    mutex_exit(&spl_mach_pressure_monitor_thread_lock);
-
-    dprintf("SPL: %s calling mach_vm_pressure_monitor - may block for some time\n", __func__);
-
-    kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
-				  &pages_reclaimed, &os_num_pages_wanted);
-
-    dprintf("SPL: %s back from mach_vm_pressure_montor - unblocked\n", __func__);
-
-    spl_stats.spl_spl_mach_pressure_monitor_wake_count.value.ui64++;
-
-    if(kr != KERN_SUCCESS) {
-      if(os_num_pages_wanted < 1) {
-      	mutex_enter(&spl_free_lock);
-	spl_free = -(int64_t)os_num_pages_wanted * PAGESIZE;
-	mutex_exit(&spl_free_lock);
-      }
-    }
-
-    if(kr != KERN_SUCCESS) {
-      printf("SPL: %s: mach_vm_pressure_monitor returned returned non-success\n", __func__);
-    } else {
-      if(os_num_pages_wanted < 1) {
-	mutex_enter(&spl_os_pages_are_wanted_lock);
-	spl_os_pages_are_wanted = FALSE;
-	mutex_exit(&spl_os_pages_are_wanted_lock);
-      } else {
-	mutex_enter(&spl_os_pages_are_wanted_lock);
-	spl_os_pages_are_wanted = TRUE;
-	mutex_exit(&spl_os_pages_are_wanted_lock);
-	// might want to spl_free_set_pressre(os_num_pages_wanted * PAGESIZE);
-	// or alternatively use this value in spl_free_thread()
-      }
-    } // else: KERN_SUCCESS
-
-    mutex_enter(&spl_mach_pressure_monitor_thread_lock);
-    dprintf("SPL: %s calling cv_timedwait\n", __func__);
-    CALLB_CPR_SAFE_BEGIN(&cpr);
-    (void)cv_timedwait(&spl_mach_pressure_monitor_thread_cv,
+	while(!spl_mach_pressure_monitor_thread_exit) {
+		mutex_exit(&spl_mach_pressure_monitor_thread_lock);
+		
+		dprintf("SPL: %s calling mach_vm_pressure_monitor - may block for some time\n", __func__);
+		
+		kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
+									  &pages_reclaimed, &os_num_pages_wanted);
+		
+		dprintf("SPL: %s back from mach_vm_pressure_montor - unblocked\n", __func__);
+		
+		spl_stats.spl_spl_mach_pressure_monitor_wake_count.value.ui64++;
+		
+		if(kr != KERN_SUCCESS) {
+			if(os_num_pages_wanted < 1) {
+				mutex_enter(&spl_free_lock);
+				spl_free = -(int64_t)os_num_pages_wanted * PAGESIZE;
+				mutex_exit(&spl_free_lock);
+			}
+		}
+		
+		if(kr != KERN_SUCCESS) {
+			printf("SPL: %s: mach_vm_pressure_monitor returned returned non-success\n", __func__);
+		} else {
+			if(os_num_pages_wanted < 1) {
+				mutex_enter(&spl_os_pages_are_wanted_lock);
+				spl_os_pages_are_wanted = FALSE;
+				mutex_exit(&spl_os_pages_are_wanted_lock);
+			} else {
+				mutex_enter(&spl_os_pages_are_wanted_lock);
+				spl_os_pages_are_wanted = TRUE;
+				mutex_exit(&spl_os_pages_are_wanted_lock);
+				// might want to spl_free_set_pressre(os_num_pages_wanted * PAGESIZE);
+				// or alternatively use this value in spl_free_thread()
+			}
+		} // else: KERN_SUCCESS
+		
+		mutex_enter(&spl_mach_pressure_monitor_thread_lock);
+		dprintf("SPL: %s calling cv_timedwait\n", __func__);
+		CALLB_CPR_SAFE_BEGIN(&cpr);
+		(void)cv_timedwait(&spl_mach_pressure_monitor_thread_cv,
 		       &spl_mach_pressure_monitor_thread_lock,
 		       ddi_get_lbolt() + (hz / 10));
-    CALLB_CPR_SAFE_END(&cpr, &spl_mach_pressure_monitor_thread_lock);
-    dprintf("SPL: %s back from cv_timedwait\n", __func__);
-  } // while
-  spl_mach_pressure_monitor_thread_exit = FALSE;
-  printf("SPL: %s exiting: cv_broadcasting\n", __func__);
-  cv_broadcast(&spl_mach_pressure_monitor_thread_cv);
-  printf("SPL: %s exiting: doing CALLB_CPR_EXIT\n", __func__);
-  CALLB_CPR_EXIT(&cpr);
-  thread_exit();
+		CALLB_CPR_SAFE_END(&cpr, &spl_mach_pressure_monitor_thread_lock);
+		dprintf("SPL: %s back from cv_timedwait\n", __func__);
+	} // while
+	spl_mach_pressure_monitor_thread_exit = FALSE;
+	printf("SPL: %s exiting: cv_broadcasting\n", __func__);
+	cv_broadcast(&spl_mach_pressure_monitor_thread_cv);
+	printf("SPL: %s exiting: doing CALLB_CPR_EXIT\n", __func__);
+	CALLB_CPR_EXIT(&cpr);
+	thread_exit();
 }
 
 static void
@@ -4529,7 +4608,7 @@ spl_kmem_init(uint64_t xtotal_memory)
                                       VM_SLEEP | VMC_NO_QCACHE);
 
     kmem_msb_arena = vmem_create("kmem_msb", NULL, 0,
-                                 PAGESIZE, segkmem_alloc, segkmem_free, kmem_metadata_arena, 0,
+                                 PAGESIZE, vmem_alloc, vmem_free, kmem_metadata_arena, 0,
                                  VMC_DUMPSAFE | VM_SLEEP);
 
     kmem_cache_arena = vmem_create("kmem_cache", NULL, 0, KMEM_ALIGN,
@@ -4539,7 +4618,7 @@ spl_kmem_init(uint64_t xtotal_memory)
                                   vmem_alloc, vmem_free, kmem_metadata_arena, 0, VM_SLEEP);
 
     kmem_log_arena = vmem_create("kmem_log", NULL, 0, KMEM_ALIGN,
-                                 vmem_alloc, vmem_free, heap_arena, 0, VM_SLEEP);
+                                 vmem_alloc, vmem_free, kmem_metadata_arena, 0, VM_SLEEP);
 
 	segkmem_zio_init();
 
@@ -4753,18 +4832,59 @@ spl_kmem_fini(void)
             kmem_content_log_size = kmem_maxavail() / 50;
         kmem_log_fini(kmem_content_log);
     }
-
+	
     if (kmem_flags & (KMF_AUDIT | KMF_RANDOMIZE)) {
         if (kmem_transaction_log_size == 0)
             kmem_transaction_log_size = kmem_maxavail() / 50;
 		kmem_log_fini(kmem_transaction_log);
     }
 
+	segkmem_zio_fini();
+	
+	// Destroy all the "general allocation" caches
+	printf("destroy alloc caches\n");
+	kmem_alloc_caches_destroy();
+	printf("destroy kmem_default_arena\n");
+	vmem_destroy(kmem_default_arena);
+	
+	// Destroy the VA arena and associated caches
+	printf("destroy va\n");
+	kmem_destroy_cache_by_name(KMEM_VA_PREFIX);
+	vmem_destroy(kmem_va_arena);
+	
+	// Destroy the magazine caches
+	printf("destroy mags\n");
+//	{ 1,	8,	3200,	65536	},
+//	{ 3,	16,	256,	32768	},
+//	{ 7,	32,	64,	16384	},
+//	{ 15,	64,	0,	8192	},
+//	{ 31,	64,	0,	4096	},
+//	{ 47,	64,	0,	2048	},
+//	{ 63,	64,	0,	1024	},
+//	{ 95,	64,	0,	512	},
+//	{ 143,
+	//kmem_destroy_cache_by_name("kmem_magazine_143");
+	//kmem_destroy_cache_by_name("kmem_magazine_95");
+	//kmem_destroy_cache_by_name("kmem_magazine_63");
+	//kmem_destroy_cache_by_name("kmem_magazine_47");
+	//kmem_destroy_cache_by_name("kmem_magazine_63");
+	//kmem_destroy_cache_by_name("kmem_magazine_47");
+	//kmem_destroy_cache_by_name("kmem_magazine_31");
+	//kmem_destroy_cache_by_name("kmem_magazine_15");
+	//	kmem_destroy_cache_by_name("kmem_magazine_7");
+	//	kmem_destroy_cache_by_name("kmem_magazine_3");
+	//	kmem_destroy_cache_by_name("kmem_magazine_1");
+	
+	//kmem_destroy_cache_by_name(KMEM_MAGAZINE_PREFIX);
+	
+	// Destroy metadata caches
+	// kmem_cache_destroy(kmem_slab_cache); // Dont think this one
+	kmem_cache_destroy(kmem_bufctl_cache);
+	kmem_cache_destroy(kmem_bufctl_audit_cache);
+
 	kmem_cache_fini(2, /*use_large_pages*/ 0);
 
 	vmem_destroy(kmem_oversize_arena);
-
-	segkmem_zio_fini();
 
 	vmem_destroy(kmem_log_arena);
 	vmem_destroy(kmem_hash_arena);

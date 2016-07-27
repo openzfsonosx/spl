@@ -127,7 +127,7 @@ vmem_t *heap_arena;							/* primary kernel heap arena */
 vmem_t *zio_arena;							/* arena for allocating zio memory */
 vmem_t *zio_alloc_arena;					/* arena for allocating zio memory */
 
-static void *
+inline static void *
 osif_malloc(uint64_t size)
 {
 #ifdef _KERNEL
@@ -147,7 +147,7 @@ osif_malloc(uint64_t size)
 #endif /* _KERNEL */
 }
 
-static void
+inline static void
 osif_free(void* buf, uint64_t size)
 {
 #ifdef _KERNEL
