@@ -4047,7 +4047,7 @@ void kmem_cache_build_slablist(kmem_cache_t *cp)
 
 
 static void
-kmem_cache_fini(int pass, int use_large_pages)
+kmem_cache_fini()
 {
 	kmem_cache_t *cp;
 	int i;
@@ -4305,11 +4305,11 @@ reap_thread()
 			kmem_reap();
 			kmem_reap_idspace();
 			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-		} else if(zfs_lbolt() - last_reap > (hz*3600)) {
+		} else if(zfs_lbolt() - last_reap > (hz*15)) {
 			reap_now = 0;
 			mutex_exit(&reap_now_lock);
-			printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
-				   __func__, (zfs_lbolt() - last_reap)/hz, om);
+			//printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
+			//	   __func__, (zfs_lbolt() - last_reap)/hz, om);
 			last_reap = zfs_lbolt();
 			previous_segkmem_total_mem_allocated = om;
 			kmem_reap();
@@ -4842,50 +4842,25 @@ spl_kmem_fini(void)
 	segkmem_zio_fini();
 	
 	// Destroy all the "general allocation" caches
-	printf("destroy alloc caches\n");
 	kmem_alloc_caches_destroy();
-	printf("destroy kmem_default_arena\n");
-	vmem_destroy(kmem_default_arena);
 	
 	// Destroy the VA arena and associated caches
-	printf("destroy va\n");
 	kmem_destroy_cache_by_name(KMEM_VA_PREFIX);
-	vmem_destroy(kmem_va_arena);
-	
-	// Destroy the magazine caches
-	printf("destroy mags\n");
-//	{ 1,	8,	3200,	65536	},
-//	{ 3,	16,	256,	32768	},
-//	{ 7,	32,	64,	16384	},
-//	{ 15,	64,	0,	8192	},
-//	{ 31,	64,	0,	4096	},
-//	{ 47,	64,	0,	2048	},
-//	{ 63,	64,	0,	1024	},
-//	{ 95,	64,	0,	512	},
-//	{ 143,
-	//kmem_destroy_cache_by_name("kmem_magazine_143");
-	//kmem_destroy_cache_by_name("kmem_magazine_95");
-	//kmem_destroy_cache_by_name("kmem_magazine_63");
-	//kmem_destroy_cache_by_name("kmem_magazine_47");
-	//kmem_destroy_cache_by_name("kmem_magazine_63");
-	//kmem_destroy_cache_by_name("kmem_magazine_47");
-	//kmem_destroy_cache_by_name("kmem_magazine_31");
-	//kmem_destroy_cache_by_name("kmem_magazine_15");
-	//	kmem_destroy_cache_by_name("kmem_magazine_7");
-	//	kmem_destroy_cache_by_name("kmem_magazine_3");
-	//	kmem_destroy_cache_by_name("kmem_magazine_1");
-	
-	//kmem_destroy_cache_by_name(KMEM_MAGAZINE_PREFIX);
 	
 	// Destroy metadata caches
 	// kmem_cache_destroy(kmem_slab_cache); // Dont think this one
 	kmem_cache_destroy(kmem_bufctl_cache);
 	kmem_cache_destroy(kmem_bufctl_audit_cache);
 
-	kmem_cache_fini(2, /*use_large_pages*/ 0);
+	// Magazine caches cannot be destroyed as
+	// some of them mutually reference each other.
+	// So we explicitly pull them apart piece-by-piece.
+	kmem_cache_fini();
 
+	// Now destroy the vmem arenas used by kmem.
+	vmem_destroy(kmem_default_arena);
+	vmem_destroy(kmem_va_arena);
 	vmem_destroy(kmem_oversize_arena);
-
 	vmem_destroy(kmem_log_arena);
 	vmem_destroy(kmem_hash_arena);
 	vmem_destroy(kmem_cache_arena);
