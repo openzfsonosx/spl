@@ -686,8 +686,6 @@ vmem_populate(vmem_t *vmp, int vmflag)
 	kmutex_t *lp;
 	int i;
 
-//	printf("SPL:vmem_populate:npop=%u\n", vmem_populators);
-	
 	while (vmp->vm_nsegfree < VMEM_MINFREE &&
 	    (vsp = vmem_getseg_global()) != NULL)
 		vmem_putseg(vmp, vsp);
@@ -1172,19 +1170,17 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		if (vmflag & VM_ABORT)
 			break;
 		mutex_exit(&vmp->vm_lock);
-#if 1
-		//printf("vmem reaping\n");
+
 		if (vmp->vm_cflags & VMC_IDENTIFIER)
 			kmem_reap_idspace();
 		else
 			kmem_reap();
-		//printf("vmem reaping done\n");
-#endif
+
 		mutex_enter(&vmp->vm_lock);
 		if (vmflag & VM_NOSLEEP)
 			break;
 		vmp->vm_kstat.vk_wait.value.ui64++;
-		printf("vmem waiting for %lu sized alloc\n", size);
+		printf("SPL: vmem waiting for %lu sized alloc\n", size);
 		cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 	}
 	if (vbest != NULL) {
@@ -1633,7 +1629,7 @@ vmem_destroy(vmem_t *vmp)
 
 	leaked = vmem_size(vmp, VMEM_ALLOC);
 	if (leaked != 0)
-		printf( "vmem_destroy('%s'): leaked %lu %s\n",
+		printf( "SPL: vmem_destroy('%s'): leaked %lu %s\n",
 				vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
 				"identifiers" : "bytes");
 
@@ -1682,7 +1678,7 @@ vmem_destroy_internal(vmem_t *vmp)
 
 	leaked = vmem_size(vmp, VMEM_ALLOC);
 	if (leaked != 0)
-		printf("vmem_destroy('%s'): leaked %lu %s\n",
+		printf("SPL: vmem_destroy('%s'): leaked %lu %s\n",
 				vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
 				"identifiers" : "bytes");
 
@@ -1829,7 +1825,7 @@ vmem_init(const char *heap_name,
 	while (--nseg >= 0)
 		vmem_putseg_global(&vmem_seg0[nseg]);
 
-		printf("vmem_init-a: npop=%u\n", vmem_populators);
+	//	printf("SPL: vmem_init-a: npop=%u\n", vmem_populators);
 	
 	/*
 	 * On OSX we ultimately have to use the OS allocator 
@@ -1838,7 +1834,7 @@ vmem_init(const char *heap_name,
 	 *
 	 * By adding the heap_parent arena that acts as a source
 	 * for the actual heap, the heap accumulates allocations
-	 * and statistics just as it would on illumos, while
+	 * and statistics just as it would on Illumos, while
 	 * using the heap_parent as a "source". The heap parent
 	 * arena never internally allocates memory as 
 	 * heap_alloc (segkmem_alloc) and heap_free (segkmem_free)
@@ -1877,8 +1873,6 @@ vmem_init(const char *heap_name,
 								  vmem0, sizeof (vmem0), 1,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
-
-	printf("vmem_init-b: npop=%u\n", vmem_populators);
 	
 	// 5 vmem_create before this line.
 	for (id = 0; id < vmem_id; id++) {
@@ -1886,8 +1880,6 @@ vmem_init(const char *heap_name,
 									   1, 0, 0, &vmem0[id], &vmem0[id + 1],
 										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
 	}
-
-	printf("vmem_init-c: npop=%u\n", vmem_populators);
 	
 	vmem_update(NULL);
 
@@ -1926,30 +1918,27 @@ void vmem_fini(vmem_t *heap)
 
 	bsd_untimeout(vmem_update, NULL);
 
-	// FIXME - turn on cleanup again.
-#if 1
 	/* Create a list of slabs to free by walking the list of allocs */
 	list_create(&freelist, sizeof (struct free_slab),
 				offsetof(struct free_slab, next));
-
+	
 	/* Walk to list of allocations */
 	vmem_walk(vmem_seg_arena, VMEM_ALLOC,
 			  vmem_fini_freelist, vmem_seg_arena);
 
+	vmem_walk(vmem_hash_arena, VMEM_ALLOC,
+			  vmem_fini_freelist, vmem_hash_arena);
+		
 	vmem_walk(heap, VMEM_ALLOC,
 			  vmem_fini_freelist, heap);
+	
+	vmem_walk(heap_parent, VMEM_ALLOC,
+			  vmem_fini_freelist, heap_parent);
 
 	for (id = 0; id < 5; id++) {// From vmem_init, 5 vmem_create
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
 	}
-
-	//vmem_destroy_internal(vmem_vmem_arena);
-	//vmem_destroy_internal(vmem_hash_arena);
-	//vmem_destroy_internal(vmem_seg_arena);
-	//vmem_destroy_internal(vmem_metadata_arena);
-	vmem_destroy_internal(heap);
-	vmem_destroy_internal(heap_parent);
-
+	
 	/* Now release the list of allocs to built above */
 	total = 0;
 	while((fs = list_head(&freelist))) {
@@ -1958,9 +1947,8 @@ void vmem_fini(vmem_t *heap)
 		segkmem_free(fs->vmp, fs->slab, fs->slabsize);
 		FREE(fs, M_TEMP);
 	}
-	printf("SPL: Released %llu bytes from vmem_seg_arena\n", total);
+	printf("SPL: Released %llu bytes from arenas\n", total);
 	list_destroy(&freelist);
-#endif
 	
 #if 0 // Don't release, panics
 	mutex_destroy(&vmem_panic_lock);

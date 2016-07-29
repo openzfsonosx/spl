@@ -3922,7 +3922,7 @@ kmem_cache_init(int pass, int use_large_pages)
         kmem_va_arena = vmem_create(KMEM_VA_PREFIX,
                                     NULL, 0, PAGESIZE,
                                     vmem_alloc, vmem_free, heap_arena,
-                                    8 * PAGESIZE, VM_SLEEP);
+                                    64 * PAGESIZE, VM_SLEEP);
 
 //        if (use_large_pages) {
 //            kmem_default_arena = vmem_xcreate("kmem_default",
@@ -4305,7 +4305,7 @@ reap_thread()
 			kmem_reap();
 			kmem_reap_idspace();
 			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-		} else if(zfs_lbolt() - last_reap > (hz*15)) {
+		} else if(zfs_lbolt() - last_reap > (hz*3600)) {
 			reap_now = 0;
 			mutex_exit(&reap_now_lock);
 			//printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
@@ -4844,16 +4844,16 @@ spl_kmem_fini(void)
 	// Destroy all the "general allocation" caches
 	kmem_alloc_caches_destroy();
 	
-	// Destroy the VA arena and associated caches
+	// Destroy the VA associated caches
 	kmem_destroy_cache_by_name(KMEM_VA_PREFIX);
 	
 	// Destroy metadata caches
-	// kmem_cache_destroy(kmem_slab_cache); // Dont think this one
 	kmem_cache_destroy(kmem_bufctl_cache);
 	kmem_cache_destroy(kmem_bufctl_audit_cache);
+	kmem_cache_destroy(kmem_slab_cache); // Dont think this one
 
-	// Magazine caches cannot be destroyed as
-	// some of them mutually reference each other.
+	// Some caches cannot be destroyed as
+	// they mutually reference each other.
 	// So we explicitly pull them apart piece-by-piece.
 	kmem_cache_fini();
 
@@ -4980,6 +4980,7 @@ spl_kmem_thread_fini(void)
 	  cv_signal(&reap_thread_cv);
 	  cv_wait(&reap_thread_cv, &reap_thread_lock);
 	}
+	
 	printf("SPL: reap thread stop: while loop ended, dropping mutex\n");
 	mutex_exit(&reap_thread_lock);
 	printf("SPL: reap thread stop: destroying cv and mutex\n");
