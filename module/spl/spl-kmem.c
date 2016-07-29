@@ -3922,7 +3922,7 @@ kmem_cache_init(int pass, int use_large_pages)
         kmem_va_arena = vmem_create(KMEM_VA_PREFIX,
                                     NULL, 0, PAGESIZE,
                                     vmem_alloc, vmem_free, heap_arena,
-                                    64 * PAGESIZE, VM_SLEEP);
+                                    8 * PAGESIZE, VM_SLEEP);
 
 //        if (use_large_pages) {
 //            kmem_default_arena = vmem_xcreate("kmem_default",
