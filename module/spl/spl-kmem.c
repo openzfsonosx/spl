@@ -2254,7 +2254,6 @@ kmem_cache_free(kmem_cache_t *cp, void *buf)
      * Any changes to this logic should be reflected in kmem_slab_prefill()
      */
     for (;;) {
-			//printf("kmem_cache_free: loop top\n");
         /*
          * If there's a slot available in the current CPU's
          * loaded magazine, just put the object there and return.
@@ -4059,7 +4058,6 @@ kmem_cache_fini()
     mutex_enter(&kmem_cache_lock);
 
 	while((cp = list_head(&kmem_caches))) {
-		//printf("cache:%s\n", cp->cache_name);
 			list_remove(&kmem_caches, cp);
 			mutex_exit(&kmem_cache_lock);
 			kmem_cache_build_slablist(cp);
@@ -4308,8 +4306,8 @@ reap_thread()
 		} else if(zfs_lbolt() - last_reap > (hz*3600)) {
 			reap_now = 0;
 			mutex_exit(&reap_now_lock);
-			//printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
-			//	   __func__, (zfs_lbolt() - last_reap)/hz, om);
+			printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
+				   __func__, (zfs_lbolt() - last_reap)/hz, om);
 			last_reap = zfs_lbolt();
 			previous_segkmem_total_mem_allocated = om;
 			kmem_reap();
