@@ -206,7 +206,7 @@ extern "C" {
 (cp)->cache_magtype->mt_cache)
 
 #define	KMEM_MAGAZINE_VALID(cp, mp)	\
-(((kmem_slab_t *)P2END((uintptr_t)(mp), KMEM_QUANTUM) - 1)->slab_cache == \
+(((kmem_slab_t *)P2END((uintptr_t)(mp), PAGESIZE) - 1)->slab_cache == \
 (cp)->cache_magtype->mt_cache)
 
 #define	KMEM_SLAB_OFFSET(sp, buf)	\

@@ -131,6 +131,7 @@ extern uint64_t physmem;
     char *kmem_asprintf(const char *fmt, ...);
     void strfree(char *str);
     char *kmem_vasprintf(const char *fmt, va_list ap);
+	char *kmem_strstr(const char *in, const char *str);
 	void strident_canon(char *s, size_t n);
 
 

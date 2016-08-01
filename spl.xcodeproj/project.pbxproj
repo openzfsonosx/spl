@@ -1,0 +1,220 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXFileReference section */
+		49C6A9131D164B68007A7AA2 /* .git */ = {isa = PBXFileReference; lastKnownFileType = folder; path = .git; sourceTree = "<group>"; };
+		49C6A9141D164B68007A7AA2 /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
+		49C6A9151D164B68007A7AA2 /* aclocal.m4 */ = {isa = PBXFileReference; lastKnownFileType = text; path = aclocal.m4; sourceTree = "<group>"; };
+		49C6A9161D164B68007A7AA2 /* AUTHORS */ = {isa = PBXFileReference; lastKnownFileType = text; path = AUTHORS; sourceTree = "<group>"; };
+		49C6A9171D164B68007A7AA2 /* autogen.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = autogen.sh; sourceTree = "<group>"; };
+		49C6A9181D164B68007A7AA2 /* ChangeLog */ = {isa = PBXFileReference; lastKnownFileType = text; path = ChangeLog; sourceTree = "<group>"; };
+		49C6A9191D164B68007A7AA2 /* ChangeLog.highlights */ = {isa = PBXFileReference; lastKnownFileType = text; path = ChangeLog.highlights; sourceTree = "<group>"; };
+		49C6A91A1D164B68007A7AA2 /* config */ = {isa = PBXFileReference; lastKnownFileType = folder; path = config; sourceTree = "<group>"; };
+		49C6A91B1D164B68007A7AA2 /* config.log */ = {isa = PBXFileReference; lastKnownFileType = text; path = config.log; sourceTree = "<group>"; };
+		49C6A91C1D164B68007A7AA2 /* config.status */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = config.status; sourceTree = "<group>"; };
+		49C6A91D1D164B68007A7AA2 /* configure */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = configure; sourceTree = "<group>"; };
+		49C6A91E1D164B68007A7AA2 /* configure.ac */ = {isa = PBXFileReference; lastKnownFileType = text; path = configure.ac; sourceTree = "<group>"; };
+		49C6A91F1D164B68007A7AA2 /* copy-builtin */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "copy-builtin"; sourceTree = "<group>"; };
+		49C6A9201D164B68007A7AA2 /* COPYING */ = {isa = PBXFileReference; lastKnownFileType = text; path = COPYING; sourceTree = "<group>"; };
+		49C6A9211D164B68007A7AA2 /* DISCLAIMER */ = {isa = PBXFileReference; lastKnownFileType = text; path = DISCLAIMER; sourceTree = "<group>"; };
+		49C6A9221D164B68007A7AA2 /* dkms.conf */ = {isa = PBXFileReference; lastKnownFileType = text; path = dkms.conf; sourceTree = "<group>"; };
+		49C6A9231D164B68007A7AA2 /* dkms.conf.in */ = {isa = PBXFileReference; lastKnownFileType = text; path = dkms.conf.in; sourceTree = "<group>"; };
+		49C6A9241D164B68007A7AA2 /* dkms.postinst */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = dkms.postinst; sourceTree = "<group>"; };
+		49C6A9251D164B68007A7AA2 /* include */ = {isa = PBXFileReference; lastKnownFileType = folder; path = include; sourceTree = "<group>"; };
+		49C6A9261D164B68007A7AA2 /* INSTALL */ = {isa = PBXFileReference; lastKnownFileType = text; path = INSTALL; sourceTree = "<group>"; };
+		49C6A9271D164B68007A7AA2 /* libtool */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = libtool; sourceTree = "<group>"; };
+		49C6A9281D164B68007A7AA2 /* Makefile */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.make; path = Makefile; sourceTree = "<group>"; };
+		49C6A9291D164B68007A7AA2 /* Makefile.am */ = {isa = PBXFileReference; lastKnownFileType = text; path = Makefile.am; sourceTree = "<group>"; };
+		49C6A92A1D164B68007A7AA2 /* Makefile.in */ = {isa = PBXFileReference; lastKnownFileType = text; path = Makefile.in; sourceTree = "<group>"; };
+		49C6A92B1D164B68007A7AA2 /* META */ = {isa = PBXFileReference; lastKnownFileType = text; path = META; sourceTree = "<group>"; };
+		49C6A92C1D164B68007A7AA2 /* module */ = {isa = PBXFileReference; lastKnownFileType = folder; path = module; sourceTree = "<group>"; };
+		49C6A92D1D164B68007A7AA2 /* patches */ = {isa = PBXFileReference; lastKnownFileType = folder; path = patches; sourceTree = "<group>"; };
+		49C6A92E1D164B68007A7AA2 /* PKGBUILD-spl */ = {isa = PBXFileReference; lastKnownFileType = text; path = "PKGBUILD-spl"; sourceTree = "<group>"; };
+		49C6A92F1D164B68007A7AA2 /* PKGBUILD-spl-modules */ = {isa = PBXFileReference; lastKnownFileType = text; path = "PKGBUILD-spl-modules"; sourceTree = "<group>"; };
+		49C6A9301D164B68007A7AA2 /* PKGBUILD-spl-modules.in */ = {isa = PBXFileReference; lastKnownFileType = text; path = "PKGBUILD-spl-modules.in"; sourceTree = "<group>"; };
+		49C6A9311D164B68007A7AA2 /* PKGBUILD-spl.in */ = {isa = PBXFileReference; lastKnownFileType = text; path = "PKGBUILD-spl.in"; sourceTree = "<group>"; };
+		49C6A9321D164B68007A7AA2 /* README.markdown */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.markdown; sourceTree = "<group>"; };
+		49C6A9331D164B68007A7AA2 /* scripts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = scripts; sourceTree = "<group>"; };
+		49C6A9341D164B68007A7AA2 /* spl-modules.spec */ = {isa = PBXFileReference; lastKnownFileType = text; path = "spl-modules.spec"; sourceTree = "<group>"; };
+		49C6A9351D164B68007A7AA2 /* spl-modules.spec.in */ = {isa = PBXFileReference; lastKnownFileType = text; path = "spl-modules.spec.in"; sourceTree = "<group>"; };
+		49C6A9361D164B68007A7AA2 /* spl.release */ = {isa = PBXFileReference; lastKnownFileType = text; path = spl.release; sourceTree = "<group>"; };
+		49C6A9371D164B68007A7AA2 /* spl.release.in */ = {isa = PBXFileReference; lastKnownFileType = text; path = spl.release.in; sourceTree = "<group>"; };
+		49C6A9381D164B68007A7AA2 /* spl.spec */ = {isa = PBXFileReference; lastKnownFileType = text; path = spl.spec; sourceTree = "<group>"; };
+		49C6A9391D164B68007A7AA2 /* spl.spec.in */ = {isa = PBXFileReference; lastKnownFileType = text; path = spl.spec.in; sourceTree = "<group>"; };
+		49C6A93A1D164B68007A7AA2 /* spl_config.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = spl_config.h; sourceTree = "<group>"; };
+		49C6A93B1D164B68007A7AA2 /* spl_config.h.in */ = {isa = PBXFileReference; lastKnownFileType = text; path = spl_config.h.in; sourceTree = "<group>"; };
+		49C6A93C1D164B68007A7AA2 /* spl_config.h.in~ */ = {isa = PBXFileReference; lastKnownFileType = text; path = "spl_config.h.in~"; sourceTree = "<group>"; };
+		49C6A93D1D164B68007A7AA2 /* stamp-h1 */ = {isa = PBXFileReference; lastKnownFileType = text; path = "stamp-h1"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		49C6A90D1D164B68007A7AA2 = {
+			isa = PBXGroup;
+			children = (
+				49C6A9131D164B68007A7AA2 /* .git */,
+				49C6A9141D164B68007A7AA2 /* .gitignore */,
+				49C6A9151D164B68007A7AA2 /* aclocal.m4 */,
+				49C6A9161D164B68007A7AA2 /* AUTHORS */,
+				49C6A9171D164B68007A7AA2 /* autogen.sh */,
+				49C6A9181D164B68007A7AA2 /* ChangeLog */,
+				49C6A9191D164B68007A7AA2 /* ChangeLog.highlights */,
+				49C6A91A1D164B68007A7AA2 /* config */,
+				49C6A91B1D164B68007A7AA2 /* config.log */,
+				49C6A91C1D164B68007A7AA2 /* config.status */,
+				49C6A91D1D164B68007A7AA2 /* configure */,
+				49C6A91E1D164B68007A7AA2 /* configure.ac */,
+				49C6A91F1D164B68007A7AA2 /* copy-builtin */,
+				49C6A9201D164B68007A7AA2 /* COPYING */,
+				49C6A9211D164B68007A7AA2 /* DISCLAIMER */,
+				49C6A9221D164B68007A7AA2 /* dkms.conf */,
+				49C6A9231D164B68007A7AA2 /* dkms.conf.in */,
+				49C6A9241D164B68007A7AA2 /* dkms.postinst */,
+				49C6A9251D164B68007A7AA2 /* include */,
+				49C6A9261D164B68007A7AA2 /* INSTALL */,
+				49C6A9271D164B68007A7AA2 /* libtool */,
+				49C6A9281D164B68007A7AA2 /* Makefile */,
+				49C6A9291D164B68007A7AA2 /* Makefile.am */,
+				49C6A92A1D164B68007A7AA2 /* Makefile.in */,
+				49C6A92B1D164B68007A7AA2 /* META */,
+				49C6A92C1D164B68007A7AA2 /* module */,
+				49C6A92D1D164B68007A7AA2 /* patches */,
+				49C6A92E1D164B68007A7AA2 /* PKGBUILD-spl */,
+				49C6A92F1D164B68007A7AA2 /* PKGBUILD-spl-modules */,
+				49C6A9301D164B68007A7AA2 /* PKGBUILD-spl-modules.in */,
+				49C6A9311D164B68007A7AA2 /* PKGBUILD-spl.in */,
+				49C6A9321D164B68007A7AA2 /* README.markdown */,
+				49C6A9331D164B68007A7AA2 /* scripts */,
+				49C6A9341D164B68007A7AA2 /* spl-modules.spec */,
+				49C6A9351D164B68007A7AA2 /* spl-modules.spec.in */,
+				49C6A9361D164B68007A7AA2 /* spl.release */,
+				49C6A9371D164B68007A7AA2 /* spl.release.in */,
+				49C6A9381D164B68007A7AA2 /* spl.spec */,
+				49C6A9391D164B68007A7AA2 /* spl.spec.in */,
+				49C6A93A1D164B68007A7AA2 /* spl_config.h */,
+				49C6A93B1D164B68007A7AA2 /* spl_config.h.in */,
+				49C6A93C1D164B68007A7AA2 /* spl_config.h.in~ */,
+				49C6A93D1D164B68007A7AA2 /* stamp-h1 */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXLegacyTarget section */
+		49C6A9121D164B68007A7AA2 /* spl */ = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = "$(ACTION)";
+			buildConfigurationList = 49C6A93E1D164B68007A7AA2 /* Build configuration list for PBXLegacyTarget "spl" */;
+			buildPhases = (
+			);
+			buildToolPath = /usr/bin/make;
+			buildWorkingDirectory = "/Users/zfs-tests/Developer/spl";
+			dependencies = (
+			);
+			name = spl;
+			passBuildSettingsInEnvironment = 1;
+			productName = spl;
+		};
+/* End PBXLegacyTarget section */
+
+/* Begin PBXProject section */
+		49C6A90E1D164B68007A7AA2 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+			};
+			buildConfigurationList = 49C6A9111D164B68007A7AA2 /* Build configuration list for PBXProject "spl" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = English;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+			);
+			mainGroup = 49C6A90D1D164B68007A7AA2;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				49C6A9121D164B68007A7AA2 /* spl */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin XCBuildConfiguration section */
+		49C6A90F1D164B68007A7AA2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_BIT)";
+				COPY_PHASE_STRIP = NO;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx10.6;
+			};
+			name = Debug;
+		};
+		49C6A9101D164B68007A7AA2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_BIT)";
+				COPY_PHASE_STRIP = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				SDKROOT = macosx10.6;
+			};
+			name = Release;
+		};
+		49C6A93F1D164B68007A7AA2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COPY_PHASE_STRIP = NO;
+				DEBUGGING_SYMBOLS = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				OTHER_CFLAGS = "";
+				OTHER_LDFLAGS = "";
+				PRODUCT_NAME = spl;
+			};
+			name = Debug;
+		};
+		49C6A9401D164B68007A7AA2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
+				OTHER_CFLAGS = "";
+				OTHER_LDFLAGS = "";
+				PRODUCT_NAME = spl;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		49C6A9111D164B68007A7AA2 /* Build configuration list for PBXProject "spl" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				49C6A90F1D164B68007A7AA2 /* Debug */,
+				49C6A9101D164B68007A7AA2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		49C6A93E1D164B68007A7AA2 /* Build configuration list for PBXLegacyTarget "spl" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				49C6A93F1D164B68007A7AA2 /* Debug */,
+				49C6A9401D164B68007A7AA2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 49C6A90E1D164B68007A7AA2 /* Project object */;
+}
