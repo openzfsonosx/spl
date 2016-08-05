@@ -134,7 +134,43 @@ uint64_t stat_osif_malloc_denied = 0;
 uint64_t stat_osif_malloc_success = 0;
 uint64_t stat_osif_malloc_fail = 0;
 uint64_t stat_osif_free = 0;
+uint64_t stat_osif_alloc_tries_above_total_memory = 0;
+uint64_t stat_osif_cum_bytes_above_total_memory = 0;
+uint64_t stat_osif_cur_bytes_above_total_memory = 0;
 
+#ifdef _KERNEL
+// slowpath: segkmem_total_mem_allocated + size > total_memory
+inline static void *
+osif_malloc_slowpath(uint64_t size)
+{
+  static uint64_t total_memory_plus_some_is_ceiling = 0;
+  void *tr;
+  kern_return_t kr;
+
+  if (total_memory_plus_some_is_ceiling == 0 && total_memory > 0) {
+    total_memory_plus_some_is_ceiling = total_memory * 101ULL / 100ULL;
+  }
+
+  atomic_inc_64(&stat_osif_alloc_tries_above_total_memory);
+
+  if (segkmem_total_mem_allocated + size <= total_memory_plus_some_is_ceiling) {
+    kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0, SPL_TAG);
+
+    if (kr == KERN_SUCCESS) {
+      stat_osif_malloc_success++;
+      atomic_add_64(&segkmem_total_mem_allocated, size);
+      atomic_add_64(&stat_osif_cum_bytes_above_total_memory, size);
+      return (tr);
+    } else {
+      stat_osif_malloc_fail++;
+      return (NULL);
+    }
+  } else {
+    stat_osif_malloc_denied++;
+    return(NULL);
+  }
+}
+#endif
 
 inline static void *
 osif_malloc(uint64_t size)
@@ -143,11 +179,10 @@ osif_malloc(uint64_t size)
     void *tr;
     kern_return_t kr;
 
-    if(segkmem_total_mem_allocated &&
-       total_memory &&
-       segkmem_total_mem_allocated + size > total_memory) {
-      stat_osif_malloc_denied++;
-      return (NULL);
+     if((segkmem_total_mem_allocated + size > total_memory) &&
+        (total_memory > 0) &&
+        (segkmem_total_mem_allocated > 0)) {
+       return (osif_malloc_slowpath(size));
     }
 	
     kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0, SPL_TAG);
