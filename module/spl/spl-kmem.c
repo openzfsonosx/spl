@@ -513,6 +513,11 @@ struct {
 	kmem_bufctl_t	*kmp_bufctl;	/* bufctl */
 } kmem_panic_info;
 
+extern uint64_t stat_osif_malloc_denied;
+extern uint64_t stat_osif_malloc_success;
+extern uint64_t stat_osif_malloc_fail;
+extern uint64_t stat_osif_free;
+
 typedef struct spl_stats {
 	kstat_named_t spl_os_alloc;
 	kstat_named_t spl_active_threads;
@@ -534,6 +539,10 @@ typedef struct spl_stats {
 	kstat_named_t spl_spl_free_negative_count;
 	kstat_named_t spl_spl_minimal_uses_spl_free;
 	kstat_named_t spl_spl_reap_timeout_seconds;
+	kstat_named_t spl_osif_malloc_denied;
+	kstat_named_t spl_osif_malloc_success;
+	kstat_named_t spl_osif_malloc_fail;
+	kstat_named_t spl_osif_free;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -557,6 +566,10 @@ static spl_stats_t spl_stats = {
 	{"spl_spl_free_negative_count", KSTAT_DATA_UINT64},
 	{"spl_spl_minimal_uses_spl_free", KSTAT_DATA_INT64},
 	{"spl_spl_reap_timeout_seconds", KSTAT_DATA_INT64},
+	{"spl_osif_malloc_denied", KSTAT_DATA_UINT64},
+	{"spl_osif_malloc_success", KSTAT_DATA_UINT64},
+	{"spl_osif_malloc_fail", KSTAT_DATA_UINT64},
+	{"spl_osif_free", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4448,6 +4461,10 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_spl_free_delta_ema.value.i64 = spl_free_delta_ema;
 		ks->spl_spl_minimal_uses_spl_free.value.i64 = spl_minimal_uses_spl_free;
 		ks->spl_spl_reap_timeout_seconds.value.ui64 = spl_reap_timeout_seconds;
+		ks->spl_osif_malloc_denied.value.ui64 = stat_osif_malloc_denied;
+		ks->spl_osif_malloc_success.value.ui64 = stat_osif_malloc_success;
+		ks->spl_osif_malloc_fail.value.ui64 = stat_osif_malloc_fail;
+		ks->spl_osif_free.value.ui64 = stat_osif_free;
 	}
 
 	return (0);
