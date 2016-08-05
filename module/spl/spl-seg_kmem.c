@@ -127,12 +127,22 @@ vmem_t *heap_arena;							/* primary kernel heap arena */
 vmem_t *zio_arena;							/* arena for allocating zio memory */
 vmem_t *zio_alloc_arena;					/* arena for allocating zio memory */
 
+#ifdef _KERNEL
+extern uint64_t total_memory;
+#endif
+
 inline static void *
 osif_malloc(uint64_t size)
 {
 #ifdef _KERNEL
     void *tr;
     kern_return_t kr;
+
+    if(segkmem_total_mem_allocated &&
+       total_memory &&
+       segkmem_total_mem_allocated + size > total_memory) {
+      return (NULL);
+    }
 	
     kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0, SPL_TAG);
 
