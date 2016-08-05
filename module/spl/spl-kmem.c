@@ -4085,7 +4085,7 @@ spl_free_thread()
 
 		// leave slop in kmem for non-arc, back way down if kmem is nearly full
 		// os_mem_alloc sysctl is segkmem_total_mem_allocated
-		if (segkmem_total_mem_allocated > total_memory * 95ULL / 100ULL) {
+		if (segkmem_total_mem_allocated > total_memory * 98ULL / 100ULL) {
 			int64_t big_used = segkmem_total_mem_allocated * 100LL;
 			int64_t pct_used = big_used / (int64_t)total_memory;  // range is 85+
 
@@ -4102,7 +4102,7 @@ spl_free_thread()
 			// and that may continue for 1/10 second,
 			// so it's a big shrink.
 
-			spl_free -= (pct_used - 95) * (int64_t)(total_memory / 1000ULL);
+			spl_free -= (pct_used - 97) * (int64_t)(total_memory / 1000ULL);
 
 			lowmem = true;
 		}
