@@ -134,71 +134,111 @@ uint64_t stat_osif_malloc_denied = 0;
 uint64_t stat_osif_malloc_success = 0;
 uint64_t stat_osif_malloc_fail = 0;
 uint64_t stat_osif_free = 0;
-uint64_t stat_osif_alloc_tries_above_total_memory = 0;
-uint64_t stat_osif_cum_bytes_above_total_memory = 0;
-uint64_t stat_osif_cur_bytes_above_total_memory = 0;
+uint64_t stat_osif_cum_reserve_allocs = 0;
+uint64_t stat_osif_cum_reserve_bytes = 0;
+uint64_t stat_osif_uncapped_calls = 0;
+uint64_t stat_osif_capped_calls = 0;
+uint64_t stat_osif_default_calls = 0;
 
-#ifdef _KERNEL
+
+#define OSIF_RESERVE_PERCENT_ULL 110ULL // must be greater than 100ULL; make tunable?
+
 // slowpath: segkmem_total_mem_allocated + size > total_memory
 inline static void *
-osif_malloc_slowpath(uint64_t size)
-{
-  static uint64_t total_memory_plus_some_is_ceiling = 0;
-  void *tr;
-  kern_return_t kr;
-
-  if (total_memory_plus_some_is_ceiling == 0 && total_memory > 0) {
-    total_memory_plus_some_is_ceiling = total_memory * 101ULL / 100ULL;
-  }
-
-  atomic_inc_64(&stat_osif_alloc_tries_above_total_memory);
-
-  if (segkmem_total_mem_allocated + size <= total_memory_plus_some_is_ceiling) {
-    kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0, SPL_TAG);
-
-    if (kr == KERN_SUCCESS) {
-      stat_osif_malloc_success++;
-      atomic_add_64(&segkmem_total_mem_allocated, size);
-      atomic_add_64(&stat_osif_cum_bytes_above_total_memory, size);
-      return (tr);
-    } else {
-      stat_osif_malloc_fail++;
-      return (NULL);
-    }
-  } else {
-    stat_osif_malloc_denied++;
-    return(NULL);
-  }
-}
-#endif
-
-inline static void *
-osif_malloc(uint64_t size)
+osif_malloc_reserve_cap(uint64_t size)
 {
 #ifdef _KERNEL
-    void *tr;
-    kern_return_t kr;
+	static uint64_t total_memory_plus_some_is_ceiling = 0;
+	void *tr;
+	kern_return_t kr;
 
-     if((segkmem_total_mem_allocated + size > total_memory) &&
-        (total_memory > 0) &&
-        (segkmem_total_mem_allocated > 0)) {
-       return (osif_malloc_slowpath(size));
-    }
-	
-    kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0, SPL_TAG);
+	if (total_memory_plus_some_is_ceiling == 0 && total_memory > 0) {
+		total_memory_plus_some_is_ceiling =
+		    total_memory * OSIF_RESERVE_PERCENT_ULL / 100ULL;
+	}
 
-    if (kr == KERN_SUCCESS) {
-      stat_osif_malloc_success++;
-        atomic_add_64(&segkmem_total_mem_allocated, size);
-        return (tr);
-    } else {
-      stat_osif_malloc_fail++;
-        return (NULL);
-    }
+	atomic_inc_64(&stat_osif_cum_reserve_allocs);
+
+	if (segkmem_total_mem_allocated + size <=
+	    total_memory_plus_some_is_ceiling) {
+		kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0,
+					    SPL_TAG);
+
+		if (kr == KERN_SUCCESS) {
+			stat_osif_malloc_success++;
+			atomic_add_64(&segkmem_total_mem_allocated, size);
+			atomic_add_64(&stat_osif_cum_reserve_bytes, size);
+			return (tr);
+		} else {
+			atomic_inc_64(&stat_osif_malloc_fail);
+			return (NULL);
+		}
+	} else {
+		stat_osif_malloc_denied++;
+		return (NULL);
+	}
 #else
-    return ((void*)malloc(size));
-#endif /* _KERNEL */
+	return ((void *) malloc(size));
+#endif
 }
+
+inline static void *
+osif_malloc_uncapped(uint64_t size)
+{
+#ifdef _KERNEL
+	void *tr;
+	kern_return_t kr;
+
+	atomic_inc_64(&stat_osif_uncapped_calls);
+
+	kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0,
+				    SPL_TAG);
+
+	if (kr == KERN_SUCCESS) {
+		stat_osif_malloc_success++;
+		atomic_add_64(&segkmem_total_mem_allocated, size);
+		return (tr);
+	} else {
+		atomic_inc_64(&stat_osif_malloc_fail);
+		return (NULL);
+	}
+#else
+	return ((void *) malloc(size));
+#endif				/* _KERNEL */
+}
+
+inline static void *
+osif_malloc_capped(uint64_t size)
+{
+#ifdef _KERNEL
+	void *tr;
+	kern_return_t kr;
+
+	atomic_inc_64(&stat_osif_capped_calls);
+
+	if ((segkmem_total_mem_allocated + size) > total_memory &&
+	    (total_memory > 0) &&
+	    (segkmem_total_mem_allocated > 0)) {
+		atomic_inc_64(&stat_osif_malloc_denied);
+		return (NULL);
+	}
+
+	kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0,
+				    SPL_TAG);
+
+	if (kr == KERN_SUCCESS) {
+		stat_osif_malloc_success++;
+		atomic_add_64(&segkmem_total_mem_allocated, size);
+		return (tr);
+	} else {
+		atomic_inc_64(&stat_osif_malloc_fail);
+		return (NULL);
+	}
+#else
+	return ((void *) malloc(size));
+#endif				/* _KERNEL */
+}
+
 
 inline static void
 osif_free(void* buf, uint64_t size)
@@ -229,15 +269,53 @@ void kernelheap_fini(void)
 }
 
 void *
-segkmem_alloc(vmem_t *vmp, size_t size, int vmflag)
+segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 {
-	return osif_malloc(size);
+	if (vmflag == VM_SLEEP) {
+		return osif_malloc_capped(size);
+	}
+
+	uint8_t vmflags = vmflag & 0xff;
+
+	if (vmflags & VM_PANIC) {
+		return osif_malloc_uncapped(size);
+	}
+
+	if (vmflags & VM_PUSHPAGE) {
+		return osif_malloc_reserve_cap(size);
+	}
+
+	if (vmflags & VM_NORMALPRI) {
+		return osif_malloc_capped(size);
+	}
+
+	atomic_inc_64(&stat_osif_default_calls);
+	return (osif_malloc_capped(size));
 }
 
 void *
 segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 {
-	return osif_malloc(size);
+	if (vmflag == VM_SLEEP) {
+		return osif_malloc_capped(size);
+	}
+
+	uint8_t vmflags = vmflag & 0xff;
+
+	if (vmflags & VM_PANIC) {
+		return osif_malloc_uncapped(size);
+	}
+
+	if (vmflags & VM_PUSHPAGE) {
+		return osif_malloc_reserve_cap(size);
+	}
+
+	if (vmflags & VM_NORMALPRI) {
+		return osif_malloc_capped(size);
+	}
+
+	atomic_inc_64(&stat_osif_default_calls);
+	return (osif_malloc_capped(size));
 }
 
 void

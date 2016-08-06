@@ -517,9 +517,14 @@ extern uint64_t stat_osif_malloc_denied;
 extern uint64_t stat_osif_malloc_success;
 extern uint64_t stat_osif_malloc_fail;
 extern uint64_t stat_osif_free;
-extern uint64_t stat_osif_alloc_tries_above_total_memory;
-extern uint64_t stat_osif_cum_bytes_above_total_memory;
-extern uint64_t stat_osif_cur_bytes_above_total_memory;
+extern uint64_t stat_osif_reserve_inuse;
+extern uint64_t stat_osif_cum_reserve_allocs;
+extern uint64_t stat_osif_cum_reserve_bytes;
+extern uint64_t stat_osif_uncapped_calls;
+extern uint64_t stat_osif_capped_calls;
+extern uint64_t stat_osif_default_calls;
+
+uint64_t stat_cur_bytes_above_total_memory = 0;
 
 typedef struct spl_stats {
 	kstat_named_t spl_os_alloc;
@@ -546,9 +551,12 @@ typedef struct spl_stats {
 	kstat_named_t spl_osif_malloc_success;
 	kstat_named_t spl_osif_malloc_fail;
 	kstat_named_t spl_osif_free;
-	kstat_named_t spl_osif_alloc_tries_above_total_memory;
-	kstat_named_t spl_osif_cum_bytes_above_total_memory;
-	kstat_named_t spl_osif_cur_bytes_above_total_memory;
+	kstat_named_t spl_osif_cum_reserve_allocs;
+	kstat_named_t spl_osif_cum_reserve_bytes;
+	kstat_named_t spl_osif_uncapped_calls;
+	kstat_named_t spl_osif_capped_calls;
+	kstat_named_t spl_osif_default_calls;
+	kstat_named_t spl_cur_bytes_above_total_memory;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -576,9 +584,12 @@ static spl_stats_t spl_stats = {
 	{"spl_osif_malloc_success", KSTAT_DATA_UINT64},
 	{"spl_osif_malloc_fail", KSTAT_DATA_UINT64},
 	{"spl_osif_free", KSTAT_DATA_UINT64},
-	{"spl_osif_tries_above_total_memory", KSTAT_DATA_UINT64},
-	{"spl_osif_cum_bytes_above_total_memory", KSTAT_DATA_UINT64},
-	{"spl_osif_cur_bytes_above_total_memory", KSTAT_DATA_UINT64},
+	{"spl_osif_cum_reserve_allocs", KSTAT_DATA_UINT64},
+	{"spl_osif_cum_reserve_bytes", KSTAT_DATA_UINT64},
+	{"spl_osif_uncapped_calls", KSTAT_DATA_UINT64},
+	{"spl_osif_capped_calls", KSTAT_DATA_UINT64},
+	{"spl_osif_default_calls", KSTAT_DATA_UINT64},
+	{"spl_cur_bytes_above_total_memory", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4474,13 +4485,16 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_osif_malloc_success.value.ui64 = stat_osif_malloc_success;
 		ks->spl_osif_malloc_fail.value.ui64 = stat_osif_malloc_fail;
 		ks->spl_osif_free.value.ui64 = stat_osif_free;
-		ks->spl_osif_alloc_tries_above_total_memory.value.ui64 = stat_osif_alloc_tries_above_total_memory;
-		ks->spl_osif_cum_bytes_above_total_memory.value.ui64 = stat_osif_cum_bytes_above_total_memory;
+		ks->spl_osif_cum_reserve_allocs.value.ui64 = stat_osif_cum_reserve_allocs;
+		ks->spl_osif_cum_reserve_bytes.value.ui64 = stat_osif_cum_reserve_bytes;
+		ks->spl_osif_uncapped_calls.value.ui64 = stat_osif_uncapped_calls;
+		ks->spl_osif_capped_calls.value.ui64 = stat_osif_capped_calls;
+		ks->spl_osif_default_calls.value.ui64 = stat_osif_default_calls;
 		if(total_memory >= segkmem_total_mem_allocated)
-		  stat_osif_cur_bytes_above_total_memory = 0;
+		  stat_cur_bytes_above_total_memory = 0;
 		else
-		  stat_osif_cur_bytes_above_total_memory = segkmem_total_mem_allocated - total_memory;
-		ks->spl_osif_cur_bytes_above_total_memory.value.ui64 = stat_osif_cur_bytes_above_total_memory;
+		  stat_cur_bytes_above_total_memory = segkmem_total_mem_allocated - total_memory;
+		ks->spl_cur_bytes_above_total_memory.value.ui64 = stat_cur_bytes_above_total_memory;
 	}
 
 	return (0);
