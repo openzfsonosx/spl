@@ -289,6 +289,10 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 		return osif_malloc_capped(size);
 	}
 
+	if (vmflags & VM_NOSLEEP) {
+		return osif_malloc_capped(size);
+	}
+
 	atomic_inc_64(&stat_osif_default_calls);
 	return (osif_malloc_capped(size));
 }
@@ -311,6 +315,10 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 	}
 
 	if (vmflags & VM_NORMALPRI) {
+		return osif_malloc_capped(size);
+	}
+
+	if (vmflags & VM_NOSLEEP) {
 		return osif_malloc_capped(size);
 	}
 
