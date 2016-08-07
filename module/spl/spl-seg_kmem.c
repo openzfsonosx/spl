@@ -28,7 +28,9 @@
 #include <sys/vmem.h>
 #include <vm/seg_kmem.h>
 
-
+#include <sys/time.h>
+#include <sys/timer.h>
+#include <osx/condvar.h>
 
 /*
  * seg_kmem is the primary kernel memory segment driver.  It
@@ -129,6 +131,9 @@ vmem_t *zio_alloc_arena;					/* arena for allocating zio memory */
 
 #ifdef _KERNEL
 extern uint64_t total_memory;
+uint64_t tunable_osif_memory_cap = 0;
+uint64_t tunable_osif_memory_reserve = 0;
+uint64_t tunable_osif_pushpage_waitlimit = hz*10ULL;
 #endif
 uint64_t stat_osif_malloc_denied = 0;
 uint64_t stat_osif_malloc_success = 0;
@@ -141,40 +146,50 @@ uint64_t stat_osif_capped_calls = 0;
 uint64_t stat_osif_default_calls = 0;
 
 
-#define OSIF_RESERVE_PERCENT_ULL 110ULL // must be greater than 100ULL; make tunable?
+#define OSIF_RESERVE_PERCENT_ULL 10ULL // percent above cap we can allocate
 
 // slowpath: segkmem_total_mem_allocated + size > total_memory
 inline static void *
 osif_malloc_reserve_cap(uint64_t size)
 {
 #ifdef _KERNEL
-	static uint64_t total_memory_plus_some_is_ceiling = 0;
 	void *tr;
 	kern_return_t kr;
 
-	if (total_memory_plus_some_is_ceiling == 0 && total_memory > 0) {
-		total_memory_plus_some_is_ceiling =
-		    total_memory * OSIF_RESERVE_PERCENT_ULL / 100ULL;
+	if (tunable_osif_memory_cap == 0 && total_memory > 0) {
+		tunable_osif_memory_cap = total_memory;
+	}
+
+	if (tunable_osif_memory_reserve <= tunable_osif_memory_cap
+	    && total_memory > 0) {
+		tunable_osif_memory_reserve =
+		    total_memory +
+		    (total_memory * OSIF_RESERVE_PERCENT_ULL / 100ULL);
 	}
 
 	atomic_inc_64(&stat_osif_cum_reserve_allocs);
 
-	if (segkmem_total_mem_allocated + size <=
-	    total_memory_plus_some_is_ceiling) {
+	if (segkmem_total_mem_allocated + size <= tunable_osif_memory_reserve) {
 		kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0,
 					    SPL_TAG);
 
 		if (kr == KERN_SUCCESS) {
 			stat_osif_malloc_success++;
 			atomic_add_64(&segkmem_total_mem_allocated, size);
-			atomic_add_64(&stat_osif_cum_reserve_bytes, size);
+			if (segkmem_total_mem_allocated > total_memory) {	// close enough, logically
+				// rather than burn a variable to determine what fraction
+				// of this allocation is above total_memory threshold
+				// and anyway, that's maybe less interesting than this count for now
+				atomic_add_64(&stat_osif_cum_reserve_bytes,
+					      size);
+			}
 			return (tr);
 		} else {
 			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
 	} else {
-		stat_osif_malloc_denied++;
+		atomic_inc_64(&stat_osif_malloc_denied);
 		return (NULL);
 	}
 #else
@@ -216,8 +231,12 @@ osif_malloc_capped(uint64_t size)
 
 	atomic_inc_64(&stat_osif_capped_calls);
 
-	if ((segkmem_total_mem_allocated + size) > total_memory &&
-	    (total_memory > 0) &&
+	if (tunable_osif_memory_cap == 0 && total_memory > 0) {
+		tunable_osif_memory_cap = total_memory;
+	}
+
+	if ((segkmem_total_mem_allocated + size) > tunable_osif_memory_cap &&
+	    (tunable_osif_memory_cap > 0) &&
 	    (segkmem_total_mem_allocated > 0)) {
 		atomic_inc_64(&stat_osif_malloc_denied);
 		return (NULL);
@@ -268,6 +287,37 @@ void kernelheap_fini(void)
 	vmem_fini(heap_arena);
 }
 
+static inline void *
+osif_malloc_pushpage(size_t size)
+{
+	static uint64_t lastsuccess = 0;
+
+	void *ret = osif_malloc_reserve_cap(size);
+
+	if (ret != NULL) {
+		lastsuccess = zfs_lbolt();
+		return (ret);
+	}
+
+	uint64_t now = zfs_lbolt();
+	uint64_t elapsed = now - lastsuccess;
+
+	extern unsigned int vm_page_free_wanted;
+	extern unsigned int vm_page_free_count;
+
+	if (elapsed > tunable_osif_pushpage_waitlimit
+	    && vm_page_free_wanted == 0
+	    && vm_page_free_count > (size / PAGESIZE)) {
+		printf
+		    ("SPL: %s stuck for %llu ticks, force allocating %lu.\n",
+		     __func__, elapsed, size);
+		lastsuccess = now;
+		return osif_malloc_uncapped(size);
+	}
+
+	return (NULL);
+}
+
 void *
 segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 {
@@ -282,7 +332,7 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 	}
 
 	if (vmflags & VM_PUSHPAGE) {
-		return osif_malloc_reserve_cap(size);
+		return osif_malloc_pushpage(size);
 	}
 
 	if (vmflags & VM_NORMALPRI) {
@@ -311,7 +361,7 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 	}
 
 	if (vmflags & VM_PUSHPAGE) {
-		return osif_malloc_reserve_cap(size);
+		return osif_malloc_pushpage(size);
 	}
 
 	if (vmflags & VM_NORMALPRI) {

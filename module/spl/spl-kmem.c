@@ -523,6 +523,9 @@ extern uint64_t stat_osif_cum_reserve_bytes;
 extern uint64_t stat_osif_uncapped_calls;
 extern uint64_t stat_osif_capped_calls;
 extern uint64_t stat_osif_default_calls;
+extern uint64_t tunable_osif_memory_cap;
+extern uint64_t tunable_osif_memory_reserve;
+extern uint64_t tunable_osif_pushpage_waitlimit;
 
 uint64_t stat_cur_bytes_above_total_memory = 0;
 
@@ -557,6 +560,9 @@ typedef struct spl_stats {
 	kstat_named_t spl_osif_capped_calls;
 	kstat_named_t spl_osif_default_calls;
 	kstat_named_t spl_cur_bytes_above_total_memory;
+	kstat_named_t spl_tunable_osif_memory_cap;
+	kstat_named_t spl_tunable_osif_memory_reserve;
+	kstat_named_t spl_tunable_osif_pushpage_waitlimit;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -590,6 +596,9 @@ static spl_stats_t spl_stats = {
 	{"spl_osif_capped_calls", KSTAT_DATA_UINT64},
 	{"spl_osif_default_calls", KSTAT_DATA_UINT64},
 	{"spl_cur_bytes_above_total_memory", KSTAT_DATA_UINT64},
+	{"spl_tunable_osif_memory_cap", KSTAT_DATA_UINT64},
+	{"spl_tunable_osif_memory_reserve", KSTAT_DATA_UINT64},
+	{"spl_tunable_osif_pushpage_waitlimit", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4467,6 +4476,18 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		  spl_reap_timeout_seconds = ks->spl_spl_reap_timeout_seconds.value.ui64;
 		}
 
+		if (ks->spl_tunable_osif_memory_cap.value.ui64 != tunable_osif_memory_cap) {
+			tunable_osif_memory_cap = ks->spl_tunable_osif_memory_cap.value.ui64;
+		}
+
+		if (ks->spl_tunable_osif_memory_reserve.value.ui64 != tunable_osif_memory_reserve) {
+			tunable_osif_memory_reserve = ks->spl_tunable_osif_memory_reserve.value.ui64;
+		}
+
+		if (ks->spl_tunable_osif_pushpage_waitlimit.value.ui64 != tunable_osif_pushpage_waitlimit) {
+			tunable_osif_pushpage_waitlimit = ks->spl_tunable_osif_pushpage_waitlimit.value.ui64;
+		}
+
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
 		ks->spl_active_threads.value.ui64 = zfs_threads;
@@ -4495,6 +4516,9 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		else
 		  stat_cur_bytes_above_total_memory = segkmem_total_mem_allocated - total_memory;
 		ks->spl_cur_bytes_above_total_memory.value.ui64 = stat_cur_bytes_above_total_memory;
+		ks->spl_tunable_osif_memory_cap.value.ui64 = tunable_osif_memory_cap;
+		ks->spl_tunable_osif_memory_reserve.value.ui64 = tunable_osif_memory_reserve;
+		ks->spl_tunable_osif_pushpage_waitlimit.value.ui64 = tunable_osif_pushpage_waitlimit;
 	}
 
 	return (0);
