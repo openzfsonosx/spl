@@ -288,7 +288,7 @@ void kernelheap_fini(void)
 }
 
 static inline void *
-osif_malloc_pushpage(size_t size)
+osif_malloc_pushpage(size_t size, const char *caller)
 {
 	static uint64_t lastsuccess = 0;
 
@@ -305,14 +305,36 @@ osif_malloc_pushpage(size_t size)
 	extern unsigned int vm_page_free_wanted;
 	extern unsigned int vm_page_free_count;
 
-	if (elapsed > tunable_osif_pushpage_waitlimit
-	    && vm_page_free_wanted == 0
-	    && vm_page_free_count > (size / PAGESIZE)) {
-		printf
-		    ("SPL: %s stuck for %llu ticks, force allocating %lu.\n",
-		     __func__, elapsed, size);
-		lastsuccess = now;
-		return osif_malloc_uncapped(size);
+	if (elapsed > tunable_osif_pushpage_waitlimit) {
+		if (vm_page_free_wanted == 0
+		    && vm_page_free_count > (size / PAGESIZE)) {
+			printf("SPL: %s stuck for %llu ticks, force allocating %lu.\n",
+			    caller, elapsed, size);
+			lastsuccess = now;
+			return osif_malloc_uncapped(size);
+		} else if (vm_page_free_wanted == 0) {
+			printf("SPL: %s stuck for %llu ticks, vm_page_free_count is only %u, "
+			    "force allocating %lu anyway.\n",
+			    caller, elapsed, vm_page_free_count, size);
+			lastsuccess = now;
+			return osif_malloc_uncapped(size);
+		} else if (elapsed > (6*tunable_osif_pushpage_waitlimit)
+		    || (now % (hz*60))==0) {
+			printf("SPL: %s stuck for %llu seconds, vm_page_free_wanted = %u, "
+			    "vm_page_free_count = %u, force_allocating %lu nevertheless.\n",
+			    caller, (elapsed / hz),
+			    vm_page_free_wanted, vm_page_free_count,
+			    size);
+			lastsuccess = now;
+			return osif_malloc_uncapped(size);
+		} else if ((now % (10*hz))==0) {
+			printf("SPL: %s stuck badly, been %llu seconds, "
+			    "vm_page_free_wanted = %u, vm_page_free_count = %u, still waiting for %lu.\n",
+			    caller, (elapsed/hz),
+			    vm_page_free_wanted, vm_page_free_count,
+			    size);
+			return (NULL);
+		}
 	}
 
 	return (NULL);
@@ -332,7 +354,7 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 	}
 
 	if (vmflags & VM_PUSHPAGE) {
-		return osif_malloc_pushpage(size);
+		return osif_malloc_pushpage(size, __func__);
 	}
 
 	if (vmflags & VM_NORMALPRI) {
@@ -343,6 +365,8 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 		return osif_malloc_capped(size);
 	}
 
+	printf("SPL: %s default alloc, size = %lu, vmflag = %x.\n",
+	    __func__, size, vmflag);
 	atomic_inc_64(&stat_osif_default_calls);
 	return (osif_malloc_capped(size));
 }
@@ -361,7 +385,7 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 	}
 
 	if (vmflags & VM_PUSHPAGE) {
-		return osif_malloc_pushpage(size);
+		return osif_malloc_pushpage(size, __func__);
 	}
 
 	if (vmflags & VM_NORMALPRI) {
@@ -372,6 +396,8 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 		return osif_malloc_capped(size);
 	}
 
+	printf("SPL: %s default alloc, size = %lu, vmflag = %x.\n",
+	    __func__, size, vmflag);
 	atomic_inc_64(&stat_osif_default_calls);
 	return (osif_malloc_capped(size));
 }
