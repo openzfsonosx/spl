@@ -4112,12 +4112,15 @@ spl_free_thread()
 			lowmem = true;
 		}
 
-		// add 10% of the total memory cap if we are far from the cap
-		// add 5% of the total memory cap if we are not too near the cap
+		// add 20% of the total memory cap if we are far from the cap
+		// add 10% of the total memory cap if we are not too near the cap
+		// add  5% of the total memory cap if we are below 90% of the cap
 
 		if (!lowmem && segkmem_total_mem_allocated < (tunable_osif_memory_cap >> 1)) {
-			spl_free += tunable_osif_memory_cap / 10ULL;
+			spl_free += tunable_osif_memory_cap / 5ULL;
 		} else if (!lowmem && segkmem_total_mem_allocated < tunable_osif_memory_cap / 75ULL * 100ULL) {
+			spl_free += tunable_osif_memory_cap / 10ULL;
+		} else if (!lowmem && segkmem_total_mem_allocated < tunable_osif_memory_cap / 90ULL * 100ULL) {
 			spl_free += tunable_osif_memory_cap / 20ULL;
 		}
 
