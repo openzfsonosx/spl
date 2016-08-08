@@ -26,11 +26,18 @@
 #include <sys/atomic.h>
 
 #include <sys/vmem.h>
+#include <sys/vmem_impl.h>
+// ugly: smd
+#ifdef kmem_free
+#undef kmem_free
+#endif
 #include <vm/seg_kmem.h>
 
 #include <sys/time.h>
 #include <sys/timer.h>
 #include <osx/condvar.h>
+
+#include <stdbool.h>
 
 /*
  * seg_kmem is the primary kernel memory segment driver.  It
@@ -343,61 +350,90 @@ osif_malloc_pushpage(size_t size, const char *caller)
 void *
 segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 {
+	void *ret = NULL;
+	bool called = false;
+
 	if (vmflag == VM_SLEEP) {
-		return osif_malloc_capped(size);
+		ret = osif_malloc_capped(size);
+		called = true;
 	}
 
 	uint8_t vmflags = vmflag & 0xff;
 
 	if (vmflags & VM_PANIC) {
-		return osif_malloc_uncapped(size);
+		ret = osif_malloc_uncapped(size);
+		called = true;
 	}
 
 	if (vmflags & VM_PUSHPAGE) {
-		return osif_malloc_pushpage(size, __func__);
+		ret = osif_malloc_pushpage(size, __func__);
+		called = true;
 	}
 
 	if (vmflags & VM_NORMALPRI) {
-		return osif_malloc_capped(size);
+		ret = osif_malloc_capped(size);
+		called = true;
 	}
 
 	if (vmflags & VM_NOSLEEP) {
-		return osif_malloc_capped(size);
+		return (osif_malloc_capped(size));
+	}
+
+	if (ret != NULL) {
+		cv_broadcast(&vmp->vm_cv);
+		return (ret);
+	} else if (called == true) {
+		return (NULL);
 	}
 
 	printf("SPL: %s default alloc, size = %lu, vmflag = %x.\n",
-	    __func__, size, vmflag);
+	       __func__, size, vmflag);
 	atomic_inc_64(&stat_osif_default_calls);
 	return (osif_malloc_capped(size));
 }
 
+
 void *
 segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 {
+		void *ret = NULL;
+	bool called = false;
+
 	if (vmflag == VM_SLEEP) {
-		return osif_malloc_capped(size);
+		ret = osif_malloc_capped(size);
+		called = true;
 	}
 
 	uint8_t vmflags = vmflag & 0xff;
 
 	if (vmflags & VM_PANIC) {
-		return osif_malloc_uncapped(size);
+		ret = osif_malloc_uncapped(size);
+		called = true;
 	}
 
 	if (vmflags & VM_PUSHPAGE) {
-		return osif_malloc_pushpage(size, __func__);
+		ret = osif_malloc_pushpage(size, __func__);
+		called = true;
 	}
 
 	if (vmflags & VM_NORMALPRI) {
-		return osif_malloc_capped(size);
+		ret = osif_malloc_capped(size);
+		called = true;
 	}
 
 	if (vmflags & VM_NOSLEEP) {
-		return osif_malloc_capped(size);
+		return (osif_malloc_capped(size));
+	}
+
+	if (ret != NULL) {
+		cv_broadcast(&vmp->vm_cv);
+		return (ret);
+	} else if (called == true) {
+		return (NULL);
 	}
 
 	printf("SPL: %s default alloc, size = %lu, vmflag = %x.\n",
-	    __func__, size, vmflag);
+	       __func__, size, vmflag);
 	atomic_inc_64(&stat_osif_default_calls);
 	return (osif_malloc_capped(size));
 }
@@ -406,12 +442,14 @@ void
 segkmem_free(vmem_t *vmp, void *inaddr, size_t size)
 {
 	osif_free(inaddr, size);
+	cv_broadcast(&vmp->vm_cv);
 }
 
 void
 segkmem_zio_free(vmem_t *vmp, void *inaddr, size_t size)
 {
 	osif_free(inaddr, size);
+	cv_broadcast(&vmp->vm_cv);
 }
 
 /*
