@@ -4387,11 +4387,11 @@ memory_monitor_thread()
 
 		if (!shutting_down) {
 
-			// has it been five minutes?  reap if the system has less than 20% real memory free
+			// has it been five minutes?  reap if the system has less than 10% real memory free
 			if ((zfs_lbolt() - last_reap) > (hz*300)) {
-				uint32_t twentypct_real_pages = (uint32_t)((real_total_memory / 20ULL) / PAGESIZE);
-				if ((vm_page_free_count + vm_page_speculative_count) < twentypct_real_pages) {
-					printf("SPL: MMT background 80%% real memory check, vm_page_free_wanted = %u, vm_page_free_count == %u, periodic reaping\n",
+				uint32_t tenpct_real_pages = (uint32_t)((real_total_memory / 10ULL) / PAGESIZE);
+				if ((vm_page_free_count + vm_page_speculative_count) < tenpct_real_pages) {
+					printf("SPL: MMT background 90%% real memory check, vm_page_free_wanted = %u, vm_page_free_count == %u, periodic reaping\n",
 						   vm_page_free_wanted,
 						   vm_page_free_count);
 					mutex_enter(&reap_now_lock);
