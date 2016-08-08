@@ -4112,6 +4112,15 @@ spl_free_thread()
 			lowmem = true;
 		}
 
+		// add 10% of the total memory cap if we are far from the cap
+		// add 5% of the total memory cap if we are not too near the cap
+
+		if (!lowmem && segkmem_total_mem_allocated < (tunable_osif_memory_cap >> 1)) {
+			spl_free += tunable_osif_memory_cap / 10ULL;
+		} else if (!lowmem && segkmem_total_mem_allocated < tunable_osif_memory_cap / 75ULL * 100ULL) {
+			spl_free += tunable_osif_memory_cap / 20ULL;
+		}
+
 		// leave slop in kmem for non-arc, back way down if kmem is nearly full
 		// os_mem_alloc sysctl is segkmem_total_mem_allocated
 		if (segkmem_total_mem_allocated > tunable_osif_memory_reserve * 98ULL / 100ULL) {
@@ -4138,6 +4147,8 @@ spl_free_thread()
 
 		// stop arc from grabbing allll the memory near startup and after a big evacuation of memory
 		// (e.g. fast I/O small memory)
+		// this does a small deflation compared to typical tunable_osif_memory_cap sizes (GiBs)
+		// this helps a little with rapidly growing user space demands at login/boot time
 		if (spl_free > tunable_osif_memory_cap) { // by default 80% of real_total_memory
 			spl_free -= 128*1024*1024;
 		}
