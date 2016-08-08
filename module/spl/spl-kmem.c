@@ -3121,7 +3121,7 @@ spl_minimal_physmem_p_logic()
 		return (false);
 	if (vm_page_free_count > (vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES))
 		return (false);
-	if (segkmem_total_mem_allocated > total_memory * 99ULL / 100ULL)
+	if (segkmem_total_mem_allocated > tunable_osif_memory_reserve * 99ULL / 100ULL)
 		return (false);
 
 	return (true);
@@ -4114,9 +4114,9 @@ spl_free_thread()
 
 		// leave slop in kmem for non-arc, back way down if kmem is nearly full
 		// os_mem_alloc sysctl is segkmem_total_mem_allocated
-		if (segkmem_total_mem_allocated > total_memory * 98ULL / 100ULL) {
+		if (segkmem_total_mem_allocated > tunable_osif_memory_reserve * 98ULL / 100ULL) {
 			int64_t big_used = segkmem_total_mem_allocated * 100LL;
-			int64_t pct_used = big_used / (int64_t)total_memory;  // range is 85+
+			int64_t pct_used = big_used / (int64_t)tunable_osif_memory_cap;  // range is 85+
 
 			if (pct_used >= 98 && spl_free > 0) {
 				spl_free = -1;
@@ -4131,14 +4131,14 @@ spl_free_thread()
 			// and that may continue for 1/10 second,
 			// so it's a big shrink.
 
-			spl_free -= (pct_used - 97) * (int64_t)(total_memory / 1000ULL);
+			spl_free -= (pct_used - 97) * (int64_t)(tunable_osif_memory_cap / 1000ULL);
 
 			lowmem = true;
 		}
 
 		// stop arc from grabbing allll the memory near startup and after a big evacuation of memory
 		// (e.g. fast I/O small memory)
-		if (spl_free > total_memory) { // total_memory is 80% of real_total_memory
+		if (spl_free > tunable_osif_memory_cap) { // by default 80% of real_total_memory
 			spl_free -= 128*1024*1024;
 		}
 		if (spl_free > real_total_memory * 90ULL / 100ULL) {
@@ -4152,7 +4152,7 @@ spl_free_thread()
 		if (emergency_lowmem) {
 			// shove this right into arc_reclaim_thread, rather than waiting for eventual reaction
 			// to a negative spl_free.
-			spl_free_set_emergency_pressure((int64_t)total_memory / 200LL);
+			spl_free_set_emergency_pressure((int64_t)tunable_osif_memory_cap / 200LL);
 		}
 
 		if (spl_free < 0)
@@ -4214,7 +4214,7 @@ reap_thread()
 			kmem_reap_idspace();
 			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
 		} else if (om > previous_segkmem_total_mem_allocated &&
-				  om > (total_memory * 90ULL / 100ULL) &&
+				  om > (tunable_osif_memory_reserve * 90ULL / 100ULL) &&
 				  zfs_lbolt() - last_reap > (hz*10)) {
 			reap_now = 0;
 			mutex_exit(&reap_now_lock);
@@ -4225,7 +4225,7 @@ reap_thread()
 			kmem_reap();
 			kmem_reap_idspace();
 			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-		} else if (om > (total_memory * 90ULL / 100ULL) &&
+		} else if (om > (tunable_osif_memory_reserve * 90ULL / 100ULL) &&
 				  zfs_lbolt() - last_reap > (hz*60)) {
 			reap_now = 0;
 			mutex_exit(&reap_now_lock);
