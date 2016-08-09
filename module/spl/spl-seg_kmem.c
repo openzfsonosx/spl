@@ -385,7 +385,9 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 		cv_signal(&vmp->vm_cv);
 		return (ret);
 	} else if (called == true) {
-		cv_signal(&vmp->vm_cv);
+		// should we or not signal?
+		// since adjusting vmem_update(), probably not
+		//cv_signal(&vmp->vm_cv);
 		return (NULL);
 	}
 
@@ -432,7 +434,9 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 		cv_signal(&vmp->vm_cv);
 		return (ret);
 	} else if (called == true) {
-		cv_signal(&vmp->vm_cv);
+		// should we or not signal?
+		// since adjusting vmem_update(), probably not
+		//cv_signal(&vmp->vm_cv);
 		return (NULL);
 	}
 
