@@ -373,6 +373,12 @@ vmem_seg_t *_vnext = (vsp)->vs_##type##next;			\
 (_vnext)->vs_##type##prev = (_vprev);				\
 }
 
+/// vmem thread block count
+static uint64_t spl_vmem_threads_waiting = 0;
+extern uint64_t tunable_osif_memory_cap;
+extern void spl_free_set_emergency_pressure(int64_t p);
+extern uint64_t segkmem_total_mem_allocated;
+
 /*
  * Get a vmem_seg_t from the global segfree list.
  */
@@ -898,6 +904,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			vmp->vm_kstat.vk_wait.value.ui64++;
 			printf("SPL: %s: waiting for %lu sized alloc after full circle, arena %s.\n",
 			    __func__, size, vmp->vm_name);
+			atomic_inc_64(&spl_vmem_threads_waiting);
 			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 			vsp = rotor->vs_anext;
 		}
@@ -1184,6 +1191,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		vmp->vm_kstat.vk_wait.value.ui64++;
 		printf("SPL: %s: vmem waiting for %lu sized alloc, arena %s\n",
 		    __func__, size, vmp->vm_name);
+		atomic_inc_64(&spl_vmem_threads_waiting);
 		cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 	}
 	if (vbest != NULL) {
@@ -1787,7 +1795,22 @@ vmem_update(void *dummy)
 		vmem_hash_rescale(vmp);
 	}
 	mutex_exit(&vmem_list_lock);
-	
+
+	if(spl_vmem_threads_waiting > 0) {
+		if(tunable_osif_memory_cap < segkmem_total_mem_allocated) {
+		    printf("SPL: %s: waiting threads = %llu, bytes above cap = %llu\n",
+			__func__,
+			spl_vmem_threads_waiting,
+			segkmem_total_mem_allocated - tunable_osif_memory_cap);
+		    spl_free_set_emergency_pressure(1ULL*1024ULL*1024ULL); // free a MiB
+		} else {
+			printf("SPL: %s waiting threads= %llu\n", __func__,
+				spl_vmem_threads_waiting);
+		}
+		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
+	}
+
+
 	(void) bsd_timeout(vmem_update, dummy, &vmem_update_interval);
 }
 
