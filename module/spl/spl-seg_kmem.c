@@ -385,6 +385,7 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 		cv_broadcast(&vmp->vm_cv);
 		return (ret);
 	} else if (called == true) {
+		cv_broadcast(&vmp->vm_cv);
 		return (NULL);
 	}
 
@@ -431,6 +432,7 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 		cv_broadcast(&vmp->vm_cv);
 		return (ret);
 	} else if (called == true) {
+		cv_broadcast(&vmp->vm_cv);
 		return (NULL);
 	}
 
