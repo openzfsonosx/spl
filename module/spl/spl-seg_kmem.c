@@ -382,10 +382,10 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 	}
 
 	if (ret != NULL) {
-		cv_broadcast(&vmp->vm_cv);
+		cv_signal(&vmp->vm_cv);
 		return (ret);
 	} else if (called == true) {
-		cv_broadcast(&vmp->vm_cv);
+		cv_signal(&vmp->vm_cv);
 		return (NULL);
 	}
 
@@ -429,10 +429,10 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 	}
 
 	if (ret != NULL) {
-		cv_broadcast(&vmp->vm_cv);
+		cv_signal(&vmp->vm_cv);
 		return (ret);
 	} else if (called == true) {
-		cv_broadcast(&vmp->vm_cv);
+		cv_signal(&vmp->vm_cv);
 		return (NULL);
 	}
 
@@ -446,14 +446,14 @@ void
 segkmem_free(vmem_t *vmp, void *inaddr, size_t size)
 {
 	osif_free(inaddr, size);
-	cv_broadcast(&vmp->vm_cv);
+	cv_signal(&vmp->vm_cv);
 }
 
 void
 segkmem_zio_free(vmem_t *vmp, void *inaddr, size_t size)
 {
 	osif_free(inaddr, size);
-	cv_broadcast(&vmp->vm_cv);
+	cv_signal(&vmp->vm_cv);
 }
 
 /*
