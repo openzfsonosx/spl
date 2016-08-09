@@ -1802,9 +1802,9 @@ vmem_update(void *dummy)
 			__func__,
 			spl_vmem_threads_waiting,
 			segkmem_total_mem_allocated - tunable_osif_memory_cap);
-		    spl_free_set_emergency_pressure(1ULL*1024ULL*1024ULL); // free a MiB
+		    spl_free_set_emergency_pressure(16ULL*1024ULL*1024ULL); // tell arc to shrink 16MiB
 		} else {
-			printf("SPL: %s waiting threads= %llu\n", __func__,
+			printf("SPL: %s waiting threads = %llu\n", __func__,
 				spl_vmem_threads_waiting);
 		}
 		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
