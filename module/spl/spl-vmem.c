@@ -896,6 +896,8 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 									0, 0, NULL, NULL, vmflag & VM_KMFLAGS));
 			}
 			vmp->vm_kstat.vk_wait.value.ui64++;
+			printf("SPL: %s: waiting for %lu sized alloc after full circle, arena %s.\n",
+			    __func__, size, vmp->vm_name);
 			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 			vsp = rotor->vs_anext;
 		}
@@ -1180,7 +1182,8 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		if (vmflag & VM_NOSLEEP)
 			break;
 		vmp->vm_kstat.vk_wait.value.ui64++;
-		printf("SPL: vmem waiting for %lu sized alloc\n", size);
+		printf("SPL: %s: vmem waiting for %lu sized alloc, arena %s\n",
+		    __func__, size, vmp->vm_name);
 		cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 	}
 	if (vbest != NULL) {
