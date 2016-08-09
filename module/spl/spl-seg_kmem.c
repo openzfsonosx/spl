@@ -164,14 +164,16 @@ osif_malloc_reserve_cap(uint64_t size)
 	kern_return_t kr;
 
 	if (tunable_osif_memory_cap == 0 && total_memory > 0) {
-		tunable_osif_memory_cap = total_memory;
+		tunable_osif_memory_cap = total_memory + (1024ULL * 1024ULL * 1024ULL);
 	}
 
-	if (tunable_osif_memory_reserve <= tunable_osif_memory_cap
+	if (tunable_osif_memory_reserve <=
+	    (tunable_osif_memory_cap + (1024ULL * 1024ULL * 1024ULL))
 	    && total_memory > 0) {
 		tunable_osif_memory_reserve =
 		    total_memory +
-		    (total_memory * OSIF_RESERVE_PERCENT_ULL / 100ULL);
+		    (total_memory * OSIF_RESERVE_PERCENT_ULL / 100ULL) +
+		    (2ULL * 1024ULL * 1024ULL * 1024ULL);
 	}
 
 	atomic_inc_64(&stat_osif_cum_reserve_allocs);
@@ -239,7 +241,7 @@ osif_malloc_capped(uint64_t size)
 	atomic_inc_64(&stat_osif_capped_calls);
 
 	if (tunable_osif_memory_cap == 0 && total_memory > 0) {
-		tunable_osif_memory_cap = total_memory;
+		tunable_osif_memory_cap = total_memory + (1024ULL * 1024ULL * 1024ULL);
 	}
 
 	if ((segkmem_total_mem_allocated + size) > tunable_osif_memory_cap &&
