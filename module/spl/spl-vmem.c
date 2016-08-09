@@ -1779,7 +1779,11 @@ void
 vmem_update(void *dummy)
 {
 	vmem_t *vmp;
-	
+
+	uint64_t prev = spl_vmem_threads_waiting;
+
+	atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
+
 	mutex_enter(&vmem_list_lock);
 	for (vmp = vmem_list; vmp != NULL; vmp = vmp->vm_next) {
 		/*
@@ -1796,20 +1800,28 @@ vmem_update(void *dummy)
 	}
 	mutex_exit(&vmem_list_lock);
 
-	if(spl_vmem_threads_waiting > 0) {
-		if(tunable_osif_memory_cap < segkmem_total_mem_allocated) {
-		    printf("SPL: %s: waiting threads = %llu, bytes above cap = %llu\n",
-			__func__,
-			spl_vmem_threads_waiting,
-			segkmem_total_mem_allocated - tunable_osif_memory_cap);
-		    spl_free_set_emergency_pressure(16ULL*1024ULL*1024ULL); // tell arc to shrink 16MiB
+	// the cv_broadcast may have awakened some threads, which promptly
+	// go back to waiting.
+
+	if (prev > 0) {
+		if (tunable_osif_memory_cap < segkmem_total_mem_allocated) {
+			uint64_t bytes_above_cap =
+			    segkmem_total_mem_allocated - tunable_osif_memory_cap;
+			printf
+			    ("SPL: %s: waited threads = %llu (%llu), bytes above cap = %llu\n",
+				__func__, prev, spl_vmem_threads_waiting, bytes_above_cap);
+			// tell arc to shrink fast by 1/4 of the amount we are above cap
+			spl_free_set_emergency_pressure(bytes_above_cap >> 2);
+			// there is not really all that much we can do if arc*min is too big
+			// for tunable_osif_memory_cap.   the gap between the two may need
+			// to be increased dynamically (and temporarily), but we can only do
+			// that if one or both is at default.
 		} else {
 			printf("SPL: %s waiting threads = %llu\n", __func__,
-				spl_vmem_threads_waiting);
+			    spl_vmem_threads_waiting);
 		}
 		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
 	}
-
 
 	(void) bsd_timeout(vmem_update, dummy, &vmem_update_interval);
 }
