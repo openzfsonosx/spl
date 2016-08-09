@@ -4031,7 +4031,7 @@ spl_free_set_pressure(int64_t p)
 	mutex_exit(&spl_free_manual_pressure_lock);
 }
 
-static inline void
+void
 spl_free_set_emergency_pressure(int64_t p)
 {
 	mutex_enter(&spl_free_manual_pressure_lock);
