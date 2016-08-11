@@ -466,11 +466,20 @@ segkmem_zio_free(vmem_t *vmp, void *inaddr, size_t size)
  * fallback to using the kmem_default arena same 
  * as all the other caches.
  */
+// smd: we nevertheless plumb in an arena with heap as parent, so that
+//      we can track stats and maintain the VM_ / qc settings differently
 void
 segkmem_zio_init()
 {
-	zio_arena = NULL;
-	zio_alloc_arena = NULL;
+	zio_arena = vmem_create("zfs_file_data", NULL, 0,
+	    PAGESIZE, vmem_alloc, vmem_free, heap_arena,
+	    32 * 1024, VM_SLEEP);
+
+	zio_alloc_arena = vmem_create("zfs_file_data_buf", NULL, 0,
+	    PAGESIZE, vmem_alloc, vmem_free, zio_arena, 0, VM_SLEEP);
+
+	ASSERT(zio_arena != NULL);
+	ASSERT(zio_alloc_arena != NULL);
 }
 
 void
