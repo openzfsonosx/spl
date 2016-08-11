@@ -329,6 +329,7 @@ static vmem_t *vmem_hash_arena;
 static vmem_t *vmem_vmem_arena;
 static vmem_t *heap_parent; // This is a proxy arena that is a thin wrapper around the OS allocator
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
+static struct timespec  vmem_fast_update_interval = {1, 0};  // for when there are waiting threads
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
@@ -1821,6 +1822,7 @@ vmem_update(void *dummy)
 			    spl_vmem_threads_waiting);
 		}
 		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
+		(void) bsd_timeout(vmem_update, dummy, &vmem_fast_update_interval);
 	}
 
 	(void) bsd_timeout(vmem_update, dummy, &vmem_update_interval);
