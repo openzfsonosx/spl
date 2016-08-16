@@ -221,6 +221,7 @@
 #include <sys/debug.h>
 #include <sys/types.h>
 //#include <sys/panic.h>
+#include <stdbool.h>
 
 #define	VMEM_INITIAL		10	/* early vmem arenas */
 #define	VMEM_SEG_INITIAL	400
@@ -1782,6 +1783,7 @@ vmem_update(void *dummy)
 	vmem_t *vmp;
 
 	uint64_t prev = spl_vmem_threads_waiting;
+	_Bool fast = false;
 
 	atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
 
@@ -1822,10 +1824,14 @@ vmem_update(void *dummy)
 			    spl_vmem_threads_waiting);
 		}
 		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
-		(void) bsd_timeout(vmem_update, dummy, &vmem_fast_update_interval);
+		fast = true;
 	}
 
-	(void) bsd_timeout(vmem_update, dummy, &vmem_update_interval);
+	if(fast) {
+		(void) bsd_timeout(vmem_update, dummy, &vmem_fast_update_interval);
+	} else {
+		(void) bsd_timeout(vmem_update, dummy, &vmem_update_interval);
+	}
 }
 
 void
