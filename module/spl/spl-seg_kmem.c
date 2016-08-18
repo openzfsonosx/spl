@@ -402,8 +402,16 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 void *
 segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 {
-		void *ret = NULL;
+	void *ret = NULL;
 	bool called = false;
+
+	extern unsigned vm_page_free_count;
+	extern unsigned vm_page_free_wanted;
+
+	if (vm_page_free_wanted >  0 ||
+	    (vm_page_free_count >> 3) < (size / PAGESIZE)) {
+		kpreempt(KPREEMPT_SYNC);
+	}
 
 	if (vmflag == VM_SLEEP) {
 		ret = osif_malloc_capped(size);
