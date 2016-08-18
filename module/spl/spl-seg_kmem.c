@@ -268,35 +268,6 @@ osif_malloc_capped(uint64_t size)
 #endif				/* _KERNEL */
 }
 
-
-inline static void
-osif_free(void* buf, uint64_t size)
-{
-#ifdef _KERNEL
-    kmem_free(kernel_map, buf, size);
-    stat_osif_free++;
-    atomic_sub_64(&segkmem_total_mem_allocated, size);
-#else
-    free(buf);
-#endif /* _KERNEL */
-}
-
-/*
- * Configure vmem, such that the heap arena is fed,
- * and drains to the kernel low level allocator.
- */
-void
-kernelheap_init()
-{
-	heap_arena = vmem_init("heap", NULL, 0, PAGESIZE, segkmem_alloc, segkmem_free);
-}
-
-
-void kernelheap_fini(void)
-{
-	vmem_fini(heap_arena);
-}
-
 static inline void *
 osif_malloc_pushpage(size_t size, const char *caller)
 {
@@ -348,6 +319,34 @@ osif_malloc_pushpage(size_t size, const char *caller)
 	}
 
 	return (NULL);
+}
+
+inline static void
+osif_free(void* buf, uint64_t size)
+{
+#ifdef _KERNEL
+    kmem_free(kernel_map, buf, size);
+    stat_osif_free++;
+    atomic_sub_64(&segkmem_total_mem_allocated, size);
+#else
+    free(buf);
+#endif /* _KERNEL */
+}
+
+/*
+ * Configure vmem, such that the heap arena is fed,
+ * and drains to the kernel low level allocator.
+ */
+void
+kernelheap_init()
+{
+	heap_arena = vmem_init("heap", NULL, 0, PAGESIZE, segkmem_alloc, segkmem_free);
+}
+
+
+void kernelheap_fini(void)
+{
+	vmem_fini(heap_arena);
 }
 
 void *
