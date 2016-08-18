@@ -1704,11 +1704,22 @@ kmem_depot_ws_update(kmem_cache_t *cp)
 }
 
 /*
+ * Setting this high (1GB) causes the explicit kpreempt() to have very little effect.
+ * To make calls to kpreempt() more frequent, use a smaller value.
+ * A few megabytes is usually small enough that it will run hundreds of times per second.
+ *
+ */
+//size_t kmem_reap_preempt_bytes = 1024 * 1024 * 1024;
+size_t kmem_reap_preempt_bytes = 128 * 1024 * 1024;
+
+
+/*
  * Reap all magazines that have fallen out of the depot's working set.
  */
 static void
 kmem_depot_ws_reap(kmem_cache_t *cp)
 {
+	size_t bytes = 0;
 	long reap;
 	kmem_magazine_t *mp;
 
@@ -1716,12 +1727,26 @@ kmem_depot_ws_reap(kmem_cache_t *cp)
 		   taskq_member(kmem_taskq, curthread));
 
 	reap = MIN(cp->cache_full.ml_reaplimit, cp->cache_full.ml_min);
-	while (reap-- && (mp = kmem_depot_alloc(cp, &cp->cache_full)) != NULL)
+	while (reap-- &&
+	    (mp = kmem_depot_alloc(cp, &cp->cache_full)) != NULL) {
 		kmem_magazine_destroy(cp, mp, cp->cache_magtype->mt_magsize);
+		bytes += cp->cache_magtype->mt_magsize * cp->cache_bufsize;
+		if (bytes > kmem_reap_preempt_bytes) {
+			kpreempt(KPREEMPT_SYNC);
+			bytes = 0;
+		}
+	}
 
 	reap = MIN(cp->cache_empty.ml_reaplimit, cp->cache_empty.ml_min);
-	while (reap-- && (mp = kmem_depot_alloc(cp, &cp->cache_empty)) != NULL)
+	while (reap-- &&
+	    (mp = kmem_depot_alloc(cp, &cp->cache_empty)) != NULL) {
 		kmem_magazine_destroy(cp, mp, 0);
+		bytes += cp->cache_magtype->mt_magsize * cp->cache_bufsize;
+		if (bytes > kmem_reap_preempt_bytes) {
+			kpreempt(KPREEMPT_SYNC);
+			bytes = 0;
+		}
+	}
 }
 
 static void
