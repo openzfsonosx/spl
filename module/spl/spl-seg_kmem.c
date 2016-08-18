@@ -312,8 +312,8 @@ osif_malloc_pushpage(size_t size, const char *caller)
 	uint64_t now = zfs_lbolt();
 	uint64_t elapsed = now - lastsuccess;
 
-	extern unsigned int vm_page_free_wanted;
-	extern unsigned int vm_page_free_count;
+	volatile extern unsigned int vm_page_free_wanted;
+	volatile extern unsigned int vm_page_free_count;
 
 	if (elapsed > tunable_osif_pushpage_waitlimit) {
 		if (vm_page_free_wanted == 0
@@ -356,7 +356,13 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 	void *ret = NULL;
 	bool called = false;
 
+	volatile extern unsigned int vm_page_free_wanted;
+	volatile extern unsigned int vm_page_free_count;
+
 	if (vmflag == VM_SLEEP) {
+		if (vm_page_free_wanted > 0) {
+			return (NULL);
+		}
 		ret = osif_malloc_capped(size);
 		called = true;
 	}
@@ -370,6 +376,17 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 
 	if (vmflags & VM_PUSHPAGE) {
 		ret = osif_malloc_pushpage(size, __func__);
+		called = true;
+	}
+
+	if (vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
+		if (vm_page_free_wanted > 0) {
+			return (NULL);
+		}
+		if (vm_page_free_count < 8 * (size / PAGESIZE)) {
+			return (NULL);
+		}
+		ret = osif_malloc_capped(size);
 		called = true;
 	}
 
@@ -405,15 +422,18 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 	void *ret = NULL;
 	bool called = false;
 
-	extern unsigned vm_page_free_count;
-	extern unsigned vm_page_free_wanted;
+	volatile extern unsigned int vm_page_free_count;
+	volatile extern unsigned int vm_page_free_wanted;
 
 	if (vm_page_free_wanted >  0 ||
-	    (vm_page_free_count >> 3) < (size / PAGESIZE)) {
+	    vm_page_free_count < 8 * (size / PAGESIZE)) {
 		kpreempt(KPREEMPT_SYNC);
 	}
 
 	if (vmflag == VM_SLEEP) {
+		if (vm_page_free_wanted > 0) {
+			return (NULL);
+		}
 		ret = osif_malloc_capped(size);
 		called = true;
 	}
@@ -427,6 +447,17 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 
 	if (vmflags & VM_PUSHPAGE) {
 		ret = osif_malloc_pushpage(size, __func__);
+		called = true;
+	}
+
+	if (vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
+		if (vm_page_free_wanted > 0) {
+			return (NULL);
+		}
+		if (vm_page_free_count < 8 * (size / PAGESIZE)) {
+			return (NULL);
+		}
+		ret = osif_malloc_capped(size);
 		called = true;
 	}
 
