@@ -1723,6 +1723,12 @@ vmem_destroy_internal(vmem_t *vmp)
 }
 
 /*
+ * Only shrink vmem hashtable if it is 1<<vmem_rescale_minshift times (8x)
+ * larger than necessary.
+ */
+int vmem_rescale_minshift = 3;
+
+/*
  * Resize vmp's hash table to keep the average lookup depth near 1.0.
  */
 static void
@@ -1730,16 +1736,17 @@ vmem_hash_rescale(vmem_t *vmp)
 {
 	vmem_seg_t **old_table, **new_table, *vsp;
 	size_t old_size, new_size, h, nseg;
-	
+
 	nseg = (size_t)(vmp->vm_kstat.vk_alloc.value.ui64 -
 	    vmp->vm_kstat.vk_free.value.ui64);
-	
+
 	new_size = MAX(VMEM_HASH_INITIAL, 1 << (highbit(3 * nseg + 4) - 2));
 	old_size = vmp->vm_hash_mask + 1;
-	
-	if ((old_size >> 1) <= new_size && new_size <= (old_size << 1))
+
+	if ((old_size >> vmem_rescale_minshift) <= new_size &&
+	    new_size <= (old_size << 1))
 		return;
-	
+
 	new_table = vmem_alloc(vmem_hash_arena, new_size * sizeof (void *),
 						   VM_NOSLEEP);
 	if (new_table == NULL)
