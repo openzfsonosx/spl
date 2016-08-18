@@ -377,9 +377,11 @@ vmem_seg_t *_vnext = (vsp)->vs_##type##next;			\
 
 /// vmem thread block count
 static uint64_t spl_vmem_threads_waiting = 0;
+
 extern uint64_t tunable_osif_memory_cap;
 extern void spl_free_set_emergency_pressure(int64_t p);
 extern uint64_t segkmem_total_mem_allocated;
+extern uint64_t total_memory;
 
 /*
  * Get a vmem_seg_t from the global segfree list.
@@ -1472,7 +1474,7 @@ spl_vmem_size(vmem_t *vmp, int typemask)
 		if (vmp->vm_kstat.vk_mem_inuse.value.ui64 ==
 		    vmp->vm_kstat.vk_mem_total.value.ui64 ==
 		    vmp->vm_kstat.vk_mem_import.value.ui64) {
-			size += tunable_osif_memory_cap -
+			size += MAX(tunable_osif_memory_cap, total_memory) -
 			    vmp->vm_kstat.vk_mem_inuse.value.ui64;
 		} else {
 			return (vmem_size(vmp, typemask));
