@@ -1471,14 +1471,9 @@ spl_vmem_size(vmem_t *vmp, int typemask)
 	if (typemask & VMEM_ALLOC)
 		size += vmp->vm_kstat.vk_mem_inuse.value.ui64;
 	if (typemask & VMEM_FREE) {
-		if (vmp->vm_kstat.vk_mem_inuse.value.ui64 ==
-		    vmp->vm_kstat.vk_mem_total.value.ui64 ==
-		    vmp->vm_kstat.vk_mem_import.value.ui64) {
-			size += MAX(tunable_osif_memory_cap, total_memory) -
-			    vmp->vm_kstat.vk_mem_inuse.value.ui64;
-		} else {
+		size += MAX(tunable_osif_memory_cap, total_memory) -
+		    vmp->vm_kstat.vk_mem_inuse.value.ui64;
 			return (vmem_size(vmp, typemask));
-		}
 	}
 	return ((size_t)size);
 }
