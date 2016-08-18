@@ -361,6 +361,7 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 	if (vmflag == VM_SLEEP) {
 		if (vm_page_free_wanted > 0) {
 			return (NULL);
+			atomic_inc_64(&stat_osif_malloc_fail);
 		}
 		ret = osif_malloc_capped(size);
 		called = true;
@@ -380,9 +381,11 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 
 	if (vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
 		if (vm_page_free_wanted > 0) {
+			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
 		if (vm_page_free_count < 8 * (size / PAGESIZE)) {
+			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
 		ret = osif_malloc_capped(size);
@@ -431,6 +434,7 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 
 	if (vmflag == VM_SLEEP) {
 		if (vm_page_free_wanted > 0) {
+			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
 		ret = osif_malloc_capped(size);
@@ -451,9 +455,11 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
 
 	if (vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
 		if (vm_page_free_wanted > 0) {
+			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
 		if (vm_page_free_count < 8 * (size / PAGESIZE)) {
+			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
 		ret = osif_malloc_capped(size);
