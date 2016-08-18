@@ -1461,6 +1461,26 @@ vmem_size(vmem_t *vmp, int typemask)
 	return ((size_t)size);
 }
 
+size_t
+spl_vmem_size(vmem_t *vmp, int typemask)
+{
+	uint64_t size = 0;
+
+	if (typemask & VMEM_ALLOC)
+		size += vmp->vm_kstat.vk_mem_inuse.value.ui64;
+	if (typemask & VMEM_FREE) {
+		if (vmp->vm_kstat.vk_mem_inuse.value.ui64 ==
+		    vmp->vm_kstat.vk_mem_total.value.ui64 ==
+		    vmp->vm_kstat.vk_mem_import.value.ui64) {
+			size += tunable_osif_memory_cap -
+			    vmp->vm_kstat.vk_mem_inuse.value.ui64;
+		} else {
+			return (vmem_size(vmp, typemask));
+		}
+	}
+	return ((size_t)size);
+}
+
 /*
  * Create an arena called name whose initial span is [base, base + size).
  * The arena's natural unit of currency is quantum, so vmem_alloc()

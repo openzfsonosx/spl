@@ -154,6 +154,7 @@ extern "C" {
 	extern int vmem_contains(vmem_t *, void *, size_t);
 	extern void vmem_walk(vmem_t *, int, void (*)(void *, void *, size_t), void *);
 	extern size_t vmem_size(vmem_t *, int);
+	extern size_t spl_vmem_size(vmem_t *, int);
 	extern void vmem_qcache_reap(vmem_t *vmp);
 
 #ifdef	__cplusplus
