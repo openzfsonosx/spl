@@ -1704,13 +1704,12 @@ kmem_depot_ws_update(kmem_cache_t *cp)
 }
 
 /*
- * Setting this high (1GB) causes the explicit kpreempt() to have very little effect.
- * To make calls to kpreempt() more frequent, use a smaller value.
- * A few megabytes is usually small enough that it will run hundreds of times per second.
- *
+ * The number of bytes to reap before we call kpreempt(). The default (1MB)
+ * causes us to preempt reaping up to hundres of times per second.  Using a
+ * larger value (1GB) causes this to have virtually no effect.
  */
 //size_t kmem_reap_preempt_bytes = 1024 * 1024 * 1024;
-size_t kmem_reap_preempt_bytes = 128 * 1024 * 1024;
+size_t kmem_reap_preempt_bytes = 1024 * 1024;
 
 
 /*
