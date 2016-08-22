@@ -1801,6 +1801,10 @@ vmem_hash_rescale(vmem_t *vmp)
 /*
  * Perform periodic maintenance on all vmem arenas.
  */
+#define MAX_VMEM_FASTS 8
+static uint64_t vmem_update_fast_count = 0;
+static uint64_t vmem_update_original_memory_cap = 0;
+
 void
 vmem_update(void *dummy)
 {
@@ -1827,6 +1831,47 @@ vmem_update(void *dummy)
 	}
 	mutex_exit(&vmem_list_lock);
 
+	// has the rescaling recovered some memory?
+	// note: currently only affects the tunable_osif_memory_cap,
+	//       may have to involve tunable_osif_memory_reserve
+	//       (in module/spl/spl-seg_kmem.c)
+
+	if (vmem_update_original_memory_cap > 0 &&
+	    segkmem_total_mem_allocated < tunable_osif_memory_cap) {
+		atomic_swap_64(&vmem_update_fast_count, 0ULL);
+		fast = false;
+		printf("SPL: %s total alloc %llu < tunable cap %llu\n",
+		    __func__, segkmem_total_mem_allocated, tunable_osif_memory_cap);
+		if (vmem_update_original_memory_cap > 0) {
+			printf("SPL: %s emergency memory cap %llu reduced back to %llu (delta %lld)\n",
+			    __func__, tunable_osif_memory_cap, vmem_update_original_memory_cap,
+			    (int64_t)((int64_t)vmem_update_original_memory_cap - (int64_t)tunable_osif_memory_cap));
+			atomic_swap_64(&tunable_osif_memory_cap, vmem_update_original_memory_cap);
+			atomic_swap_64(&vmem_update_original_memory_cap, 0ULL);
+		} else {
+			atomic_swap_64(&vmem_update_original_memory_cap, 0ULL);
+		}
+	} else if (segkmem_total_mem_allocated >= tunable_osif_memory_cap) {
+		if(vmem_update_original_memory_cap == 0) {
+			atomic_swap_64(&vmem_update_original_memory_cap, tunable_osif_memory_cap);
+		}
+		atomic_inc_64(&vmem_update_fast_count);
+		printf("SPL: %s out of memory pass %llu\n", __func__, vmem_update_fast_count);
+		if ((vmem_update_fast_count % MAX_VMEM_FASTS)==0) {
+			// strategies here might include:
+			// 1. temporarily increase the cap (by 32MiB, 2 * max spa block size)
+			// 2. (try to) force arc to shrink below arc min
+			// 3. (really) force arc to shrink below arc min
+			atomic_add_64(&tunable_osif_memory_cap, 32 * 1024 * 1024);
+			spl_free_set_emergency_pressure(32 * 1024 * 1024);
+			fast = true;
+			printf("SPL: %s cap raised to %llu from %llu (cum. delta %lld)\n",
+			    __func__, tunable_osif_memory_cap, vmem_update_original_memory_cap,
+			    (int64_t)((int64_t)tunable_osif_memory_cap -
+				(int64_t)vmem_update_original_memory_cap));
+		}
+	}
+
 	// the cv_broadcast may have awakened some threads, which promptly
 	// go back to waiting.
 
@@ -1837,8 +1882,8 @@ vmem_update(void *dummy)
 			printf
 			    ("SPL: %s: waited threads = %llu (%llu), bytes above cap = %llu\n",
 				__func__, prev, spl_vmem_threads_waiting, bytes_above_cap);
-			// tell arc to shrink fast by 1/4 of the amount we are above cap
-			spl_free_set_emergency_pressure(bytes_above_cap >> 2);
+			// tell arc to shrink fast by half of the amount we are above cap
+			spl_free_set_emergency_pressure(bytes_above_cap >> 1);
 			// there is not really all that much we can do if arc*min is too big
 			// for tunable_osif_memory_cap.   the gap between the two may need
 			// to be increased dynamically (and temporarily), but we can only do
@@ -1848,6 +1893,7 @@ vmem_update(void *dummy)
 			    spl_vmem_threads_waiting);
 		}
 		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
+		atomic_inc_64(&vmem_update_fast_count);
 		fast = true;
 	}
 
