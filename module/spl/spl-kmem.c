@@ -4038,6 +4038,13 @@ spl_free_wrapper(void)
 	return (spl_free);
 }
 
+void spl_free_wrapper_reset(void)
+{
+	mutex_enter(&spl_free_lock);
+	spl_free = 0;
+	mutex_exit(&spl_free_lock);
+}
+
 // this is intended to substitute for kmem_avail() in arc.c
 // when arc_reclaim_thread() calls spl_free_set_pressure(0);
 int64_t
