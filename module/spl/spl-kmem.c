@@ -4120,9 +4120,9 @@ spl_free_thread()
 			PAGESIZE;
 
 		if (vm_page_free_wanted > 0) {
-			spl_free = -(int64_t)vm_page_free_wanted * PAGESIZE;
+			spl_free = -(int64_t)(vm_page_free_wanted * PAGESIZE) * 10;
 			lowmem = true;
-			if (vm_page_free_wanted >= vm_page_free_min)
+			if (vm_page_free_count <= vm_page_free_min)
 				emergency_lowmem = true;
 		}
 
