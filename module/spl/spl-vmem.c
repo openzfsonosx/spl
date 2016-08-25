@@ -1842,7 +1842,8 @@ vmem_update(void *dummy)
 		fast = false;
 		printf("SPL: %s total alloc %llu < tunable cap %llu\n",
 		    __func__, segkmem_total_mem_allocated, tunable_osif_memory_cap);
-		if (vmem_update_original_memory_cap > 0) {
+		if (vmem_update_original_memory_cap > 0 &&
+		    vmem_update_original_memory_cap != tunable_osif_memory_cap) {
 			printf("SPL: %s emergency memory cap %llu reduced back to %llu (delta %lld)\n",
 			    __func__, tunable_osif_memory_cap, vmem_update_original_memory_cap,
 			    (int64_t)((int64_t)vmem_update_original_memory_cap - (int64_t)tunable_osif_memory_cap));
