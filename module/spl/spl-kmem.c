@@ -4038,10 +4038,19 @@ spl_free_wrapper(void)
 	return (spl_free);
 }
 
-void spl_free_wrapper_reset(void)
+void
+spl_free_wrapper_reset(void)
 {
 	mutex_enter(&spl_free_lock);
 	spl_free = 0;
+	mutex_exit(&spl_free_lock);
+}
+
+void
+spl_free_wrapper_set(int64_t new)
+{
+	mutex_enter(&spl_free_lock);
+	spl_free = new;
 	mutex_exit(&spl_free_lock);
 }
 
