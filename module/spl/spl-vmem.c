@@ -1858,6 +1858,7 @@ vmem_update(void *dummy)
 		}
 		atomic_inc_64(&vmem_update_fast_count);
 		printf("SPL: %s out of memory pass %llu\n", __func__, vmem_update_fast_count);
+		fast = true;
 		if ((vmem_update_fast_count % MAX_VMEM_FASTS)==0) {
 			// strategies here might include:
 			// 1. temporarily increase the cap (by 32MiB, 2 * max spa block size)
@@ -1865,7 +1866,7 @@ vmem_update(void *dummy)
 			// 3. (really) force arc to shrink below arc min
 			atomic_add_64(&tunable_osif_memory_cap, 32 * 1024 * 1024);
 			spl_free_set_emergency_pressure(32 * 1024 * 1024);
-			fast = true;
+			fast = false;
 			printf("SPL: %s cap raised to %llu from %llu (cum. delta %lld)\n",
 			    __func__, tunable_osif_memory_cap, vmem_update_original_memory_cap,
 			    (int64_t)((int64_t)tunable_osif_memory_cap -
