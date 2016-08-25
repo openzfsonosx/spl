@@ -1852,7 +1852,7 @@ vmem_update(void *dummy)
 		} else {
 			atomic_swap_64(&vmem_update_original_memory_cap, 0ULL);
 		}
-	} else if (segkmem_total_mem_allocated >= tunable_osif_memory_cap) {
+	} else if (segkmem_total_mem_allocated >= tunable_osif_memory_cap && prev > 0) {
 		if(vmem_update_original_memory_cap == 0) {
 			atomic_swap_64(&vmem_update_original_memory_cap, tunable_osif_memory_cap);
 		}
