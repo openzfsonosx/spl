@@ -1801,7 +1801,9 @@ vmem_hash_rescale(vmem_t *vmp)
 /*
  * Perform periodic maintenance on all vmem arenas.
  */
-#define MAX_VMEM_FASTS 8
+#define MAX_VMEM_FASTS 80ULL
+#define VMEM_FAST_STRIDE 8ULL
+#define VMEM_FAST_RELEASE (32ULL * 1024ULL * 1024ULL)
 static uint64_t vmem_update_fast_count = 0;
 static uint64_t vmem_update_original_memory_cap = 0;
 
@@ -1859,18 +1861,21 @@ vmem_update(void *dummy)
 		atomic_inc_64(&vmem_update_fast_count);
 		printf("SPL: %s out of memory pass %llu\n", __func__, vmem_update_fast_count);
 		fast = true;
-		if ((vmem_update_fast_count % MAX_VMEM_FASTS)==0) {
+		if ((vmem_update_fast_count % VMEM_FAST_STRIDE)==0 || vmem_update_fast_count > MAX_VMEM_FASTS) {
 			// strategies here might include:
 			// 1. temporarily increase the cap (by 32MiB, 2 * max spa block size)
 			// 2. (try to) force arc to shrink below arc min
 			// 3. (really) force arc to shrink below arc min
-			atomic_add_64(&tunable_osif_memory_cap, 32 * 1024 * 1024);
-			spl_free_set_emergency_pressure(32 * 1024 * 1024);
-			fast = false;
-			printf("SPL: %s cap raised to %llu from %llu (cum. delta %lld)\n",
-			    __func__, tunable_osif_memory_cap, vmem_update_original_memory_cap,
-			    (int64_t)((int64_t)tunable_osif_memory_cap -
+			uint64_t newcap = tunable_osif_memory_cap + VMEM_FAST_RELEASE;
+			printf("SPL: %s raising current cap %llu by %llu to %llu from original %llu (cum. delta %lld)\n",
+			    __func__, tunable_osif_memory_cap, VMEM_FAST_RELEASE,
+			    newcap, vmem_update_original_memory_cap,
+			    (int64_t)((int64_t)newcap -
 				(int64_t)vmem_update_original_memory_cap));
+			spl_free_set_emergency_pressure(32 * 1024 * 1024);
+			atomic_swap_64(&tunable_osif_memory_cap, newcap);
+			kpreempt(KPREEMPT_SYNC);
+			fast = true;
 		}
 	}
 
