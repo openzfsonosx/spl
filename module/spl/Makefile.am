@@ -40,7 +40,6 @@ spl_SOURCES = 	\
 	crypto/skein/skein.c \
 	crypto/skein/skein_iv.c \
 	crypto/skein/skein_block.c \
-	crypto/sha2/sha2.c \
 	spl-atomic.c \
 	spl-avl.c \
 	spl-condvar.c \
