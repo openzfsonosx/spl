@@ -1866,7 +1866,21 @@ vmem_update(void *dummy)
 			// 1. temporarily increase the cap (by 32MiB, 2 * max spa block size)
 			// 2. (try to) force arc to shrink below arc min
 			// 3. (really) force arc to shrink below arc min
+
 			uint64_t newcap = tunable_osif_memory_cap + VMEM_FAST_RELEASE;
+
+			if (vmem_update_fast_count > MAX_VMEM_FASTS) {
+				extern unsigned int vm_page_free_wanted;
+				extern unsigned int vm_page_free_count;
+				extern unsigned int vm_page_speculative_count;
+				extern unsigned int vm_page_free_min;
+
+				if (vm_page_free_wanted == 0 &&
+				    (vm_page_free_count + vm_page_speculative_count) > (2 * vm_page_free_min)) {
+					newcap = tunable_osif_memory_cap + (4 * VMEM_FAST_RELEASE);
+				}
+			}
+
 			printf("SPL: %s raising current cap %llu by %llu to %llu from original %llu (cum. delta %lld)\n",
 			    __func__, tunable_osif_memory_cap, VMEM_FAST_RELEASE,
 			    newcap, vmem_update_original_memory_cap,
