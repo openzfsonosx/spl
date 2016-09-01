@@ -171,10 +171,10 @@ osif_malloc_reserve_cap(uint64_t size)
 	if (tunable_osif_memory_reserve <=
 	    (tunable_osif_memory_cap + (1024ULL * 1024ULL * 1024ULL))
 	    && total_memory > 0) {
+		extern uint64_t real_total_memory;
 		tunable_osif_memory_reserve =
-		    total_memory +
-		    (total_memory * OSIF_RESERVE_PERCENT_ULL / 100ULL) +
-		    (2ULL * 1024ULL * 1024ULL * 1024ULL);
+		    MIN((real_total_memory / 80ULL * 100ULL),
+			(tunable_osif_memory_cap + (2ULL * 1024ULL * 1024ULL * 1024ULL)));
 	}
 
 	atomic_inc_64(&stat_osif_cum_reserve_allocs);
