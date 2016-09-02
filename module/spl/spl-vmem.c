@@ -1914,8 +1914,10 @@ vmem_update(void *dummy)
 			    spl_vmem_threads_waiting);
 		}
 		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
-		atomic_inc_64(&vmem_update_fast_count);
-		fast = true;
+		if (!fast) {
+		  atomic_inc_64(&vmem_update_fast_count);
+		  fast = true;
+		}
 	}
 
 	if(fast) {
