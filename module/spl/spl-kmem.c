@@ -4186,6 +4186,9 @@ spl_free_thread()
 			spl_free -= (pct_used - 97) * (int64_t)(tunable_osif_memory_cap / 1000ULL);
 
 			lowmem = true;
+		} else if (segkmem_total_mem_allocated >= tunable_osif_memory_cap) {
+			if (spl_free > (16LL * 1024LL * 1024LL))    // SPA_MAXBLOCKSIZE
+				spl_free = 16LL * 1024LL * 1024LL;
 		}
 
 		// stop arc from grabbing allll the memory near startup and after a big evacuation of memory
