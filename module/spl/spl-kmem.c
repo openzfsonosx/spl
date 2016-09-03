@@ -4086,7 +4086,7 @@ spl_free_fast_pressure_wrapper()
 	return (spl_free_fast_pressure);
 }
 
-static inline void
+inline void
 spl_free_set_fast_pressure(boolean_t state)
 {
 	mutex_enter(&spl_free_manual_pressure_lock);
