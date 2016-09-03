@@ -1801,7 +1801,7 @@ vmem_hash_rescale(vmem_t *vmp)
 /*
  * Perform periodic maintenance on all vmem arenas.
  */
-#define MAX_VMEM_FASTS 80ULL
+#define MAX_VMEM_FASTS 33ULL
 #define VMEM_FAST_STRIDE 8ULL
 #define VMEM_FAST_RELEASE (32ULL * 1024ULL * 1024ULL)
 static uint64_t vmem_update_fast_count = 0;
@@ -1903,8 +1903,7 @@ vmem_update(void *dummy)
 			printf
 			    ("SPL: %s: waited threads = %llu (%llu), bytes above cap = %llu\n",
 				__func__, prev, spl_vmem_threads_waiting, bytes_above_cap);
-			// tell arc to shrink fast by half of the amount we are above cap
-			spl_free_set_emergency_pressure(bytes_above_cap >> 1);
+			spl_free_set_emergency_pressure(bytes_above_cap);
 			// there is not really all that much we can do if arc*min is too big
 			// for tunable_osif_memory_cap.   the gap between the two may need
 			// to be increased dynamically (and temporarily), but we can only do
