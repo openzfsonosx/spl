@@ -133,6 +133,7 @@ void segkmem_free(vmem_t *vmp, void *inaddr, size_t size);
 
 uint64_t segkmem_total_mem_allocated = 0;	/* Total memory held allocated */
 vmem_t *heap_arena;							/* primary kernel heap arena */
+vmem_t *zio_arena_parent_parent = NULL;
 vmem_t *zio_arena_parent = NULL;
 vmem_t *zio_arena;							/* arena for allocating zio memory */
 vmem_t *zio_alloc_arena;					/* arena for allocating zio memory */
@@ -523,11 +524,15 @@ segkmem_zio_init()
 
 	// for now we duke it out on size using segkmem_zio_alloc
 
+	zio_arena_parent_parent = vmem_create("zfs_file_data_p_p", NULL, 0,
+	    4*1024*1024, NULL, NULL, NULL, 0, VM_SLEEP);
+
 	zio_arena_parent = vmem_create("zfs_file_data_p", NULL, 0,
-	    PAGESIZE, NULL, NULL, NULL, 0, VM_SLEEP);
+	    PAGESIZE, segkmem_zio_alloc, segkmem_zio_free, zio_arena_parent_parent,
+	    4*1024*1024, VM_SLEEP | VMC_NO_QCACHE | VMC_POPULATOR);
 
 	zio_arena = vmem_create("zfs_file_data", NULL, 0,
-	    PAGESIZE, segkmem_zio_alloc, segkmem_zio_free, zio_arena_parent,
+	    PAGESIZE, vmem_alloc, vmem_free, zio_arena_parent,
 	    /* 32 * 1024 */ 0, VM_SLEEP);
 
 	zio_alloc_arena = vmem_create("zfs_file_data_buf", NULL, 0,

@@ -328,6 +328,7 @@ static vmem_t *vmem_metadata_arena;
 static vmem_t *vmem_seg_arena;
 static vmem_t *vmem_hash_arena;
 static vmem_t *vmem_vmem_arena;
+static vmem_t *heap_parent_parent; // This is a proxy arena that is a thin wrapper around the OS allocator
 static vmem_t *heap_parent; // This is a proxy arena that is a thin wrapper around the OS allocator
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  vmem_fast_update_interval = {1, 0};  // for when there are waiting threads
@@ -351,8 +352,8 @@ static vmem_kstat_t vmem_kstat_template = {
 	{ "contains_search",	KSTAT_DATA_UINT64 },
 };
 
-// Warning, we know its 5 from inside of vmem_init()
-static void *global_vmem_reap[5] = {NULL};
+// Warning, we know its 6 from inside of vmem_init()
+static void *global_vmem_reap[6] = {NULL};
 
 
 /*
@@ -580,8 +581,8 @@ vmem_span_create(vmem_t *vmp, void *vaddr, size_t size, uint8_t import)
 	ASSERT(MUTEX_HELD(&vmp->vm_lock));
 	
 	if ((start | end) & (vmp->vm_quantum - 1))
-		panic("vmem_span_create(%p, %p, %lu): misaligned",
-			  (void *)vmp, vaddr, size);
+		panic("vmem_span_create(%p, %p, %lu): misaligned (%s)",
+		    (void *)vmp, vaddr, size, vmp->vm_name);
 	
 	span = vmem_seg_create(vmp, vmp->vm_seg0.vs_aprev, start, end);
 	span->vs_type = VMEM_SPAN;
@@ -2035,14 +2036,18 @@ vmem_init(const char *heap_name,
 	 * heap_alloc (segkmem_alloc) and heap_free (segkmem_free)
 	 * go direct to the OS.
 	 */
+
+	heap_parent_parent = vmem_create("heap_parent_parent", NULL, 0,
+	    4*1024*1024, NULL, NULL, NULL, 0, VM_SLEEP);
+
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
-							  NULL, NULL, NULL, 0,
-							  VM_NOSLEEP);
+							  heap_alloc, heap_free, heap_parent_parent, 4*1024*1024,
+							  VM_NOSLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
 	
 	heap = vmem_create(heap_name,
 					   NULL, 0, heap_quantum,
-					   heap_alloc, heap_free, heap_parent, 0,
+					   vmem_alloc, vmem_free, heap_parent, 0,
 					   VM_NOSLEEP | VMC_POPULATOR);
 	
 	
@@ -2051,7 +2056,7 @@ vmem_init(const char *heap_name,
 	// chance of cleaning up in an orderly manner.
 	vmem_metadata_arena = vmem_create("vmem_metadata",
 									  NULL, 0, heap_quantum,
-									  heap_alloc, heap_free, heap_parent, 8 * PAGESIZE,
+									  vmem_alloc, vmem_free, heap_parent, 8 * PAGESIZE,
 									  VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
 	
 	vmem_seg_arena = vmem_create("vmem_seg",
@@ -2069,7 +2074,7 @@ vmem_init(const char *heap_name,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 	
-	// 5 vmem_create before this line.
+	// 6 vmem_create before this line.
 	for (id = 0; id < vmem_id; id++) {
 		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
 										   1, 0, 0, &vmem0[id], &vmem0[id + 1],
@@ -2130,7 +2135,7 @@ void vmem_fini(vmem_t *heap)
 	vmem_walk(heap_parent, VMEM_ALLOC,
 			  vmem_fini_freelist, heap_parent);
 	
-	for (id = 0; id < 5; id++) {// From vmem_init, 5 vmem_create
+	for (id = 0; id < 6; id++) {// From vmem_init, 6 vmem_create
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
 	}
 	
