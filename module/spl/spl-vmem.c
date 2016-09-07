@@ -1801,8 +1801,8 @@ vmem_hash_rescale(vmem_t *vmp)
 /*
  * Perform periodic maintenance on all vmem arenas.
  */
-#define MAX_VMEM_FASTS 33ULL
-#define VMEM_FAST_STRIDE 8ULL
+#define MAX_VMEM_FASTS 17ULL
+#define VMEM_FAST_STRIDE 4ULL
 #define VMEM_FAST_RELEASE (32ULL * 1024ULL * 1024ULL)
 static uint64_t vmem_update_fast_count = 0;
 static uint64_t vmem_update_original_memory_cap = 0;
