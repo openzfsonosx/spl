@@ -1806,6 +1806,56 @@ vmem_hash_rescale(vmem_t *vmp)
 #define VMEM_FAST_RELEASE (32ULL * 1024ULL * 1024ULL)
 static uint64_t vmem_update_fast_count = 0;
 static uint64_t vmem_update_original_memory_cap = 0;
+static uint64_t zfs_arc_c_min = 0;
+static uint64_t spl_target_arc_c_min = 0;
+static uint64_t original_zfs_arc_min = 0;
+
+uint64_t
+spl_arc_c_min_update(uint64_t cur_arc_c_min)
+{
+	atomic_swap_64(&zfs_arc_c_min, cur_arc_c_min);
+	if (original_zfs_arc_min &&
+	    spl_target_arc_c_min &&
+	    spl_target_arc_c_min != cur_arc_c_min)
+		return (spl_target_arc_c_min);
+	else
+		return (cur_arc_c_min);
+}
+
+uint64_t
+spl_zfs_arc_min_set(uint64_t val)
+{
+	printf("SPL: %s, original_zfs_arc_min %llu -> %llu\n",
+	    __func__, original_zfs_arc_min, val);
+	atomic_swap_64(&original_zfs_arc_min, val);
+	atomic_swap_64(&spl_target_arc_c_min, val);
+	return (val);
+}
+
+static inline void
+deflate_arc_c_min(uint64_t howmuch)
+{
+	if (spl_target_arc_c_min > howmuch + (1024ULL * 1024ULL * 1024ULL))
+		atomic_sub_64(&spl_target_arc_c_min, howmuch);
+}
+
+
+static inline void
+reset_arc_c_min(void)
+{
+	if(zfs_arc_c_min != original_zfs_arc_min)
+		atomic_swap_64(&zfs_arc_c_min, original_zfs_arc_min);
+}
+
+static inline void
+increment_arc_c_min(uint64_t howmuch)
+{
+	if (original_zfs_arc_min &&
+	    spl_target_arc_c_min + howmuch >= original_zfs_arc_min)
+		reset_arc_c_min();
+	else if (original_zfs_arc_min)
+		atomic_add_64(&spl_target_arc_c_min, howmuch);
+}
 
 void
 vmem_update(void *dummy)
@@ -1837,6 +1887,9 @@ vmem_update(void *dummy)
 	// note: currently only affects the tunable_osif_memory_cap,
 	//       may have to involve tunable_osif_memory_reserve
 	//       (in module/spl/spl-seg_kmem.c)
+
+	if (segkmem_total_mem_allocated < tunable_osif_memory_cap)
+		increment_arc_c_min(VMEM_FAST_RELEASE);
 
 	if (vmem_update_original_memory_cap > 0 &&
 	    segkmem_total_mem_allocated < tunable_osif_memory_cap) {
@@ -1886,7 +1939,11 @@ vmem_update(void *dummy)
 			    newcap, vmem_update_original_memory_cap,
 			    (int64_t)((int64_t)newcap -
 				(int64_t)vmem_update_original_memory_cap));
-			spl_free_set_emergency_pressure(32 * 1024 * 1024);
+
+			spl_free_set_emergency_pressure(32LL * 1024LL * 1024LL);
+
+			deflate_arc_c_min(VMEM_FAST_RELEASE);
+
 			atomic_swap_64(&tunable_osif_memory_cap, newcap);
 			kpreempt(KPREEMPT_SYNC);
 			fast = true;
