@@ -2134,6 +2134,9 @@ void vmem_fini(vmem_t *heap)
 	
 	vmem_walk(heap_parent, VMEM_ALLOC,
 			  vmem_fini_freelist, heap_parent);
+
+	vmem_walk(heap_parent_parent, VMEM_ALLOC,
+	    vmem_fini_freelist, heap_parent_parent);
 	
 	for (id = 0; id < 6; id++) {// From vmem_init, 6 vmem_create
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
