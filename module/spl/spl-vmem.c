@@ -2043,7 +2043,7 @@ vmem_init(const char *heap_name,
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
 							  heap_alloc, heap_free, heap_parent_parent, 4*1024*1024,
-							  VM_NOSLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
+							  VM_NOSLEEP | VMC_POPULATOR | VMC_NO_QCACHE | VM_NEXTFIT);
 	
 	heap = vmem_create(heap_name,
 					   NULL, 0, heap_quantum,
