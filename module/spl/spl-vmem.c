@@ -1870,6 +1870,7 @@ vmem_do_walk(vmem_t *vmp)
 	printf("SPL: %s, walking %s\n", __func__, vmp->vm_name);
 	uint64_t start = zfs_lbolt();
 	vmem_walk(vmp, VMEM_ALLOC | VMEM_REENTRANT, vmem_do_walk_dummy, vmp);
+	vmem_walk(vmp, VMEM_FREE | VMEM_REENTRANT, vmem_do_walk_dummy, vmp);
 	uint64_t end = zfs_lbolt();
 	printf("SPL: %s, walking %s took %llu\n",
 	    __func__, vmp->vm_name, (end-start));
