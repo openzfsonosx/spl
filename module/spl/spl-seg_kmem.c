@@ -525,11 +525,11 @@ segkmem_zio_init()
 	// for now we duke it out on size using segkmem_zio_alloc
 
 	zio_arena_parent_parent = vmem_create("zfs_file_data_p_p", NULL, 0,
-	    4*1024*1024, NULL, NULL, NULL, 0, VM_SLEEP);
+	    1024*1024, NULL, NULL, NULL, 0, VM_SLEEP);
 
 	zio_arena_parent = vmem_create("zfs_file_data_p", NULL, 0,
 	    PAGESIZE, segkmem_zio_alloc, segkmem_zio_free, zio_arena_parent_parent,
-	    4*1024*1024, VM_SLEEP | VMC_NO_QCACHE | VMC_POPULATOR | VM_NEXTFIT);
+	    1024*1024, VM_SLEEP | VMC_NO_QCACHE | VMC_POPULATOR | VM_NEXTFIT);
 
 	zio_arena = vmem_create("zfs_file_data", NULL, 0,
 	    PAGESIZE, vmem_alloc, vmem_free, zio_arena_parent,
