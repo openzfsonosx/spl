@@ -1858,6 +1858,56 @@ increment_arc_c_min(uint64_t howmuch)
 		atomic_add_64(&spl_target_arc_c_min, howmuch);
 }
 
+static void
+vmem_do_walk_dummy(void *vmp, void *start, size_t size)
+{
+	return;
+}
+
+static void
+vmem_do_walk(vmem_t *vmp)
+{
+	printf("SPL: %s, walking %s\n", __func__, vmp->vm_name);
+	uint64_t start = zfs_lbolt();
+	vmem_walk(vmp, VMEM_ALLOC | VMEM_REENTRANT, vmem_do_walk_dummy, vmp);
+	uint64_t end = zfs_lbolt();
+	printf("SPL: %s, walking %s took %llu\n",
+	    __func__, vmp->vm_name, (end-start));
+}
+
+static inline void
+vmem_maybe_walk_impl(vmem_t *vmp)
+{
+
+	if (vmp) {
+		uint64_t inuse = vmp->vm_kstat.vk_mem_inuse.value.ui64;
+		uint64_t import = vmp->vm_kstat.vk_mem_import.value.ui64;
+
+		if (import > inuse) {
+			uint64_t difference = import - inuse;
+			uint64_t fivepct = import / 20ULL;
+
+			if (difference > fivepct || difference > 512ULL*1024ULL*1024ULL)
+				vmem_do_walk(vmp);
+		}
+	}
+}
+
+void
+vmem_maybe_walk(void)
+{
+	// called when memory is low:
+	// for each of zio_arena_parent and heap_parent
+	// if mem_import is much greater than mem_inuse
+	// do a vmem_walk
+
+	extern vmem_t *zio_arena_parent;
+
+	vmem_maybe_walk_impl(zio_arena_parent);
+	vmem_maybe_walk_impl(heap_parent);
+
+}
+
 void
 vmem_update(void *dummy)
 {
@@ -1865,6 +1915,7 @@ vmem_update(void *dummy)
 
 	uint64_t prev = spl_vmem_threads_waiting;
 	_Bool fast = false;
+	static uint64_t last_maybe_walk = 0;
 
 	atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
 
@@ -1891,6 +1942,12 @@ vmem_update(void *dummy)
 
 	if (segkmem_total_mem_allocated < tunable_osif_memory_cap)
 		increment_arc_c_min(VMEM_FAST_RELEASE);
+
+	if (segkmem_total_mem_allocated > tunable_osif_memory_cap &&
+	    last_maybe_walk + (hz * 60) < zfs_lbolt()) {
+		vmem_maybe_walk();
+		last_maybe_walk = zfs_lbolt();
+	}
 
 	if (vmem_update_original_memory_cap > 0 &&
 	    segkmem_total_mem_allocated < tunable_osif_memory_cap) {
