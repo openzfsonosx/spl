@@ -1925,13 +1925,17 @@ void
 vmem_maybe_walk(void)
 {
 	// called when memory is low:
-	// for each of zio_arena_parent and heap_parent
+	// for each of zio_arena(_parent) and heap(_parent)
 	// if mem_import is much greater than mem_inuse
 	// do a vmem_walk
 
 	extern vmem_t *zio_arena_parent;
+	extern vmem_t *zio_arena;
+	extern vmem_t *heap_arena;
 
+	vmem_maybe_walk_impl(zio_arena);
 	vmem_maybe_walk_impl(zio_arena_parent);
+	vmem_maybe_walk_impl(heap_arena);
 	vmem_maybe_walk_impl(heap_parent);
 
 }
