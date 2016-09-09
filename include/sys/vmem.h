@@ -33,16 +33,6 @@ extern "C" {
 #endif
 
 
-<<<<<<< HEAD
-
-//#define KMEM_QUANTUM (PAGESIZE) // (<<5, 128k, has been running for months (as of 23 sept 2015), lower does glitch
-=======
-// BGH - Back to 512k users reporting glitching, beachballing etc.
-#define KMEM_QUANTUM (PAGESIZE<<7) 
->>>>>>> master
-
-
-
 	/*
 	 * Per-allocation flags
 	 */
