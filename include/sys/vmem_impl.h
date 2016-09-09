@@ -106,6 +106,10 @@ MAX(1 << highbit(3 * (max)), 64)
 		kstat_named_t	vk_populate_fail;	/* populates that failed */
 		kstat_named_t	vk_contains;		/* vmem_contains() calls */
 		kstat_named_t	vk_contains_search;	/* vmem_contains() search cnt */
+		kstat_named_t	vk_parent_alloc;	/* called the source allocator */
+		kstat_named_t	vk_parent_xalloc;	/* called the source allocator */
+		kstat_named_t	vk_parent_free;	        /* called the source free function */
+		kstat_named_t	vk_nextfit_xalloc;	/* nextfit search did not find space, call xalloc */
 	} vmem_kstat_t;
 	
 	struct vmem {
