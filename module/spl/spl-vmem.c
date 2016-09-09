@@ -900,7 +900,32 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			 * a VM_NOSLEEP allocation, let vmem_xalloc() handle it.
 			 * Otherwise, wait until another thread frees something.
 			 */
-			if (vmp->vm_source_alloc != NULL ||
+			extern void *segkmem_alloc(vmem_t *, size_t, int);
+			extern void *segkmem_zio_alloc(vmem_t *, size_t, int);
+			if ((vmp->vm_source_alloc == segkmem_zio_alloc ||
+				vmp->vm_source_alloc == segkmem_alloc) &&
+			    (!(vmflag & (VM_NOSLEEP | VM_PANIC)))) {
+				// special case: these are the _parent heaps and
+				// not a VM_NOSLEEP or VM_PANIC allocation
+				vmp->vm_kstat.vk_wait.value.ui64++;
+				printf("SPL: %s TIMED waiting for %lu sized alloc after full circle, arena %s.\n",
+				    __func__, size, vmp->vm_name);
+				atomic_inc_64(&spl_vmem_threads_waiting);
+				int tim = cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, ddi_get_lbolt() + hz);
+				if (spl_vmem_threads_waiting > 0)
+					atomic_dec_64(&spl_vmem_threads_waiting);
+				if (tim > 0) {
+					// another thread woke us up, go around again
+					vsp = rotor->vs_anext;
+					continue;
+				} else {
+					printf("SPL: %s allocating %lu after cv_timedwait timeout, arena %s.\n",
+					    __func__, size, vmp->vm_name);
+					mutex_exit(&vmp->vm_lock);
+					return (vmem_xalloc(vmp, size, vmp->vm_quantum,
+						0, 0, NULL, NULL, vmflag & VM_KMFLAGS));
+				}
+			} else if (vmp->vm_source_alloc != NULL ||
 				(vmflag & VM_NOSLEEP)) {
 				mutex_exit(&vmp->vm_lock);
 				return (vmem_xalloc(vmp, size, vmp->vm_quantum,
@@ -911,6 +936,8 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			    __func__, size, vmp->vm_name);
 			atomic_inc_64(&spl_vmem_threads_waiting);
 			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
+			if (spl_vmem_threads_waiting > 0)
+				atomic_dec_64(&spl_vmem_threads_waiting);
 			vsp = rotor->vs_anext;
 		}
 	}
