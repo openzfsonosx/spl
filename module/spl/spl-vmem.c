@@ -835,6 +835,7 @@ vmem_advance(vmem_t *vmp, vmem_seg_t *walker, vmem_seg_t *afterme)
  * for allocating things like process IDs, where we want to cycle through
  * all values in order.
  */
+#define dprintf if (0) printf
 static void *
 vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 {
@@ -909,7 +910,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 				// special case: these are the _parent heaps and
 				// not a VM_NOSLEEP or VM_PANIC allocation
 				vmp->vm_kstat.vk_wait.value.ui64++;
-				printf("SPL: %s TIMED waiting for %lu sized alloc after full circle, arena %s.\n",
+				dprintf("SPL: %s TIMED waiting for %lu sized alloc after full circle, arena %s.\n",
 				    __func__, size, vmp->vm_name);
 				atomic_inc_64(&spl_vmem_threads_waiting);
 				int tim = cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, ddi_get_lbolt() + (hz/10));
@@ -920,7 +921,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 					vsp = rotor->vs_anext;
 					continue;
 				} else {
-					printf("SPL: %s allocating %lu after cv_timedwait timeout, arena %s.\n",
+					dprintf("SPL: %s allocating %lu after cv_timedwait timeout, arena %s.\n",
 					    __func__, size, vmp->vm_name);
 					mutex_exit(&vmp->vm_lock);
 					return (vmem_xalloc(vmp, size, vmp->vm_quantum,
