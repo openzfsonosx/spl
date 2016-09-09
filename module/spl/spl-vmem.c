@@ -327,7 +327,8 @@ static vmem_t *vmem_metadata_arena;
 static vmem_t *vmem_seg_arena;
 static vmem_t *vmem_hash_arena;
 static vmem_t *vmem_vmem_arena;
-static vmem_t *heap_parent; // This is a proxy arena that is a thin wrapper around the OS allocator
+static vmem_t *heap_parent_parent;
+static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
@@ -350,7 +351,7 @@ static vmem_kstat_t vmem_kstat_template = {
 };
 
 // Warning, we know its 5 from inside of vmem_init()
-static void *global_vmem_reap[5] = {NULL};
+static void *global_vmem_reap[6] = {NULL};
 
 
 /*
@@ -1840,10 +1841,19 @@ vmem_init(const char *heap_name,
 	 * heap_alloc (segkmem_alloc) and heap_free (segkmem_free)
 	 * go direct to the OS.
 	 */
+	
+	heap_parent_parent = vmem_create("heap_parent_parent",
+									 NULL, 0,
+									 4*1024*1024,
+									 NULL, NULL, NULL, 0,
+									 VM_SLEEP);
+	
 	heap_parent = vmem_create("heap_parent",
-							  NULL, 0, heap_quantum,
-							  NULL, NULL, NULL, 0,
-							  VM_SLEEP);
+							  NULL, 0,
+							  heap_quantum,
+							  heap_alloc, heap_free, heap_parent_parent,
+							  4*1024*1024,
+							  VM_NOSLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
 	
 	heap = vmem_create(heap_name,
 					   NULL, 0, heap_quantum,
@@ -1856,7 +1866,7 @@ vmem_init(const char *heap_name,
 	// chance of cleaning up in an orderly manner.
 	vmem_metadata_arena = vmem_create("vmem_metadata",
 									  NULL, 0, heap_quantum,
-									  heap_alloc, heap_free, heap_parent, 8 * PAGESIZE,
+									  vmem_alloc, vmem_free, heap_parent, 8 * PAGESIZE,
 									  VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
 	
 	vmem_seg_arena = vmem_create("vmem_seg",
@@ -1874,7 +1884,7 @@ vmem_init(const char *heap_name,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 	
-	// 5 vmem_create before this line.
+	// 6 vmem_create before this line.
 	for (id = 0; id < vmem_id; id++) {
 		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
 										   1, 0, 0, &vmem0[id], &vmem0[id + 1],
