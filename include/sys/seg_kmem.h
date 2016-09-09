@@ -64,7 +64,6 @@ extern "C" {
 //	extern vmem_t *static_arena;	/* arena for caches to import static memory */
 //	extern vmem_t *static_alloc_arena;	/* arena for allocating static memory */
 	extern vmem_t *zio_arena;	/* arena for zio caches */
-	extern vmem_t *zio_alloc_arena;	/* arena for zio caches */
 //	extern struct vnode kvps[];
 	/*
 	 * segkmem page vnodes
