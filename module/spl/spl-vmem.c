@@ -2096,17 +2096,17 @@ vmem_init(const char *heap_name,
 	 */
 
 	heap_parent_parent = vmem_create("heap_parent_parent", NULL, 0,
-	    1024*1024, NULL, NULL, NULL, 0, VM_SLEEP);
+	    4*1024*1024, NULL, NULL, NULL, 0, VM_SLEEP | VM_NEXTFIT);
 
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
-							  heap_alloc, heap_free, heap_parent_parent, 1024*1024,
-							  VM_NOSLEEP | VMC_POPULATOR | VMC_NO_QCACHE | VM_NEXTFIT);
+							  heap_alloc, heap_free, heap_parent_parent, 4*1024*1024,
+							  VM_SLEEP | VMC_NO_QCACHE | VM_NEXTFIT);
 	
 	heap = vmem_create(heap_name,
 					   NULL, 0, heap_quantum,
 					   vmem_alloc, vmem_free, heap_parent, 0,
-					   VM_NOSLEEP | VMC_POPULATOR);
+					   VM_SLEEP | VM_NEXTFIT);
 	
 	
 	// Root all the low bandwidth metadata arenas off heap_parent,
