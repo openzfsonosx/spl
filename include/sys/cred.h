@@ -32,7 +32,7 @@
 #include <sys/vfs.h>
 #include <sys/kauth.h>
 
-typedef struct opaque_cred_t  cred_t;
+typedef struct ucred cred_t;
 
 #define kcred   (cred_t *)NOCRED
 #define CRED()          (cred_t *)kauth_cred_get()

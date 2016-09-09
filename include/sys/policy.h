@@ -114,7 +114,7 @@ int	secpolicy_setid_setsticky_clear(vnode_t *vp, struct vattr *vap,
 int	secpolicy_fs_owner(struct mount *vfsp, cred_t *cr);
 int	secpolicy_fs_mount(cred_t *cr, vnode_t *mvp, struct mount *vfsp);
 void	secpolicy_fs_mount_clearopts(cred_t *cr, struct mount *vfsp);
-int	secpolicy_xvattr(vnode_t *vp, xvattr_t *xvap, uid_t owner, cred_t *cr,
+int	secpolicy_xvattr(vnode_t *vp, vattr_t *xvap, uid_t owner, cred_t *cr,
 	    vtype_t vtype);
 int	secpolicy_smb(cred_t *cr);
 
@@ -162,13 +162,13 @@ int secpolicy_vnode_access2(const cred_t *, struct vnode *, uid_t, mode_t, mode_
  *		void *node		- internal node (inode, tmpnode) to
  *					  pass as arg to iaccess
  */
-int secpolicy_vnode_setattr(cred_t *, struct vnode *, struct vattr *,
-    const struct vattr *, int, int (void *, int, cred_t *), void *);
+int secpolicy_vnode_setattr(cred_t *, struct vnode *, vattr_t *,
+    const vattr_t *, int, int (void *, int, cred_t *), void *);
 
 //int secpolicy_xvattr(xvattr_t *, uid_t, cred_t *, vtype_t);
 int secpolicy_vnode_stky_modify(const cred_t *);
-int	secpolicy_setid_setsticky_clear(struct vnode *vp, struct vattr *vap,
-	    const struct vattr *ovap, cred_t *cr);
+int	secpolicy_setid_setsticky_clear(struct vnode *vp, vattr_t *vap,
+	    const vattr_t *ovap, cred_t *cr);
 //int secpolicy_basic_link(const cred_t *);
 
 int secpolicy_vnode_remove(struct vnode *, const cred_t *);
@@ -177,8 +177,8 @@ int secpolicy_vnode_setids_setgids(struct vnode *, const cred_t *, gid_t);
 int secpolicy_vnode_setdac(struct vnode *, const cred_t *, uid_t);
 int secpolicy_vnode_chown(struct vnode *, const cred_t *, uid_t);
 int secpolicy_vnode_setid_retain(struct vnode *, const cred_t *, boolean_t);
-int secpolicy_xvattr(struct vnode *, struct vattr *, uid_t, const cred_t *, enum vtype);
-int secpolicy_setid_clear(struct vattr *, struct vnode *, const cred_t *);
+int secpolicy_xvattr(struct vnode *, vattr_t *, uid_t, const cred_t *, enum vtype);
+int secpolicy_setid_clear(vattr_t *, struct vnode *, const cred_t *);
 int secpolicy_basic_link(struct vnode *, const cred_t *);
 int secpolicy_fs_mount_clearopts(const cred_t *, struct mount *);
 int secpolicy_fs_mount(const cred_t *, struct vnode *, struct mount *);
