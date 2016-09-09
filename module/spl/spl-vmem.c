@@ -904,6 +904,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			extern void *segkmem_zio_alloc(vmem_t *, size_t, int);
 			if ((vmp->vm_source_alloc == segkmem_zio_alloc ||
 				vmp->vm_source_alloc == segkmem_alloc) &&
+			    segkmem_total_mem_allocated > tunable_osif_memory_cap &&
 			    (!(vmflag & (VM_NOSLEEP | VM_PANIC)))) {
 				// special case: these are the _parent heaps and
 				// not a VM_NOSLEEP or VM_PANIC allocation
@@ -2139,7 +2140,7 @@ vmem_init(const char *heap_name,
 	heap = vmem_create(heap_name,
 					   NULL, 0, heap_quantum,
 					   vmem_alloc, vmem_free, heap_parent, 0,
-					   VM_SLEEP | VM_NEXTFIT);
+					   VM_SLEEP);
 	
 	
 	// Root all the low bandwidth metadata arenas off heap_parent,
