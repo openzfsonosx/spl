@@ -929,7 +929,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 				(vmflag & VM_NOSLEEP)) {
 				mutex_exit(&vmp->vm_lock);
 				return (vmem_xalloc(vmp, size, vmp->vm_quantum,
-									0, 0, NULL, NULL, vmflag & VM_KMFLAGS));
+					0, 0, NULL, NULL, vmflag & (VM_KMFLAGS | VM_NEXTFIT)));
 			}
 			vmp->vm_kstat.vk_wait.value.ui64++;
 			printf("SPL: %s: waiting for %lu sized alloc after full circle, arena %s.\n",
@@ -1165,7 +1165,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 				    IS_P2ALIGNED(vaddr, align));
 			} else {
 				vaddr = vmp->vm_source_alloc(vmp->vm_source,
-											 asize, vmflag & VM_KMFLAGS);
+				    asize, vmflag & (VM_KMFLAGS | VM_NEXTFIT));
 			}
 			mutex_enter(&vmp->vm_lock);
 			vmp->vm_nsegfree += resv;	/* claim reservation */
