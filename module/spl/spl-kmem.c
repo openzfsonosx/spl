@@ -4641,8 +4641,6 @@ spl_kmem_init(uint64_t xtotal_memory)
 	kmem_log_arena = vmem_create("kmem_log", NULL, 0, KMEM_ALIGN,
 								 vmem_alloc, vmem_free, kmem_metadata_arena, 0, VM_SLEEP);
 
-	segkmem_zio_init();
-
 	/* temporary oversize arena for mod_read_system_file */
 	kmem_oversize_arena = vmem_create("kmem_oversize", NULL, 0, PAGESIZE,
 									  vmem_alloc, vmem_free, heap_arena, 0, VM_SLEEP);
@@ -4742,6 +4740,8 @@ spl_kmem_init(uint64_t xtotal_memory)
 				"and large memory overhead possible. See the Solaris "
 				"Tunable Parameters Reference Manual.", kmem_flags);
 #endif /* not DEBUG */
+
+	segkmem_zio_init();
 
 	kmem_cache_applyall(kmem_cache_magazine_enable, NULL, TQ_SLEEP);
 

@@ -536,7 +536,7 @@ segkmem_zio_init()
 	    /* 32 * 1024 */ 0, VM_SLEEP);
 
 	zio_alloc_arena = vmem_create("zfs_file_data_buf", NULL, 0,
-	    PAGESIZE, vmem_alloc, vmem_free, zio_arena, 0, VM_SLEEP);
+	    PAGESIZE, vmem_alloc, vmem_free, zio_arena, 8*PAGESIZE, VM_SLEEP);
 
 	ASSERT(zio_arena != NULL);
 	ASSERT(zio_alloc_arena != NULL);
