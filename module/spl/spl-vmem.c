@@ -913,7 +913,12 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 				dprintf("SPL: %s TIMED waiting for %lu sized alloc after full circle, arena %s.\n",
 				    __func__, size, vmp->vm_name);
 				atomic_inc_64(&spl_vmem_threads_waiting);
-				int tim = cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, ddi_get_lbolt() + (hz/10));
+				int waittime = 0;
+				if (vmp->vm_source_alloc == segkmem_zio_alloc)
+					waittime = hz * 10;
+				else
+					waittime = hz / 10;
+				int tim = cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, ddi_get_lbolt() + waittime);
 				if (spl_vmem_threads_waiting > 0)
 					atomic_dec_64(&spl_vmem_threads_waiting);
 				if (tim > 0) {
