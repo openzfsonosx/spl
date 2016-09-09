@@ -532,7 +532,7 @@ segkmem_zio_init()
 
 	zio_arena = vmem_create("zfs_file_data", NULL, 0,
 	    PAGESIZE, vmem_alloc, vmem_free, zio_arena_parent,
-	    8 * PAGESIZE, VM_SLEEP);
+	    1024*1024, VM_SLEEP);
 
 	ASSERT(zio_arena != NULL);
 }
