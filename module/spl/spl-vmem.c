@@ -1341,6 +1341,8 @@ vmem_alloc(vmem_t *vmp, size_t size, int vmflag)
 	if (vmflag & (VM_BESTFIT | VM_FIRSTFIT))
 		return (vmem_xalloc(vmp, size, vmp->vm_quantum, 0, 0,
 							NULL, NULL, vmflag));
+	if (vmp->vm_cflags & VM_NEXTFIT)
+		return (vmem_nextfit_alloc(vmp, size, vmflag));
 	
 	/*
 	 * Unconstrained instant-fit allocation from the segment list.
