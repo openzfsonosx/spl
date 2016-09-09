@@ -350,13 +350,15 @@ void kernelheap_fini(void)
 }
 
 void *
-segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
+segkmem_alloc(vmem_t * vmp, size_t size, int maybe_unmasked_vmflag)
 {
 	void *ret = NULL;
 	bool called = false;
 
 	volatile extern unsigned int vm_page_free_wanted;
 	volatile extern unsigned int vm_page_free_count;
+
+	int vmflag = maybe_unmasked_vmflag & VM_KMFLAGS;
 
 	if (vmflag == VM_SLEEP) {
 		if (vm_page_free_wanted > 0) {
@@ -419,13 +421,15 @@ segkmem_alloc(vmem_t * vmp, size_t size, int vmflag)
 
 
 void *
-segkmem_zio_alloc(vmem_t *vmp, size_t size, int vmflag)
+segkmem_zio_alloc(vmem_t *vmp, size_t size, int maybe_unmasked_vmflag)
 {
 	void *ret = NULL;
 	bool called = false;
 
 	volatile extern unsigned int vm_page_free_count;
 	volatile extern unsigned int vm_page_free_wanted;
+
+	int vmflag = maybe_unmasked_vmflag & VM_KMFLAGS;
 
 	if (vm_page_free_wanted >  0 ||
 	    vm_page_free_count < 8 * (size / PAGESIZE)) {
