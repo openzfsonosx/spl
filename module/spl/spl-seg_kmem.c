@@ -179,6 +179,19 @@ osif_malloc_reserve_cap(uint64_t size)
 
 	atomic_inc_64(&stat_osif_cum_reserve_allocs);
 
+	volatile extern unsigned int vm_page_free_wanted;
+	volatile extern unsigned int vm_page_free_count;
+
+	if (vm_page_free_wanted > 0) {
+		atomic_inc_64(&stat_osif_malloc_fail);
+		return (NULL);
+	}
+
+	if (vm_page_free_count < 8 * (size / PAGESIZE)) {
+		atomic_inc_64(&stat_osif_malloc_fail);
+		return (NULL);
+	}
+
 	if (segkmem_total_mem_allocated + size <= tunable_osif_memory_reserve) {
 		kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0,
 					    SPL_TAG);
@@ -377,6 +390,10 @@ segkmem_alloc(vmem_t * vmp, size_t size, int maybe_unmasked_vmflag)
 	}
 
 	if (!called && vmflags & VM_PUSHPAGE) {
+		if (vm_page_free_wanted > 0) {
+			atomic_inc_64(&stat_osif_malloc_fail);
+			return (NULL);
+		}
 		ret = osif_malloc_pushpage(size, __func__);
 		called = true;
 	}
@@ -453,6 +470,10 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int maybe_unmasked_vmflag)
 	}
 
 	if (!called && vmflags & VM_PUSHPAGE) {
+		if (vm_page_free_wanted > 0) {
+			atomic_inc_64(&stat_osif_malloc_fail);
+			return (NULL);
+		}
 		ret = osif_malloc_pushpage(size, __func__);
 		called = true;
 	}
