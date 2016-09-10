@@ -354,6 +354,7 @@ static vmem_kstat_t vmem_kstat_template = {
 	{ "parent_xalloc",	KSTAT_DATA_UINT64 },
 	{ "parent_free",	KSTAT_DATA_UINT64 },
 	{ "nextfit_xalloc",	KSTAT_DATA_UINT64 },
+	{ "nextfit_root_wait",	KSTAT_DATA_UINT64 },
 };
 
 // Warning, we know its 6 from inside of vmem_init()
@@ -908,15 +909,16 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			 */
 			extern void *segkmem_alloc(vmem_t *, size_t, int);
 			extern void *segkmem_zio_alloc(vmem_t *, size_t, int);
-			if ((vmp->vm_source_alloc == segkmem_zio_alloc ||
+			if (spl_vmem_threads_waiting > 0 &&
+			    (vmp->vm_source_alloc == segkmem_zio_alloc ||
 				vmp->vm_source_alloc == segkmem_alloc) &&
 			    segkmem_total_mem_allocated > tunable_osif_memory_cap &&
 			    (!(vmflag & (VM_NOSLEEP | VM_PANIC)))) {
 				// special case: these are the _parent heaps and
 				// not a VM_NOSLEEP or VM_PANIC allocation
-				vmp->vm_kstat.vk_wait.value.ui64++;
-				dprintf("SPL: %s TIMED waiting for %lu sized alloc after full circle, arena %s.\n",
-				    __func__, size, vmp->vm_name);
+				vmp->vm_kstat.vk_nextfit_root_wait.value.ui64++;
+				printf("SPL: %s TIMED waiting for %lu sized alloc after full circle, arena %s, threads waiting %lld.\n",
+				    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
 				atomic_inc_64(&spl_vmem_threads_waiting);
 				int waittime = 0;
 				if (vmp->vm_source_alloc == segkmem_zio_alloc)

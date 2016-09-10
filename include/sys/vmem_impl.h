@@ -110,6 +110,7 @@ MAX(1 << highbit(3 * (max)), 64)
 		kstat_named_t	vk_parent_xalloc;	/* called the source allocator */
 		kstat_named_t	vk_parent_free;	        /* called the source free function */
 		kstat_named_t	vk_nextfit_xalloc;	/* nextfit search did not find space, call xalloc */
+		kstat_named_t	vk_nextfit_root_wait;	/* nextfit waiting before calling root source alloc */
 	} vmem_kstat_t;
 	
 	struct vmem {
