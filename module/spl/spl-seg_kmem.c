@@ -181,13 +181,14 @@ osif_malloc_reserve_cap(uint64_t size)
 
 	volatile extern unsigned int vm_page_free_wanted;
 	volatile extern unsigned int vm_page_free_count;
+	volatile extern unsigned int vm_page_speculative_count;
 
 	if (vm_page_free_wanted > 0) {
 		atomic_inc_64(&stat_osif_malloc_fail);
 		return (NULL);
 	}
 
-	if (vm_page_free_count < 8 * (size / PAGESIZE)) {
+	if ((vm_page_speculative_count + vm_page_free_count) < (4001 + (size / PAGESIZE))) {
 		atomic_inc_64(&stat_osif_malloc_fail);
 		return (NULL);
 	}
@@ -398,12 +399,12 @@ segkmem_alloc(vmem_t * vmp, size_t size, int maybe_unmasked_vmflag)
 		called = true;
 	}
 
-	if (!called && vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
+	if (!called && vmflags & VM_NORMALPRI && !(vmflags & (VM_NOSLEEP | VM_PANIC))) {
 		if (vm_page_free_wanted > 0) {
 			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
-		if (vm_page_free_count < 8 * (size / PAGESIZE)) {
+		if (vm_page_free_count < 4 * (size / PAGESIZE)) {
 			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
@@ -411,7 +412,7 @@ segkmem_alloc(vmem_t * vmp, size_t size, int maybe_unmasked_vmflag)
 		called = true;
 	}
 
-	if (!called && vmflags & VM_NORMALPRI) {
+	if (!called && vmflags & VM_NORMALPRI && !(vmflags & (VM_NOSLEEP | VM_PANIC))) {
 		ret = osif_malloc_capped(size);
 		called = true;
 	}
@@ -449,7 +450,7 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int maybe_unmasked_vmflag)
 	int vmflag = maybe_unmasked_vmflag & VM_KMFLAGS;
 
 	if (vm_page_free_wanted >  0 ||
-	    vm_page_free_count < 8 * (size / PAGESIZE)) {
+	    vm_page_free_count < 4 * (size / PAGESIZE)) {
 		kpreempt(KPREEMPT_SYNC);
 	}
 
@@ -483,7 +484,7 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int maybe_unmasked_vmflag)
 			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
-		if (vm_page_free_count < 8 * (size / PAGESIZE)) {
+		if (vm_page_free_count < 4 * (size / PAGESIZE)) {
 			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
 		}
