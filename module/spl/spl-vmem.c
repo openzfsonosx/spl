@@ -1857,7 +1857,7 @@ vmem_init(const char *heap_name,
 	
 	heap = vmem_create(heap_name,
 					   NULL, 0, heap_quantum,
-					   heap_alloc, heap_free, heap_parent, 0,
+					   heap_alloc, NULL, heap_parent, 0,
 					   VM_SLEEP | VMC_POPULATOR);
 	
 	
