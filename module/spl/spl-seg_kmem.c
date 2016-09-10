@@ -362,8 +362,8 @@ segkmem_alloc(vmem_t * vmp, size_t size, int maybe_unmasked_vmflag)
 
 	if (vmflag == VM_SLEEP) {
 		if (vm_page_free_wanted > 0) {
-			return (NULL);
 			atomic_inc_64(&stat_osif_malloc_fail);
+			return (NULL);
 		}
 		ret = osif_malloc_capped(size);
 		called = true;
@@ -371,17 +371,17 @@ segkmem_alloc(vmem_t * vmp, size_t size, int maybe_unmasked_vmflag)
 
 	uint8_t vmflags = vmflag & 0xff;
 
-	if (vmflags & VM_PANIC) {
+	if (!ret && vmflags & VM_PANIC) {
 		ret = osif_malloc_uncapped(size);
 		called = true;
 	}
 
-	if (vmflags & VM_PUSHPAGE) {
+	if (!called && vmflags & VM_PUSHPAGE) {
 		ret = osif_malloc_pushpage(size, __func__);
 		called = true;
 	}
 
-	if (vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
+	if (!called && vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
 		if (vm_page_free_wanted > 0) {
 			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
@@ -394,12 +394,12 @@ segkmem_alloc(vmem_t * vmp, size_t size, int maybe_unmasked_vmflag)
 		called = true;
 	}
 
-	if (vmflags & VM_NORMALPRI) {
+	if (!called && vmflags & VM_NORMALPRI) {
 		ret = osif_malloc_capped(size);
 		called = true;
 	}
 
-	if (vmflags & VM_NOSLEEP) {
+	if (!called && vmflags & VM_NOSLEEP) {
 		return (osif_malloc_capped(size));
 	}
 
@@ -447,17 +447,17 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int maybe_unmasked_vmflag)
 
 	uint8_t vmflags = vmflag & 0xff;
 
-	if (vmflags & VM_PANIC) {
+	if (!ret && vmflags & VM_PANIC) {
 		ret = osif_malloc_uncapped(size);
 		called = true;
 	}
 
-	if (vmflags & VM_PUSHPAGE) {
+	if (!called && vmflags & VM_PUSHPAGE) {
 		ret = osif_malloc_pushpage(size, __func__);
 		called = true;
 	}
 
-	if (vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
+	if (!called && vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
 		if (vm_page_free_wanted > 0) {
 			atomic_inc_64(&stat_osif_malloc_fail);
 			return (NULL);
@@ -470,12 +470,12 @@ segkmem_zio_alloc(vmem_t *vmp, size_t size, int maybe_unmasked_vmflag)
 		called = true;
 	}
 
-	if (vmflags & VM_NORMALPRI) {
+	if (!called && vmflags & VM_NORMALPRI) {
 		ret = osif_malloc_capped(size);
 		called = true;
 	}
 
-	if (vmflags & VM_NOSLEEP) {
+	if (!called && vmflags & VM_NOSLEEP) {
 		return (osif_malloc_capped(size));
 	}
 
