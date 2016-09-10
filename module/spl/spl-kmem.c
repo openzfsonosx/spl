@@ -3885,7 +3885,7 @@ kmem_cache_init(int pass, int use_large_pages)
 		kmem_default_arena = vmem_create("kmem_default",
 										 NULL, 0, PAGESIZE,
 										 vmem_alloc, vmem_free, kmem_va_arena,
-										 0, VMC_DUMPSAFE | VM_SLEEP);
+										 16 * PAGESIZE, VMC_DUMPSAFE | VM_SLEEP);
 
 		/* Figure out what our maximum cache size is */
 		maxbuf = kmem_max_cached;
