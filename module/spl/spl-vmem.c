@@ -951,6 +951,9 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			printf("SPL: %s: waiting for %lu sized alloc after full circle, arena %s.\n",
 			    __func__, size, vmp->vm_name);
 			atomic_inc_64(&spl_vmem_threads_waiting);
+			if (spl_vemem_threads_waiting > 1)
+				printf("SPL: %s threads waiting now %llu\n",
+				    __func__, spl_vmem_threads_waiting);
 			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 			if (spl_vmem_threads_waiting > 0)
 				atomic_dec_64(&spl_vmem_threads_waiting);
@@ -1242,7 +1245,12 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		printf("SPL: %s: vmem waiting for %lu sized alloc, arena %s\n",
 		    __func__, size, vmp->vm_name);
 		atomic_inc_64(&spl_vmem_threads_waiting);
+		if (spl_vmem_threads_waiting > 1)
+			printf("SPL: %s threads waiting now %llu\n",
+			    __func__, spl_vmem_threads_waiting);
 		cv_wait(&vmp->vm_cv, &vmp->vm_lock);
+		if (spl_vmem_threads_waiting > 0)
+			atomic_dec_64(&spl_vmem_threads_waiting);
 	}
 	if (vbest != NULL) {
 		ASSERT(vbest->vs_type == VMEM_FREE);
@@ -2079,7 +2087,7 @@ vmem_update(void *dummy)
 			// to be increased dynamically (and temporarily), but we can only do
 			// that if one or both is at default.
 		} else {
-			printf("SPL: %s waiting threads = %llu\n", __func__,
+			printf("SPL: %s waiting threads = %llu.\n", __func__,
 			    spl_vmem_threads_waiting);
 		}
 		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
