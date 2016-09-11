@@ -328,8 +328,9 @@ static vmem_t *vmem_metadata_arena;
 static vmem_t *vmem_seg_arena;
 static vmem_t *vmem_hash_arena;
 static vmem_t *vmem_vmem_arena;
-static vmem_t *heap_parent_parent; // This is a proxy arena that is a thin wrapper around the OS allocator
-static vmem_t *heap_parent; // This is a proxy arena that is a thin wrapper around the OS allocator
+static vmem_t *free_arena;
+vmem_t *spl_root_arena; // The bottom-most arena for SPL
+static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  vmem_fast_update_interval = {1, 0};  // for when there are waiting threads
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
@@ -357,8 +358,8 @@ static vmem_kstat_t vmem_kstat_template = {
 	{ "nextfit_root_wait",	KSTAT_DATA_UINT64 },
 };
 
-// Warning, we know its 6 from inside of vmem_init()
-static void *global_vmem_reap[6] = {NULL};
+// Warning, we know its 7 from inside of vmem_init()
+static void *global_vmem_reap[7] = {NULL};
 
 
 /*
@@ -951,7 +952,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			printf("SPL: %s: waiting for %lu sized alloc after full circle, arena %s.\n",
 			    __func__, size, vmp->vm_name);
 			atomic_inc_64(&spl_vmem_threads_waiting);
-			if (spl_vemem_threads_waiting > 1)
+			if (spl_vmem_threads_waiting > 1)
 				printf("SPL: %s threads waiting now %llu\n",
 				    __func__, spl_vmem_threads_waiting);
 			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
@@ -1971,6 +1972,10 @@ vmem_maybe_walk(void)
 
 }
 
+void vmem_vacuum_free_arena(void);
+
+static uint32_t vmem_add_a_gibibyte(vmem_t *);
+
 void
 vmem_update(void *dummy)
 {
@@ -1997,6 +2002,8 @@ vmem_update(void *dummy)
 		vmem_hash_rescale(vmp);
 	}
 	mutex_exit(&vmem_list_lock);
+
+	vmem_vacuum_free_arena();
 
 	// has the rescaling recovered some memory?
 	// note: currently only affects the tunable_osif_memory_cap,
@@ -2044,7 +2051,7 @@ vmem_update(void *dummy)
 			uint64_t newcap = tunable_osif_memory_cap + VMEM_FAST_RELEASE;
 
 			if (vmem_update_fast_count > MAX_VMEM_FASTS) {
-				extern unsigned int vm_page_free_wanted;
+				extern volatile unsigned int vm_page_free_wanted;
 				extern unsigned int vm_page_free_count;
 				extern unsigned int vm_page_speculative_count;
 				extern unsigned int vm_page_free_min;
@@ -2086,9 +2093,16 @@ vmem_update(void *dummy)
 			// for tunable_osif_memory_cap.   the gap between the two may need
 			// to be increased dynamically (and temporarily), but we can only do
 			// that if one or both is at default.
-		} else {
-			printf("SPL: %s waiting threads = %llu.\n", __func__,
-			    spl_vmem_threads_waiting);
+		} else if (spl_vmem_threads_waiting > 0) {
+			printf("SPL: %s waiting threads = %llu (%llu), attempting to grab more memory.\n",
+			    __func__, spl_vmem_threads_waiting, prev);
+			const uint32_t gib = 1024*1024*1024;
+			const uint32_t gib_pages = gib/PAGESIZE;
+			uint32_t pages = vmem_add_a_gibibyte(spl_root_arena);
+			if (pages != gib)
+				printf("SPL: %s got %u instead of %u (1GiB) pages.\n",
+				    __func__, pages, gib_pages);
+			cv_broadcast(&spl_root_arena->vm_cv);
 		}
 		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
 		if (!fast) {
@@ -2115,6 +2129,39 @@ vmem_qcache_reap(vmem_t *vmp)
 	for (i = 0; i < VMEM_NQCACHE_MAX; i++)
 		if (vmp->vm_qcache[i])
 			kmem_cache_reap_now(vmp->vm_qcache[i]);
+}
+
+static uint32_t
+vmem_add_a_gibibyte(vmem_t *vmp)
+{
+	const uint32_t gibibyte = 1024*1024*1024;
+	const uint32_t pages = (gibibyte/PAGESIZE);
+
+	extern void *osif_malloc(uint64_t);
+	extern volatile unsigned int vm_page_free_wanted;
+
+	for (uint32_t i = 0; i < pages; i++) {
+		void *a = osif_malloc(PAGESIZE);
+		if (a == NULL) {
+			printf("SPL: %s bailing out after only %u pages for %s.\n",
+			    __func__, i, vmp->vm_name);
+			return (i);
+		} else {
+			vmem_add(vmp, a, PAGESIZE, VM_SLEEP);
+		}
+		if (vm_page_free_wanted > 0) {
+			printf("SPL: %s memory tight, bailing out after only %u pages for %s.\n",
+			    __func__, i, vmp->vm_name);
+			return (i);
+		}
+	}
+	return (pages);
+}
+
+static void
+spl_root_arena_free(vmem_t *vmp, void *inaddr,  size_t size)
+{
+	vmem_add(free_arena, inaddr, size, VM_SLEEP);
 }
 
 /*
@@ -2157,12 +2204,26 @@ vmem_init(const char *heap_name,
 	 * go direct to the OS.
 	 */
 
-	heap_parent_parent = vmem_create("heap_parent_parent", NULL, 0,
-	    4*1024*1024, NULL, NULL, NULL, 0, VM_SLEEP | VM_NEXTFIT);
+
+	free_arena = vmem_create("free_arena", NULL, 0,
+	    PAGESIZE, NULL, NULL, NULL, 0, VM_SLEEP);
+
+	spl_root_arena = vmem_create("spl_root_arena", NULL, 0,
+	    PAGESIZE, NULL, spl_root_arena_free, NULL, 0, VM_SLEEP);
+
+	for (int i=0; i < 2; i++) {
+		const uint32_t gib = 1024*1024*1024;
+		uint32_t p = vmem_add_a_gibibyte(spl_root_arena);
+		if (p != gib) {
+			panic("SPL: %s, failed to add 1 GiB to spl_root_arena\n", __func__);
+		} else {
+			printf("SPL: %s, added 1 GiB to spl_root_arena\n", __func__);
+		}
+	}
 
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
-							  heap_alloc, heap_free, heap_parent_parent, 4*1024*1024,
+							  vmem_alloc, vmem_free, spl_root_arena, 256*1024,
 							  VM_SLEEP | VMC_NO_QCACHE);
 	
 	heap = vmem_create(heap_name,
@@ -2194,7 +2255,7 @@ vmem_init(const char *heap_name,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 	
-	// 6 vmem_create before this line.
+	// 7 vmem_create before this line.
 	for (id = 0; id < vmem_id; id++) {
 		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
 										   1, 0, 0, &vmem0[id], &vmem0[id + 1],
@@ -2229,7 +2290,6 @@ static void vmem_fini_freelist(void *vmp, void *start, size_t size)
 	list_insert_tail(&freelist, fs);
 }
 
-
 void vmem_fini(vmem_t *heap)
 {
 	uint32_t id;
@@ -2255,10 +2315,10 @@ void vmem_fini(vmem_t *heap)
 	vmem_walk(heap_parent, VMEM_ALLOC,
 			  vmem_fini_freelist, heap_parent);
 
-	vmem_walk(heap_parent_parent, VMEM_ALLOC,
-	    vmem_fini_freelist, heap_parent_parent);
-	
-	for (id = 0; id < 6; id++) {// From vmem_init, 6 vmem_create
+	vmem_walk(spl_root_arena, VMEM_ALLOC,
+	    vmem_fini_freelist, spl_root_arena);
+
+	for (id = 0; id < 7; id++) {// From vmem_init, 7 vmem_create
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
 	}
 	
@@ -2281,4 +2341,44 @@ void vmem_fini(vmem_t *heap)
 	mutex_destroy(&vmem_segfree_lock);
 	mutex_destroy(&vmem_list_lock);
 #endif
+}
+
+static list_t vacuum_freelist;
+
+static void
+vmem_vacuum_freelist(void *vmp, void *start, size_t size)
+{
+	struct free_slab *fs;
+
+	MALLOC(fs, struct free_slab *, sizeof(struct free_slab), M_TEMP, M_WAITOK);
+	fs->vmp = vmp;
+	fs->slabsize = size;
+	fs->slab = start;
+	list_link_init(&fs->next);
+	list_insert_tail(&vacuum_freelist, fs);
+}
+
+void
+vmem_vacuum_free_arena(void)
+{
+	if (free_arena == NULL)
+		return;
+
+	list_create(&vacuum_freelist, sizeof (struct free_slab),
+	    offsetof(struct free_slab, next));
+
+	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, free_arena);
+
+	uint64_t total = 0;
+	struct free_slab *fs;
+	while((fs = list_head(&freelist))) {
+		total+=fs->slabsize;
+		list_remove(&freelist, fs);
+		segkmem_free(fs->vmp, fs->slab, fs->slabsize);
+		vmem_xfree(fs->vmp, fs->slab, fs->slabsize);
+		FREE(fs, M_TEMP);
+	}
+	printf("SPL: %s released %llu bytes from free_arena.\n",
+	    __func__, total);
+	list_destroy(&vacuum_freelist);
 }
