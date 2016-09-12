@@ -3145,9 +3145,6 @@ spl_minimal_physmem_p_logic()
 		return (false);
 	if (vm_page_free_count > (vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES))
 		return (false);
-	if (segkmem_total_mem_allocated > tunable_osif_memory_reserve * 99ULL / 100ULL)
-		return (false);
-
 	return (true);
 }
 
@@ -4152,54 +4149,10 @@ spl_free_thread()
 			lowmem = true;
 		}
 
-		// add 20% of the total memory cap if we are far from the cap
-		// add 10% of the total memory cap if we are not too near the cap
-		// add  5% of the total memory cap if we are below 90% of the cap
-
-		if (!lowmem && segkmem_total_mem_allocated < (tunable_osif_memory_cap >> 1)) {
-			spl_free += tunable_osif_memory_cap / 5ULL;
-		} else if (!lowmem && segkmem_total_mem_allocated < tunable_osif_memory_cap / 75ULL * 100ULL) {
-			spl_free += tunable_osif_memory_cap / 10ULL;
-		} else if (!lowmem && segkmem_total_mem_allocated < tunable_osif_memory_cap / 90ULL * 100ULL) {
-			spl_free += tunable_osif_memory_cap / 20ULL;
-		}
-
-		// leave slop in kmem for non-arc, back way down if kmem is nearly full
-		// os_mem_alloc sysctl is segkmem_total_mem_allocated
-		if (segkmem_total_mem_allocated > tunable_osif_memory_reserve * 98ULL / 100ULL) {
-			int64_t big_used = segkmem_total_mem_allocated * 100LL;
-			int64_t pct_used = big_used / (int64_t)tunable_osif_memory_cap;  // range is 85+
-
-			if (pct_used >= 98 && spl_free > 0) {
-				spl_free = -1;
-			}
-
-			if (pct_used > 99)
-				emergency_lowmem = true;
-
-			// subtract 0.1% of total_memory per percentage used above 95%;
-			// this may or may not go negative.
-			// above 98% we go negative for sure, so we are demanding back 0.3%
-			// and that may continue for 1/10 second,
-			// so it's a big shrink.
-
-			spl_free -= (pct_used - 97) * (int64_t)(tunable_osif_memory_cap / 1000ULL);
-
-			lowmem = true;
-		} else if (segkmem_total_mem_allocated >= (int64_t)tunable_osif_memory_cap) {
-			if (spl_free > (16LL * 1024LL * 1024LL))    // SPA_MAXBLOCKSIZE
-				spl_free = 16LL * 1024LL * 1024LL;
-		}
-
-		// stop arc from grabbing allll the memory near startup and after a big evacuation of memory
-		// (e.g. fast I/O small memory)
-		// this does a small deflation compared to typical tunable_osif_memory_cap sizes (GiBs)
-		// this helps a little with rapidly growing user space demands at login/boot time
-		if (spl_free > tunable_osif_memory_cap) { // by default 80% of real_total_memory
-			spl_free -= 128*1024*1024;
-		}
-		if (spl_free > real_total_memory * 90ULL / 100ULL) {
-			spl_free -= 128*1024*1024;
+		extern uint64_t spl_vmem_threads_waiting;
+		if (spl_vmem_threads_waiting > 0) {
+			spl_free = -16LL * 1024LL * 1024LL;
+			emergency_lowmem = true;
 		}
 
 		double delta = spl_free - base;
@@ -4209,7 +4162,9 @@ spl_free_thread()
 		if (emergency_lowmem) {
 			// shove this right into arc_reclaim_thread, rather than waiting for eventual reaction
 			// to a negative spl_free.
-			spl_free_set_emergency_pressure((int64_t)tunable_osif_memory_cap / 200LL);
+			extern vmem_t *spl_root_arena;
+			int64_t vmem_total = (int64_t)spl_root_arena->vm_kstat.vk_mem_total.value.ui64;
+			spl_free_set_emergency_pressure(vmem_total / 200LL);
 		}
 
 		if (spl_free < 0)
@@ -4270,29 +4225,6 @@ reap_thread()
 			kmem_reap();
 			kmem_reap_idspace();
 			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-		} else if (om > previous_segkmem_total_mem_allocated &&
-				  om > (tunable_osif_memory_reserve * 90ULL / 100ULL) &&
-				  zfs_lbolt() - last_reap > (hz*10)) {
-			reap_now = 0;
-			mutex_exit(&reap_now_lock);
-			printf("SPL: %s, reap_now not set but delta %llu since %llu seconds ago and high segkmem use %llu\n",
-				   __func__, om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz, om);
-			last_reap = zfs_lbolt();
-			previous_segkmem_total_mem_allocated = om;
-			kmem_reap();
-			kmem_reap_idspace();
-			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-		} else if (om > (tunable_osif_memory_reserve * 90ULL / 100ULL) &&
-				  zfs_lbolt() - last_reap > (hz*60)) {
-			reap_now = 0;
-			mutex_exit(&reap_now_lock);
-			printf("SPL: %s, last reap %llu seconds ago and high segkmem use %llu\n",
-				   __func__, (zfs_lbolt() - last_reap)/hz, om);
-			last_reap = zfs_lbolt();
-			previous_segkmem_total_mem_allocated = om;
-			kmem_reap();
-			kmem_reap_idspace();
-			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
 		} else if ((zfs_lbolt() - last_reap > (hz*spl_reap_timeout_seconds))) {
 			reap_now = 0;
 			mutex_exit(&reap_now_lock);
@@ -4300,26 +4232,6 @@ reap_thread()
 				   __func__, (zfs_lbolt() - last_reap)/hz, om);
 			last_reap = zfs_lbolt();
 			previous_segkmem_total_mem_allocated = om;
-			kmem_reap();
-			kmem_reap_idspace();
-			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-		} else if (reap_now && om > previous_segkmem_total_mem_allocated) {
-			reap_now = 0;
-			mutex_exit(&reap_now_lock);
-			printf("SPL: reap thread, segkmem_total_mem_allocated delta %llu since %llu seconds ago\n",
-				   om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz);
-			last_reap = zfs_lbolt();
-			previous_segkmem_total_mem_allocated = om;
-			kmem_reap();
-			kmem_reap_idspace();
-			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-		} else if (reap_now && zfs_lbolt() - last_reap > (hz*30)) {
-			reap_now = 0;
-			mutex_exit(&reap_now_lock);
-			printf("SPL: reap thread, last reap %llu seconds ago\n",
-				   (zfs_lbolt() - last_reap)/hz);
-			last_reap = zfs_lbolt();
-			previous_segkmem_total_mem_allocated = segkmem_total_mem_allocated;
 			kmem_reap();
 			kmem_reap_idspace();
 			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
@@ -4416,9 +4328,6 @@ memory_monitor_thread()
 {
 	callb_cpr_t cpr;
 
-	uint64_t last_reap = zfs_lbolt();
-	uint64_t next_release = zfs_lbolt() + (5*hz);
-
 	CALLB_CPR_INIT(&cpr, &memory_monitor_lock, callb_generic_cpr, FTAG);
 
 	mutex_enter(&memory_monitor_lock);
@@ -4432,37 +4341,8 @@ memory_monitor_thread()
 		spl_stats.spl_monitor_thread_wake_count.value.ui64++;
 
 		if (!shutting_down) {
-
-			// has it been five minutes?  reap if the system has less than 10% real memory free
-			if ((zfs_lbolt() - last_reap) > (hz*300)) {
-				uint32_t tenpct_real_pages = (uint32_t)((real_total_memory / 10ULL) / PAGESIZE);
-				if ((vm_page_free_count + vm_page_speculative_count) < tenpct_real_pages) {
-					printf("SPL: MMT background 90%% real memory check, vm_page_free_wanted = %u, vm_page_free_count == %u, periodic reaping\n",
-						   vm_page_free_wanted,
-						   vm_page_free_count);
-					mutex_enter(&reap_now_lock);
-					reap_now = 1;
-					mutex_exit(&reap_now_lock);
-					last_reap = zfs_lbolt();
-					next_release = last_reap + (5*hz);
-					cv_broadcast(&memory_monitor_thread_cv);
-				}
-			}
-
-			// has it been an hour?  reap anyway
-			// reaping at frequencies higher than this takes longer and
-			// leads to worse fragmentation
-			if ((zfs_lbolt() - last_reap) > (hz*3600)) {
-				printf("SPL: MMT it's been an hour since the last reap, vm_page_free_count == %u\n",
-					   vm_page_free_count);
-				mutex_enter(&reap_now_lock);
-				reap_now = 1;
-				mutex_exit(&reap_now_lock);
-				last_reap = zfs_lbolt();
-				next_release = last_reap + (5*hz);
-				cv_broadcast(&memory_monitor_thread_cv);
-			}
-		} // !shutting down
+			cv_broadcast(&memory_monitor_thread_cv);
+		}
 
 		// block until signalled, or after 1 second
 		mutex_enter(&memory_monitor_lock);

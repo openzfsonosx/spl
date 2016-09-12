@@ -385,7 +385,7 @@ vmem_seg_t *_vnext = (vsp)->vs_##type##next;			\
 }
 
 /// vmem thread block count
-static uint64_t spl_vmem_threads_waiting = 0;
+uint64_t spl_vmem_threads_waiting = 0;
 
 extern uint64_t tunable_osif_memory_cap;
 extern void spl_free_set_emergency_pressure(int64_t p);
