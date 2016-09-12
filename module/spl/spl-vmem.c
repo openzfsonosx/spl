@@ -2111,6 +2111,7 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 				printf("SPL: %s adding page %u for %s\n",
 				    __func__, i * pages_per_alloc, vmp->vm_name);
 		        vmem_add_as_import(vmp, a, minalloc, VM_NOSLEEP);
+			vmp->vm_kstat.vk_parent_alloc.value.ui64++;
 		}
 		if (vm_page_free_wanted > 0) {
 			printf("SPL: %s memory tight, bailing out after only %u pages for %s.\n",
