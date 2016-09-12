@@ -2088,6 +2088,9 @@ vmem_qcache_reap(vmem_t *vmp)
 			kmem_cache_reap_now(vmp->vm_qcache[i]);
 }
 
+
+static uint64_t vmem_flush_free_to_root();
+
 static uint32_t
 vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 {
@@ -2095,10 +2098,20 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 	const uint32_t pages = (gibibyte/PAGESIZE);
 	const uint32_t minalloc = 1024*1024;
 	const uint32_t pages_per_alloc = minalloc/PAGESIZE;
-	const uint32_t allocs = (gibibyte/minalloc);
+	uint32_t allocs = (gibibyte/minalloc);
 
 	extern void *osif_malloc(uint64_t);
 	extern volatile unsigned int vm_page_free_wanted;
+
+	uint64_t recovered = vmem_flush_free_to_root();
+
+	if (recovered > 0) {
+		uint32_t minallocs_recovered = recovered / minalloc;
+		if (allocs > minallocs_recovered)
+			allocs -= minallocs_recovered;
+		else
+			return (recovered / PAGESIZE);
+	}
 
 	for (uint32_t i = 0; i < allocs; i++) {
 		void *a = osif_malloc(minalloc);
@@ -2120,12 +2133,6 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 		}
 	}
 	return (pages);
-}
-
-static void
-spl_root_arena_free(vmem_t *vmp, void *inaddr,  size_t size)
-{
-	vmem_add_as_import(free_arena, inaddr, size, VM_SLEEP);
 }
 
 /*
@@ -2168,6 +2175,10 @@ vmem_init(const char *heap_name,
 	 * go direct to the OS.
 	 */
 
+	extern void segkmem_free(vmem_t *, void *, size_t);
+	free_arena = vmem_create("free_arena",
+	    NULL, 0,
+	    PAGESIZE, NULL, segkmem_free, NULL, 0, VM_SLEEP);
 
 	// first add 512MiB in one alloc
 
@@ -2182,27 +2193,13 @@ vmem_init(const char *heap_name,
 	}
 
 	spl_root_arena = vmem_create("spl_root_arena",
-	    spl_root_initial_allocation, (size_t)halfgig,
-	    heap_quantum, NULL, spl_root_arena_free, NULL, 0, VM_SLEEP);
+	    NULL, 0, heap_quantum,
+	    NULL, vmem_free, free_arena, 0, VM_SLEEP);
+
+	vmem_add(spl_root_arena, spl_root_initial_allocation, (size_t)halfgig, VM_SLEEP);
 
 	printf("SPL: %s created spl_root_arena with %llu bytes.\n",
 	    __func__, halfgig);
-
-	const uint64_t thirtytwo = 32ULL*1024ULL*1024ULL;
-	void *f = osif_malloc(thirtytwo);
-
-	if (f == NULL) {
-		panic("SPL: %s unable to allocate %llu bytes for free_arena\n",
-		    __func__, thirtytwo);
-	}
-
-	extern void segkmem_free(vmem_t *, void *, size_t);
-	free_arena = vmem_create("free_arena",
-	    f, (size_t)thirtytwo,
-	    PAGESIZE, NULL, segkmem_free, NULL, 0, VM_SLEEP);
-
-	printf("SPL: %s created free_arena with %llu bytes.\n",
-	    __func__, thirtytwo);
 
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
@@ -2329,19 +2326,10 @@ void vmem_fini(vmem_t *heap)
 #endif
 }
 
-static list_t vacuum_freelist;
-
 static void
 vmem_vacuum_freelist(void *vmp, void *start, size_t size)
 {
-	struct free_slab *fs;
-
-	MALLOC(fs, struct free_slab *, sizeof(struct free_slab), M_TEMP, M_WAITOK);
-	fs->vmp = vmp;
-	fs->slabsize = size;
-	fs->slab = start;
-	list_link_init(&fs->next);
-	list_insert_tail(&vacuum_freelist, fs);
+	return;
 }
 
 void
@@ -2352,31 +2340,59 @@ vmem_vacuum_free_arena(void)
 
 	uint64_t start_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
 
-	list_create(&vacuum_freelist, sizeof (struct free_slab),
-	    offsetof(struct free_slab, next));
-
 	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, free_arena);
-
-	uint64_t total = 0;
-	struct free_slab *fs;
-	while((fs = list_head(&freelist))) {
-		total+=fs->slabsize;
-		list_remove(&freelist, fs);
-		segkmem_free(fs->vmp, fs->slab, fs->slabsize);
-		vmem_xfree(fs->vmp, fs->slab, fs->slabsize);
-		FREE(fs, M_TEMP);
-	}
-	list_destroy(&vacuum_freelist);
 
 	uint64_t end_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
 	uint64_t difference;
 	if (end_total > start_total) {
 		difference = end_total - start_total;
-		printf("SPL: %s WOAH!, free_arena grew by %llu (list release total = %llu).\n",
-		    __func__, difference, total);
+		printf("SPL: %s WOAH!, free_arena grew by %llu.\n",
+		    __func__, difference);
 	} else if (start_total > end_total) {
 		difference = start_total - end_total;
-		printf("SPL: %s released %llu bytes from free_arena (list release total = %llu).\n",
-		    __func__, difference, total);
+		printf("SPL: %s released %llu bytes from free_arena.\n",
+		    __func__, difference);
 	}
+}
+
+static uint64_t
+vmem_flush_free_to_root()
+{
+	extern void segkmem_free(vmem_t *, void *, size_t);
+
+	mutex_enter(&spl_root_arena->vm_lock);
+	spl_root_arena->vm_source_free = NULL;
+	mutex_exit(&spl_root_arena->vm_lock);
+	mutex_enter(&free_arena->vm_lock);
+	free_arena->vm_source = spl_root_arena;
+	free_arena->vm_source_free = vmem_free;
+	mutex_exit(&free_arena->vm_lock);
+
+	uint64_t start_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
+
+	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, free_arena);
+
+	uint64_t end_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
+
+	mutex_enter(&free_arena->vm_lock);
+	free_arena->vm_source = NULL;
+	free_arena->vm_source_free = segkmem_free;
+	mutex_exit(&free_arena->vm_lock);
+	mutex_enter(&spl_root_arena->vm_lock);
+	spl_root_arena->vm_source = free_arena;
+	spl_root_arena->vm_source_free = vmem_free;
+	mutex_exit(&spl_root_arena->vm_lock);
+
+	uint64_t difference;
+	if (end_total > start_total) {
+		difference = end_total - start_total;
+		printf("SPL: %s WOAH!, free_arena grew by %llu.\n",
+		    __func__, difference);
+	} else if (start_total > end_total) {
+		difference = start_total - end_total;
+		printf("SPL: %s flushed  %llu bytes from free_arena back into spl_root_arena.\n",
+		    __func__, difference);
+		return (difference);
+	}
+	return (0);
 }
