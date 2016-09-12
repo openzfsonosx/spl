@@ -334,6 +334,7 @@ static void *spl_root_initial_allocation;
 static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  vmem_fast_update_interval = {1, 0};  // for when there are waiting threads
+static struct timespec  spl_root_refill_interval = {1, 0};   // spl_root_refill() every second
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
@@ -1966,18 +1967,6 @@ vmem_update(void *dummy)
 			// to be increased dynamically (and temporarily), but we can only do
 			// that if one or both is at default.
 		}
-		printf("SPL: %s attempting to grab more memory.\n",
-		    __func__);
-		const uint32_t gib = 1024*1024*1024;
-		const uint32_t gib_pages = gib/PAGESIZE;
-		uint32_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
-		if (pages != gib_pages)
-			printf("SPL: %s got %u instead of %u (1GiB) pages.\n",
-			    __func__, pages, gib_pages);
-		cv_broadcast(&spl_root_arena->vm_cv);
-
-		atomic_inc_64(&vmem_update_fast_count);
-		fast = true;
 	}
 
 	mutex_enter(&vmem_list_lock);
@@ -2073,6 +2062,24 @@ vmem_update(void *dummy)
 	} else {
 		(void) bsd_timeout(vmem_update, dummy, &vmem_update_interval);
 	}
+}
+
+void
+spl_root_refill(void *dummy)
+{
+
+	if (spl_vmem_threads_waiting > 0) {
+		const uint32_t gib = 1024*1024*1024;
+		const uint32_t gib_pages = gib/PAGESIZE;
+
+		uint32_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
+
+		if (pages != gib_pages)
+			printf("SPL: %s got %u instead of %u (1GiB) pages.\n",
+			    __func__, pages, gib_pages);
+		cv_broadcast(&spl_root_arena->vm_cv);
+	}
+	bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval);
 }
 
 void
@@ -2242,6 +2249,7 @@ vmem_init(const char *heap_name,
 										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
 	}
 
+	spl_root_refill(NULL);
 	vmem_update(NULL);
 	
 	return (heap);
@@ -2275,7 +2283,8 @@ void vmem_fini(vmem_t *heap)
 	uint32_t id;
 	struct free_slab *fs;
 	uint64_t total;
-	
+
+	bsd_untimeout(spl_root_refill, NULL);
 	bsd_untimeout(vmem_update, NULL);
 	
 	/* Create a list of slabs to free by walking the list of allocs */
