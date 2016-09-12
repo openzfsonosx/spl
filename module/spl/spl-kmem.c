@@ -3932,6 +3932,9 @@ kmem_cache_init(int pass, int use_large_pages)
 		kmem_big_alloc_table, maxbuf, KMEM_BIG_SHIFT);
 
 	kmem_big_alloc_table_max = maxbuf >> KMEM_BIG_SHIFT;
+
+	extern void spl_root_refill(void *);
+	spl_root_refill(NULL);
 }
 
 struct free_slab {

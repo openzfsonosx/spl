@@ -534,8 +534,8 @@ vmem_hash_delete(vmem_t *vmp, uintptr_t addr, size_t size)
 	}
 	
 	if (vsp == NULL)
-		panic("vmem_hash_delete(%p, %lx, %lu): bad free",
-			  (void *)vmp, addr, size);
+		panic("vmem_hash_delete(%p, %lx, %lu): bad free (name: %s, addr, size)",
+		    (void *)vmp, addr, size, vmp->vm_name);
 	if (VS_SIZE(vsp) != size)
 		panic("vmem_hash_delete(%p, %lx, %lu): wrong size (expect %lu)",
 			  (void *)vmp, addr, size, VS_SIZE(vsp));
@@ -1950,6 +1950,22 @@ vmem_update(void *dummy)
 	uint64_t prev = spl_vmem_threads_waiting;
 	_Bool fast = false;
 
+	mutex_enter(&vmem_list_lock);
+	for (vmp = vmem_list; vmp != NULL; vmp = vmp->vm_next) {
+		/*
+		 * If threads are waiting for resources, wake them up
+		 * periodically so they can issue another kmem_reap()
+		 * to reclaim resources cached by the slab allocator.
+		 */
+		cv_broadcast(&vmp->vm_cv);
+
+		/*
+		 * Rescale the hash table to keep the hash chains short.
+		 */
+		vmem_hash_rescale(vmp);
+	}
+	mutex_exit(&vmem_list_lock);
+
 	vmem_vacuum_free_arena();
 
 	atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
@@ -1968,22 +1984,6 @@ vmem_update(void *dummy)
 			// that if one or both is at default.
 		}
 	}
-
-	mutex_enter(&vmem_list_lock);
-	for (vmp = vmem_list; vmp != NULL; vmp = vmp->vm_next) {
-		/*
-		 * If threads are waiting for resources, wake them up
-		 * periodically so they can issue another kmem_reap()
-		 * to reclaim resources cached by the slab allocator.
-		 */
-		cv_broadcast(&vmp->vm_cv);
-		
-		/*
-		 * Rescale the hash table to keep the hash chains short.
-		 */
-		vmem_hash_rescale(vmp);
-	}
-	mutex_exit(&vmem_list_lock);
 
 	// has the above recovered some memory?
 	// note: currently only affects the tunable_osif_memory_cap,
@@ -2068,7 +2068,10 @@ void
 spl_root_refill(void *dummy)
 {
 
-	if (spl_vmem_threads_waiting > 0) {
+	const uint64_t onegig = 1024ULL*1024ULL*1024ULL;
+	uint64_t mem_in_use = spl_root_arena->vm_kstat.vk_mem_total.value.ui64;
+
+	if (spl_vmem_threads_waiting > 0 || mem_in_use <= onegig) {
 		const uint32_t gib = 1024*1024*1024;
 		const uint32_t gib_pages = gib/PAGESIZE;
 
@@ -2145,6 +2148,25 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 /*
  * Prepare vmem for use.
  */
+
+static void
+vmem_free_transfer(vmem_t *source, void *inaddr, size_t size, vmem_t *destination)
+{
+	vmem_add_as_import(destination, inaddr, size, VM_SLEEP);
+}
+
+static void
+spl_root_arena_free_to_free_arena(vmem_t *vmp, void *inaddr, size_t size)
+{
+	vmem_free_transfer(vmp, inaddr, size, free_arena);
+}
+
+static void
+free_arena_free_to_spl_root(vmem_t *vmp, void *inaddr, size_t size)
+{
+	vmem_free_transfer(vmp, inaddr, size, spl_root_arena);
+}
+
 vmem_t *
 vmem_init(const char *heap_name,
 		  void *heap_start, size_t heap_size, size_t heap_quantum,
@@ -2182,11 +2204,6 @@ vmem_init(const char *heap_name,
 	 * go direct to the OS.
 	 */
 
-	extern void segkmem_free(vmem_t *, void *, size_t);
-	free_arena = vmem_create("free_arena",
-	    NULL, 0,
-	    PAGESIZE, NULL, segkmem_free, NULL, 0, VM_SLEEP);
-
 	// first add 512MiB in one alloc
 
 	const uint64_t halfgig = 512ULL*1024ULL*1024ULL;
@@ -2200,13 +2217,16 @@ vmem_init(const char *heap_name,
 	}
 
 	spl_root_arena = vmem_create("spl_root_arena",
-	    NULL, 0, heap_quantum,
-	    NULL, vmem_free, free_arena, 0, VM_SLEEP);
-
-	vmem_add(spl_root_arena, spl_root_initial_allocation, (size_t)halfgig, VM_SLEEP);
+	    spl_root_initial_allocation, halfgig, heap_quantum,
+	    NULL, spl_root_arena_free_to_free_arena, NULL, 0, VM_SLEEP);
 
 	printf("SPL: %s created spl_root_arena with %llu bytes.\n",
 	    __func__, halfgig);
+
+	extern void segkmem_free(vmem_t *, void *, size_t);
+	free_arena = vmem_create("free_arena",
+	    NULL, 0,
+	    PAGESIZE, NULL, segkmem_free, NULL, 0, VM_SLEEP);
 
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
@@ -2249,7 +2269,6 @@ vmem_init(const char *heap_name,
 										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
 	}
 
-	spl_root_refill(NULL);
 	vmem_update(NULL);
 	
 	return (heap);
@@ -2338,7 +2357,7 @@ void vmem_fini(vmem_t *heap)
 static void
 vmem_vacuum_freelist(void *vmp, void *start, size_t size)
 {
-	return;
+	//vmem_xfree(vmp, start, size);
 }
 
 void
@@ -2369,28 +2388,41 @@ vmem_flush_free_to_root()
 {
 	extern void segkmem_free(vmem_t *, void *, size_t);
 
-	mutex_enter(&spl_root_arena->vm_lock);
-	spl_root_arena->vm_source_free = NULL;
-	mutex_exit(&spl_root_arena->vm_lock);
-	mutex_enter(&free_arena->vm_lock);
-	free_arena->vm_source = spl_root_arena;
-	free_arena->vm_source_free = vmem_free;
-	mutex_exit(&free_arena->vm_lock);
-
 	uint64_t start_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
 
+	if (start_total == 0)
+		return(0);
+
+	dprintf("SPL: %s starting, current free_arena == %llu\n",
+	    __func__, start_total);
+
+	mutex_enter(&spl_root_arena->vm_lock);
+	mutex_enter(&free_arena->vm_lock);
+
+	spl_root_arena->vm_source_free = NULL;
+
+	free_arena->vm_source_free = free_arena_free_to_spl_root;
+
+	mutex_exit(&free_arena->vm_lock);
+	mutex_exit(&spl_root_arena->vm_lock);
+
+	dprintf("SPL: %s walking\n", __func__);
 	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, free_arena);
 
 	uint64_t end_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
 
+	dprintf("SPL: %s walked, current free arena == %llu\n",
+	    __func__, end_total);
+
 	mutex_enter(&free_arena->vm_lock);
-	free_arena->vm_source = NULL;
-	free_arena->vm_source_free = segkmem_free;
-	mutex_exit(&free_arena->vm_lock);
 	mutex_enter(&spl_root_arena->vm_lock);
-	spl_root_arena->vm_source = free_arena;
-	spl_root_arena->vm_source_free = vmem_free;
+
+	free_arena->vm_source_free = segkmem_free;
+
+	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
+
 	mutex_exit(&spl_root_arena->vm_lock);
+	mutex_exit(&free_arena->vm_lock);
 
 	uint64_t difference;
 	if (end_total > start_total) {
