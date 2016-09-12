@@ -328,9 +328,12 @@ static vmem_t *vmem_seg_arena;
 static vmem_t *vmem_hash_arena;
 static vmem_t *vmem_vmem_arena;
 static vmem_t *heap_parent; // This is a proxy arena that is a thin wrapper around the OS allocator
+static vmem_t *spl_root_arena; // This is is an early-kernel-allocated slice of memory underlying all vmems
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
+static uint64_t spl_root_arena_memory_size;
 size_t vmem_seg_size = sizeof (vmem_seg_t);
+static void *spl_root_arena_memory[64] = {NULL}; // 128GiB is max supported in xnu's vm_map.c
 
 static vmem_kstat_t vmem_kstat_template = {
 	{ "mem_inuse",		KSTAT_DATA_UINT64 },
@@ -1840,15 +1843,55 @@ vmem_init(const char *heap_name,
 	 * heap_alloc (segkmem_alloc) and heap_free (segkmem_free)
 	 * go direct to the OS.
 	 */
+	
+#ifdef _KERNEL
+	
+	/*
+	 * xnu's vm_kern.c imposes a a 2GiB per-allocation limit,
+	 * so start with an empty spl_root_arena and vmem_add one
+	 * gibibyte at a time
+	 *
+	 */
+	void *osif_malloc(uint64_t size);
+	extern uint64_t real_total_memory;
+	const uint64_t one_gib = 1024ULL*1024ULL*1024ULL;
+	
+	spl_root_arena = vmem_create("spl_root_arena", NULL, 0,
+								 PAGESIZE, NULL, NULL, NULL, 0, VM_SLEEP);
+	
+	spl_root_arena_memory_size = MIN(real_total_memory/2, 64ULL*one_gib);
+	
+	int gibibytes_to_add = (int)(spl_root_arena_memory_size / one_gib) - 1;
+	
+	for (int index = 0; index <  gibibytes_to_add; index++) {
+		spl_root_arena_memory[index] = osif_malloc(one_gib);
+		if (spl_root_arena_memory[index] == NULL) {
+			panic("SPL: %s unable to allocate %llu", __func__, one_gib);
+		} else {
+			vmem_add(spl_root_arena, spl_root_arena_memory[index], one_gib, VM_SLEEP);
+			printf("SPL: %s did vmem_add(spl_root_arena, spl_root_arena_memory[%d], %llu, VM_SLEEP)\n",
+			    __func__, index, one_gib);
+		}
+	}
+	//printf("SPL: spl_root_arena populated, %s segkmem_total_mem_allocated == %llu\n",
+	//    __func__, segkmem_total_mem_allocated);
+	
+	heap_parent = vmem_create("heap_parent",  NULL, 0, PAGESIZE,
+							  vmem_alloc, vmem_free, spl_root_arena, 4*1024*1024,
+							  VM_SLEEP | VMC_NO_QCACHE);
+#else
+	spl_root_arena = vmem_create("spl_root_arena", NULL, 0,
+								 4*1024*1024, NULL, NULL, NULL, 0, VM_SLEEP);
+	
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
-							  NULL, NULL, NULL, 0,
-							  VM_SLEEP);
-	
+							  heap_alloc, heap_free, spl_root_arena, 4*1024*1024,
+							  VM_SLEEP | VMC_NO_QCACHE);
+#endif
 	heap = vmem_create(heap_name,
 					   NULL, 0, heap_quantum,
-					   heap_alloc, heap_free, heap_parent, 0,
-					   VM_SLEEP | VMC_POPULATOR);
+					   vmem_alloc, vmem_free, heap_parent, 0,
+					   VM_SLEEP);
 	
 	
 	// Root all the low bandwidth metadata arenas off heap_parent,
@@ -1856,7 +1899,7 @@ vmem_init(const char *heap_name,
 	// chance of cleaning up in an orderly manner.
 	vmem_metadata_arena = vmem_create("vmem_metadata",
 									  NULL, 0, heap_quantum,
-									  heap_alloc, heap_free, heap_parent, 8 * PAGESIZE,
+									  vmem_alloc, vmem_free, heap_parent, 8 * PAGESIZE,
 									  VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
 	
 	vmem_seg_arena = vmem_create("vmem_seg",
@@ -1874,7 +1917,7 @@ vmem_init(const char *heap_name,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 	
-	// 5 vmem_create before this line.
+	// 6 vmem_create before this line.
 	for (id = 0; id < vmem_id; id++) {
 		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
 										   1, 0, 0, &vmem0[id], &vmem0[id + 1],
@@ -1935,7 +1978,10 @@ void vmem_fini(vmem_t *heap)
 	vmem_walk(heap_parent, VMEM_ALLOC,
 			  vmem_fini_freelist, heap_parent);
 	
-	for (id = 0; id < 5; id++) {// From vmem_init, 5 vmem_create
+	vmem_walk(spl_root_arena, VMEM_ALLOC,
+			  vmem_fini_freelist, spl_root_arena);
+	
+	for (id = 0; id < 6; id++) {// From vmem_init, 5 vmem_create
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
 	}
 	
