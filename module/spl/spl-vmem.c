@@ -330,6 +330,7 @@ static vmem_t *vmem_hash_arena;
 static vmem_t *vmem_vmem_arena;
 static vmem_t *free_arena;
 vmem_t *spl_root_arena; // The bottom-most arena for SPL
+static void *spl_root_initial_allocation;
 static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  vmem_fast_update_interval = {1, 0};  // for when there are waiting threads
@@ -1460,6 +1461,25 @@ vmem_add(vmem_t *vmp, void *vaddr, size_t size, int vmflag)
 	return (vaddr);
 }
 
+static void *
+vmem_add_as_import(vmem_t *vmp, void *vaddr, size_t size, int vmflag)
+{
+	if (vaddr == NULL || size == 0)
+		panic("vmem_add_as_import(%p, %p, %lu): bad arguments",
+		    (void *)vmp, vaddr, size);
+
+	ASSERT(!vmem_contains(vmp, vaddr, size));
+
+	mutex_enter(&vmp->vm_lock);
+	if (vmem_populate(vmp, vmflag))
+		(void) vmem_span_create(vmp, vaddr, size, 1);
+	else
+		vaddr = NULL;
+	mutex_exit(&vmp->vm_lock);
+	return (vaddr);
+}
+
+
 /*
  * Walk the vmp arena, applying func to each segment matching typemask.
  * If VMEM_REENTRANT is specified, the arena lock is dropped across each
@@ -1974,7 +1994,7 @@ vmem_maybe_walk(void)
 
 void vmem_vacuum_free_arena(void);
 
-static uint32_t vmem_add_a_gibibyte(vmem_t *);
+static uint32_t vmem_add_a_gibibyte(vmem_t *, boolean_t);
 
 void
 vmem_update(void *dummy)
@@ -2098,8 +2118,8 @@ vmem_update(void *dummy)
 			    __func__, spl_vmem_threads_waiting, prev);
 			const uint32_t gib = 1024*1024*1024;
 			const uint32_t gib_pages = gib/PAGESIZE;
-			uint32_t pages = vmem_add_a_gibibyte(spl_root_arena);
-			if (pages != gib)
+			uint32_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
+			if (pages != gib_pages)
 				printf("SPL: %s got %u instead of %u (1GiB) pages.\n",
 				    __func__, pages, gib_pages);
 			cv_broadcast(&spl_root_arena->vm_cv);
@@ -2132,26 +2152,32 @@ vmem_qcache_reap(vmem_t *vmp)
 }
 
 static uint32_t
-vmem_add_a_gibibyte(vmem_t *vmp)
+vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 {
 	const uint32_t gibibyte = 1024*1024*1024;
 	const uint32_t pages = (gibibyte/PAGESIZE);
+	const uint32_t minalloc = 1024*1024;
+	const uint32_t pages_per_alloc = minalloc/PAGESIZE;
+	const uint32_t allocs = (gibibyte/minalloc);
 
 	extern void *osif_malloc(uint64_t);
 	extern volatile unsigned int vm_page_free_wanted;
 
-	for (uint32_t i = 0; i < pages; i++) {
-		void *a = osif_malloc(PAGESIZE);
+	for (uint32_t i = 0; i < allocs; i++) {
+		void *a = osif_malloc(minalloc);
 		if (a == NULL) {
 			printf("SPL: %s bailing out after only %u pages for %s.\n",
-			    __func__, i, vmp->vm_name);
+			    __func__, i * pages_per_alloc, vmp->vm_name);
 			return (i);
 		} else {
-			vmem_add(vmp, a, PAGESIZE, VM_SLEEP);
+			if (debug && (i % 16) == 0)
+				printf("SPL: %s adding page %u for %s\n",
+				    __func__, i * pages_per_alloc, vmp->vm_name);
+		        vmem_add_as_import(vmp, a, minalloc, VM_NOSLEEP);
 		}
 		if (vm_page_free_wanted > 0) {
 			printf("SPL: %s memory tight, bailing out after only %u pages for %s.\n",
-			    __func__, i, vmp->vm_name);
+			    __func__, i * pages_per_alloc, vmp->vm_name);
 			return (i);
 		}
 	}
@@ -2161,7 +2187,7 @@ vmem_add_a_gibibyte(vmem_t *vmp)
 static void
 spl_root_arena_free(vmem_t *vmp, void *inaddr,  size_t size)
 {
-	vmem_add(free_arena, inaddr, size, VM_SLEEP);
+	vmem_add_as_import(free_arena, inaddr, size, VM_SLEEP);
 }
 
 /*
@@ -2205,21 +2231,40 @@ vmem_init(const char *heap_name,
 	 */
 
 
-	free_arena = vmem_create("free_arena", NULL, 0,
-	    PAGESIZE, NULL, NULL, NULL, 0, VM_SLEEP);
+	// first add 512MiB in one alloc
 
-	spl_root_arena = vmem_create("spl_root_arena", NULL, 0,
-	    PAGESIZE, NULL, spl_root_arena_free, NULL, 0, VM_SLEEP);
+	const uint64_t halfgig = 512ULL*1024ULL*1024ULL;
 
-	for (int i=0; i < 2; i++) {
-		const uint32_t gib = 1024*1024*1024;
-		uint32_t p = vmem_add_a_gibibyte(spl_root_arena);
-		if (p != gib) {
-			panic("SPL: %s, failed to add 1 GiB to spl_root_arena\n", __func__);
-		} else {
-			printf("SPL: %s, added 1 GiB to spl_root_arena\n", __func__);
-		}
+	extern void *osif_malloc(uint64_t);
+	spl_root_initial_allocation = osif_malloc(halfgig);
+
+	if (spl_root_initial_allocation == NULL) {
+		panic("SPL: %s unable to allocate half a gigabyte (%llu)\n",
+		    __func__, halfgig);
 	}
+
+	spl_root_arena = vmem_create("spl_root_arena",
+	    spl_root_initial_allocation, (size_t)halfgig,
+	    heap_quantum, NULL, spl_root_arena_free, NULL, 0, VM_SLEEP);
+
+	printf("SPL: %s created spl_root_arena with %llu bytes.\n",
+	    __func__, halfgig);
+
+	const uint64_t thirtytwo = 32ULL*1024ULL*1024ULL;
+	void *f = osif_malloc(thirtytwo);
+
+	if (f == NULL) {
+		panic("SPL: %s unable to allocate %llu bytes for free_arena\n",
+		    __func__, thirtytwo);
+	}
+
+	extern void segkmem_free(vmem_t *, void *, size_t);
+	free_arena = vmem_create("free_arena",
+	    f, (size_t)thirtytwo,
+	    PAGESIZE, NULL, segkmem_free, NULL, 0, VM_SLEEP);
+
+	printf("SPL: %s created free_arena with %llu bytes.\n",
+	    __func__, thirtytwo);
 
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
@@ -2261,6 +2306,19 @@ vmem_init(const char *heap_name,
 										   1, 0, 0, &vmem0[id], &vmem0[id + 1],
 										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
 	}
+
+#if 0
+	for (int i=0; i < 2; i++) {
+		const uint32_t gib = 1024*1024*1024;
+		const uint32_t pages_wanted = gib/4096;
+		uint32_t p = vmem_add_a_gibibyte(spl_root_arena, true);
+		if (p != pages_wanted) {
+			panic("SPL: %s, failed to add 1 GiB to spl_root_arena\n", __func__);
+		} else {
+			printf("SPL: %s, added 1 GiB to spl_root_arena\n", __func__);
+		}
+	}
+#endif
 	
 	vmem_update(NULL);
 	
@@ -2332,6 +2390,9 @@ void vmem_fini(vmem_t *heap)
 	}
 	printf("SPL: Released %llu bytes from arenas\n", total);
 	list_destroy(&freelist);
+
+	extern void osif_free_noninline(void *, uint64_t);
+	osif_free_noninline(spl_root_initial_allocation, 512ULL*1024ULL*1024ULL);
 	
 #if 0 // Don't release, panics
 	mutex_destroy(&vmem_panic_lock);
