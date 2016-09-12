@@ -1937,61 +1937,6 @@ increment_arc_c_min(uint64_t howmuch)
 		atomic_add_64(&spl_target_arc_c_min, howmuch);
 }
 
-static void
-vmem_do_walk_dummy(void *vmp, void *start, size_t size)
-{
-	return;
-}
-
-static void
-vmem_do_walk(vmem_t *vmp)
-{
-	printf("SPL: %s, walking %s\n", __func__, vmp->vm_name);
-	uint64_t start = zfs_lbolt();
-	vmem_walk(vmp, VMEM_ALLOC | VMEM_REENTRANT, vmem_do_walk_dummy, vmp);
-	vmem_walk(vmp, VMEM_FREE | VMEM_REENTRANT, vmem_do_walk_dummy, vmp);
-	uint64_t end = zfs_lbolt();
-	printf("SPL: %s, walking %s took %llu\n",
-	    __func__, vmp->vm_name, (end-start));
-}
-
-static inline void
-vmem_maybe_walk_impl(vmem_t *vmp)
-{
-
-	if (vmp) {
-		uint64_t inuse = vmp->vm_kstat.vk_mem_inuse.value.ui64;
-		uint64_t import = vmp->vm_kstat.vk_mem_import.value.ui64;
-
-		if (import > inuse) {
-			uint64_t difference = import - inuse;
-			uint64_t fivepct = import / 20ULL;
-
-			if (difference > fivepct || difference > 512ULL*1024ULL*1024ULL)
-				vmem_do_walk(vmp);
-		}
-	}
-}
-
-void
-vmem_maybe_walk(void)
-{
-	// called when memory is low:
-	// for each of zio_arena(_parent) and heap(_parent)
-	// if mem_import is much greater than mem_inuse
-	// do a vmem_walk
-
-	extern vmem_t *zio_arena_parent;
-	extern vmem_t *zio_arena;
-	extern vmem_t *heap_arena;
-
-	vmem_maybe_walk_impl(zio_arena);
-	vmem_maybe_walk_impl(zio_arena_parent);
-	vmem_maybe_walk_impl(heap_arena);
-	vmem_maybe_walk_impl(heap_parent);
-
-}
-
 void vmem_vacuum_free_arena(void);
 
 static uint32_t vmem_add_a_gibibyte(vmem_t *, boolean_t);
@@ -2003,9 +1948,37 @@ vmem_update(void *dummy)
 
 	uint64_t prev = spl_vmem_threads_waiting;
 	_Bool fast = false;
-	static uint64_t last_maybe_walk = 0;
+
+	vmem_vacuum_free_arena();
 
 	atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
+
+	if (prev > 0) {
+		if (tunable_osif_memory_cap < segkmem_total_mem_allocated) {
+			uint64_t bytes_above_cap =
+			    segkmem_total_mem_allocated - tunable_osif_memory_cap;
+			printf
+			    ("SPL: %s: waited threads = %llu (%llu), bytes above cap = %llu\n",
+				__func__, prev, spl_vmem_threads_waiting, bytes_above_cap);
+			spl_free_set_emergency_pressure(bytes_above_cap);
+			// there is not really all that much we can do if arc*min is too big
+			// for tunable_osif_memory_cap.   the gap between the two may need
+			// to be increased dynamically (and temporarily), but we can only do
+			// that if one or both is at default.
+		}
+		printf("SPL: %s attempting to grab more memory.\n",
+		    __func__);
+		const uint32_t gib = 1024*1024*1024;
+		const uint32_t gib_pages = gib/PAGESIZE;
+		uint32_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
+		if (pages != gib_pages)
+			printf("SPL: %s got %u instead of %u (1GiB) pages.\n",
+			    __func__, pages, gib_pages);
+		cv_broadcast(&spl_root_arena->vm_cv);
+
+		atomic_inc_64(&vmem_update_fast_count);
+		fast = true;
+	}
 
 	mutex_enter(&vmem_list_lock);
 	for (vmp = vmem_list; vmp != NULL; vmp = vmp->vm_next) {
@@ -2023,21 +1996,13 @@ vmem_update(void *dummy)
 	}
 	mutex_exit(&vmem_list_lock);
 
-	vmem_vacuum_free_arena();
-
-	// has the rescaling recovered some memory?
+	// has the above recovered some memory?
 	// note: currently only affects the tunable_osif_memory_cap,
 	//       may have to involve tunable_osif_memory_reserve
 	//       (in module/spl/spl-seg_kmem.c)
 
 	if (segkmem_total_mem_allocated < tunable_osif_memory_cap)
 		increment_arc_c_min(VMEM_FAST_RELEASE);
-
-	if (segkmem_total_mem_allocated > tunable_osif_memory_cap &&
-	    last_maybe_walk + (hz * 60) < zfs_lbolt()) {
-		vmem_maybe_walk();
-		last_maybe_walk = zfs_lbolt();
-	}
 
 	if (vmem_update_original_memory_cap > 0 &&
 	    segkmem_total_mem_allocated < tunable_osif_memory_cap) {
@@ -2090,7 +2055,11 @@ vmem_update(void *dummy)
 
 			spl_free_set_emergency_pressure(32LL * 1024LL * 1024LL);
 
-			deflate_arc_c_min(VMEM_FAST_RELEASE);
+			extern unsigned int vm_page_free_count;
+			extern unsigned int vm_page_free_min;
+			if (segkmem_total_mem_allocated >= tunable_osif_memory_cap ||
+			    vm_page_free_count < (2 * vm_page_free_min))
+				deflate_arc_c_min(VMEM_FAST_RELEASE);
 
 			atomic_swap_64(&tunable_osif_memory_cap, newcap);
 			kpreempt(KPREEMPT_SYNC);
@@ -2098,38 +2067,6 @@ vmem_update(void *dummy)
 		}
 	}
 
-	// the cv_broadcast may have awakened some threads, which promptly
-	// go back to waiting.
-
-	if (prev > 0) {
-		if (tunable_osif_memory_cap < segkmem_total_mem_allocated) {
-			uint64_t bytes_above_cap =
-			    segkmem_total_mem_allocated - tunable_osif_memory_cap;
-			printf
-			    ("SPL: %s: waited threads = %llu (%llu), bytes above cap = %llu\n",
-				__func__, prev, spl_vmem_threads_waiting, bytes_above_cap);
-			spl_free_set_emergency_pressure(bytes_above_cap);
-			// there is not really all that much we can do if arc*min is too big
-			// for tunable_osif_memory_cap.   the gap between the two may need
-			// to be increased dynamically (and temporarily), but we can only do
-			// that if one or both is at default.
-		} else if (spl_vmem_threads_waiting > 0) {
-			printf("SPL: %s waiting threads = %llu (%llu), attempting to grab more memory.\n",
-			    __func__, spl_vmem_threads_waiting, prev);
-			const uint32_t gib = 1024*1024*1024;
-			const uint32_t gib_pages = gib/PAGESIZE;
-			uint32_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
-			if (pages != gib_pages)
-				printf("SPL: %s got %u instead of %u (1GiB) pages.\n",
-				    __func__, pages, gib_pages);
-			cv_broadcast(&spl_root_arena->vm_cv);
-		}
-		atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
-		if (!fast) {
-		  atomic_inc_64(&vmem_update_fast_count);
-		  fast = true;
-		}
-	}
 
 	if(fast) {
 		(void) bsd_timeout(vmem_update, dummy, &vmem_fast_update_interval);
@@ -2307,19 +2244,6 @@ vmem_init(const char *heap_name,
 										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
 	}
 
-#if 0
-	for (int i=0; i < 2; i++) {
-		const uint32_t gib = 1024*1024*1024;
-		const uint32_t pages_wanted = gib/4096;
-		uint32_t p = vmem_add_a_gibibyte(spl_root_arena, true);
-		if (p != pages_wanted) {
-			panic("SPL: %s, failed to add 1 GiB to spl_root_arena\n", __func__);
-		} else {
-			printf("SPL: %s, added 1 GiB to spl_root_arena\n", __func__);
-		}
-	}
-#endif
-	
 	vmem_update(NULL);
 	
 	return (heap);
@@ -2425,6 +2349,8 @@ vmem_vacuum_free_arena(void)
 	if (free_arena == NULL)
 		return;
 
+	uint64_t start_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
+
 	list_create(&vacuum_freelist, sizeof (struct free_slab),
 	    offsetof(struct free_slab, next));
 
@@ -2439,7 +2365,17 @@ vmem_vacuum_free_arena(void)
 		vmem_xfree(fs->vmp, fs->slab, fs->slabsize);
 		FREE(fs, M_TEMP);
 	}
-	printf("SPL: %s released %llu bytes from free_arena.\n",
-	    __func__, total);
 	list_destroy(&vacuum_freelist);
+
+	uint64_t end_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
+	uint64_t difference;
+	if (end_total > start_total) {
+		difference = end_total - start_total;
+		printf("SPL: %s WOAH!, free_arena grew by %llu (list release total = %llu).\n",
+		    __func__, difference, total);
+	} else if (start_total > end_total) {
+		difference = start_total - end_total;
+		printf("SPL: %s released %llu bytes from free_arena (list release total = %llu).\n",
+		    __func__, difference, total);
+	}
 }
