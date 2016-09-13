@@ -2029,9 +2029,9 @@ vmem_update(void *dummy)
 
 			if (vmem_update_fast_count > MAX_VMEM_FASTS) {
 				extern volatile unsigned int vm_page_free_wanted;
-				extern unsigned int vm_page_free_count;
-				extern unsigned int vm_page_speculative_count;
-				extern unsigned int vm_page_free_min;
+				extern volatile unsigned int vm_page_free_count;
+				extern volatile unsigned int vm_page_speculative_count;
+				extern volatile unsigned int vm_page_free_min;
 
 				if (vm_page_free_wanted == 0 &&
 				    (vm_page_free_count + vm_page_speculative_count) > (2 * vm_page_free_min)) {
@@ -2047,8 +2047,8 @@ vmem_update(void *dummy)
 
 			spl_free_set_emergency_pressure(32LL * 1024LL * 1024LL);
 
-			extern unsigned int vm_page_free_count;
-			extern unsigned int vm_page_free_min;
+			extern volatile unsigned int vm_page_free_count;
+			extern volatile unsigned int vm_page_free_min;
 			if (segkmem_total_mem_allocated >= tunable_osif_memory_cap ||
 			    vm_page_free_count < (2 * vm_page_free_min))
 				deflate_arc_c_min(VMEM_FAST_RELEASE);
@@ -2115,15 +2115,38 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 
 	extern void *osif_malloc(uint64_t);
 	extern volatile unsigned int vm_page_free_wanted;
+	extern volatile unsigned int vm_page_free_count;
+	extern volatile unsigned int vm_page_free_min;
+
+	// in critically low memory, just return anything in free_arena to XNU, as
+	// below we can fight for XNU memory with other non-spl allocators.
+	if (vm_page_free_wanted > 0 || vm_page_free_count <= vm_page_free_min) {
+		vmem_vacuum_free_arena();
+	}
 
 	uint64_t recovered = vmem_flush_free_to_root();
 
 	if (recovered > 0) {
+		// wake up threads waiting on memory
+		mutex_enter(&vmem_list_lock);
+		for (vmem_t *lvmp = vmem_list; lvmp !=NULL; lvmp = lvmp->vm_next) {
+			cv_broadcast(&lvmp->vm_cv);
+		}
+		mutex_exit(&vmem_list_lock);
+	}
+
+	if (recovered > 0) {
+		// we will need less memory from XNU
 		uint32_t minallocs_recovered = recovered / minalloc;
 		if (allocs > minallocs_recovered)
 			allocs -= minallocs_recovered;
 		else
 			return (recovered / PAGESIZE);
+	}
+
+	if (recovered > 0) {
+		if (vm_page_free_wanted > 0 || vm_page_free_count < (4 * vm_page_free_min))
+			return (recovered/PAGESIZE);
 	}
 
 	for (uint32_t i = 0; i < allocs; i++) {
@@ -2139,7 +2162,7 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 		        vmem_add_as_import(vmp, a, minalloc, VM_NOSLEEP);
 			vmp->vm_kstat.vk_parent_alloc.value.ui64++;
 		}
-		if (vm_page_free_wanted > 0) {
+		if (vm_page_free_wanted > 0 || vm_page_free_count < (2 * vm_page_free_min)) {
 			printf("SPL: %s memory tight, bailing out after only %u pages for %s.\n",
 			    __func__, i * pages_per_alloc, vmp->vm_name);
 			return (i);
