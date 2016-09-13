@@ -338,6 +338,9 @@ static struct timespec  spl_root_refill_interval = {1, 0};   // spl_root_refill(
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
+uint64_t vmem_free_memory_recycled = 0;
+uint64_t vmem_free_memory_released = 0;
+
 static vmem_kstat_t vmem_kstat_template = {
 	{ "mem_inuse",		KSTAT_DATA_UINT64 },
 	{ "mem_import",		KSTAT_DATA_UINT64 },
@@ -2380,6 +2383,7 @@ vmem_vacuum_free_arena(void)
 		difference = start_total - end_total;
 		printf("SPL: %s released %llu bytes from free_arena.\n",
 		    __func__, difference);
+		vmem_free_memory_released += difference;
 	}
 }
 
@@ -2433,6 +2437,7 @@ vmem_flush_free_to_root()
 		difference = start_total - end_total;
 		printf("SPL: %s flushed  %llu bytes from free_arena back into spl_root_arena.\n",
 		    __func__, difference);
+		vmem_free_memory_recycled += difference;
 		return (difference);
 	}
 	return (0);

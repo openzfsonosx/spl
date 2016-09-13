@@ -527,6 +527,9 @@ extern uint64_t tunable_osif_memory_cap;
 extern uint64_t tunable_osif_memory_reserve;
 extern uint64_t tunable_osif_pushpage_waitlimit;
 
+extern uint64_t vmem_free_memory_recycled;
+extern uint64_t vmem_free_memory_released;
+
 uint64_t stat_cur_bytes_above_total_memory = 0;
 
 typedef struct spl_stats {
@@ -563,6 +566,8 @@ typedef struct spl_stats {
 	kstat_named_t spl_tunable_osif_memory_cap;
 	kstat_named_t spl_tunable_osif_memory_reserve;
 	kstat_named_t spl_tunable_osif_pushpage_waitlimit;
+	kstat_named_t spl_vmem_free_memory_recycled;
+	kstat_named_t spl_vmem_free_memory_released;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -599,6 +604,8 @@ static spl_stats_t spl_stats = {
 	{"spl_tunable_osif_memory_cap", KSTAT_DATA_UINT64},
 	{"spl_tunable_osif_memory_reserve", KSTAT_DATA_UINT64},
 	{"spl_tunable_osif_pushpage_waitlimit", KSTAT_DATA_UINT64},
+	{"spl_vmem_free_memory_recycled", KSTAT_DATA_UINT64},
+	{"spl_vmem_free_memory_released", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4459,6 +4466,8 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_tunable_osif_memory_cap.value.ui64 = tunable_osif_memory_cap;
 		ks->spl_tunable_osif_memory_reserve.value.ui64 = tunable_osif_memory_reserve;
 		ks->spl_tunable_osif_pushpage_waitlimit.value.ui64 = tunable_osif_pushpage_waitlimit;
+		ks->spl_vmem_free_memory_recycled.value.ui64 = vmem_free_memory_recycled;
+		ks->spl_vmem_free_memory_released.value.ui64 = vmem_free_memory_released;
 	}
 
 	return (0);
