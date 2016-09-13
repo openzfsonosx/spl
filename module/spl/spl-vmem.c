@@ -2081,7 +2081,7 @@ spl_root_refill(void *dummy)
 		uint32_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
 
 		if (pages != gib_pages)
-			printf("SPL: %s got %u instead of %u (1GiB) pages.\n",
+			dprintf("SPL: %s got %u instead of %u (1GiB) pages.\n",
 			    __func__, pages, gib_pages);
 		cv_broadcast(&spl_root_arena->vm_cv);
 	}
@@ -2152,7 +2152,7 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 	for (uint32_t i = 0; i < allocs; i++) {
 		void *a = osif_malloc(minalloc);
 		if (a == NULL) {
-			printf("SPL: %s bailing out after only %u pages for %s.\n",
+			printf("SPL: WOAH! %s bailing out after only %u pages for %s.\n",
 			    __func__, i * pages_per_alloc, vmp->vm_name);
 			return (i);
 		} else {
@@ -2163,8 +2163,9 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 			vmp->vm_kstat.vk_parent_alloc.value.ui64++;
 		}
 		if (vm_page_free_wanted > 0 || vm_page_free_count < (2 * vm_page_free_min)) {
-			printf("SPL: %s memory tight, bailing out after only %u pages for %s.\n",
-			    __func__, i * pages_per_alloc, vmp->vm_name);
+			if (recovered == 0 && i == 0)
+				printf("SPL: %s NO MEMORY, bailing out, %s.\n",
+				    __func__, vmp->vm_name);
 			return (i);
 		}
 	}
@@ -2364,7 +2365,7 @@ void vmem_fini(vmem_t *heap)
 		segkmem_free(fs->vmp, fs->slab, fs->slabsize);
 		FREE(fs, M_TEMP);
 	}
-	printf("SPL: Released %llu bytes from arenas\n", total);
+	dprintf("SPL: Released %llu bytes from arenas\n", total);
 	list_destroy(&freelist);
 
 	extern void osif_free_noninline(void *, uint64_t);
@@ -2458,7 +2459,7 @@ vmem_flush_free_to_root()
 		    __func__, difference);
 	} else if (start_total > end_total) {
 		difference = start_total - end_total;
-		printf("SPL: %s flushed  %llu bytes from free_arena back into spl_root_arena.\n",
+		dprintf("SPL: %s flushed  %llu bytes from free_arena back into spl_root_arena.\n",
 		    __func__, difference);
 		vmem_free_memory_recycled += difference;
 		return (difference);
