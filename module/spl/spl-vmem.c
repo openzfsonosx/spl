@@ -334,7 +334,7 @@ static void *spl_root_initial_allocation;
 static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  vmem_fast_update_interval = {1, 0};  // for when there are waiting threads
-static struct timespec  spl_root_refill_interval = {1, 0};   // spl_root_refill() every second
+static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
@@ -2067,14 +2067,29 @@ vmem_update(void *dummy)
 	}
 }
 
+/*
+ * refill thread: regularly pull in memory, if needed and possible
+ */
 void
 spl_root_refill(void *dummy)
 {
 
 	const uint64_t onegig = 1024ULL*1024ULL*1024ULL;
 	uint64_t mem_in_use = spl_root_arena->vm_kstat.vk_mem_total.value.ui64;
+	uint64_t root_free = (uint64_t)vmem_size(spl_root_arena, VMEM_FREE);
 
-	if (spl_vmem_threads_waiting > 0 || mem_in_use <= onegig) {
+	// grab memory if there are waiting threads
+	// or if we are early after spl starts and haven't used much memory
+	// or if there is plenty of memory free
+
+	extern volatile unsigned int vm_page_free_wanted;
+	extern volatile unsigned int vm_page_free_count;
+
+	if (spl_vmem_threads_waiting > 0 ||
+	    (root_free < (onegig * 2ULL) &&
+		!vm_page_free_wanted &&
+		vm_page_free_count > (unsigned int)(onegig/PAGESIZE) + 4096) ||
+	    mem_in_use < onegig) {
 		const uint32_t gib = 1024*1024*1024;
 		const uint32_t gib_pages = gib/PAGESIZE;
 
@@ -2083,7 +2098,11 @@ spl_root_refill(void *dummy)
 		if (pages != gib_pages)
 			dprintf("SPL: %s got %u instead of %u (1GiB) pages.\n",
 			    __func__, pages, gib_pages);
-		cv_broadcast(&spl_root_arena->vm_cv);
+		if (spl_vmem_threads_waiting && pages >= (1024*1024)/PAGESIZE) {
+			mutex_enter(&spl_root_arena->vm_lock);
+			cv_broadcast(&spl_root_arena->vm_cv);
+			mutex_exit(&spl_root_arena->vm_lock);
+		}
 	}
 	bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval);
 }
