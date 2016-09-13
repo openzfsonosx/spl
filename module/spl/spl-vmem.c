@@ -2179,6 +2179,7 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 static void
 vmem_free_transfer(vmem_t *source, void *inaddr, size_t size, vmem_t *destination)
 {
+	bzero(inaddr, size);
 	vmem_add_as_import(destination, inaddr, size, VM_SLEEP);
 }
 
