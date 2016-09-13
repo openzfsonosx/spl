@@ -2126,13 +2126,26 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 
 	uint64_t recovered = vmem_flush_free_to_root();
 
-	if (recovered > 0) {
-		// wake up threads waiting on memory
-		mutex_enter(&vmem_list_lock);
-		for (vmem_t *lvmp = vmem_list; lvmp !=NULL; lvmp = lvmp->vm_next) {
-			cv_broadcast(&lvmp->vm_cv);
+	// waik up waiters, if any, if there is sufficient space
+	const uint32_t onemeg = 1024*1024;
+	if (vmp == spl_root_arena &&
+	    recovered > onemeg &&
+	    spl_vmem_threads_waiting > 0) {
+		for (uint32_t iter = 0;
+		     iter < (uint32_t)(recovered/onemeg) &&
+			 iter < (uint32_t)spl_vmem_threads_waiting; iter++) {
+			mutex_enter(&vmp->vm_lock);
+			cv_signal(&vmp->vm_cv);
+			mutex_exit(&vmp->vm_lock);
+			kpreempt(KPREEMPT_SYNC);
 		}
-		mutex_exit(&vmem_list_lock);
+		mutex_enter(&vmp->vm_lock);
+		if (spl_vmem_threads_waiting == 0 ||
+		    recovered > (onemeg * spl_vmem_threads_waiting)) {
+			mutex_exit(&vmp->vm_lock);
+			return(recovered/PAGESIZE);
+		}
+		mutex_exit(&vmp->vm_lock);
 	}
 
 	if (recovered > 0) {
