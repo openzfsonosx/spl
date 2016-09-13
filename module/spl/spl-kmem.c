@@ -4168,7 +4168,7 @@ spl_free_thread()
 			size_t root_free = spl_vmem_size(spl_root_arena, VMEM_FREE);
 
 			if (root_free > root_sixteenth_total) {
-				spl_free += root_free / 8;
+				spl_free += root_free / 4;
 			} else {
 				spl_free -= root_sixteenth_total;
 				lowmem = true;
