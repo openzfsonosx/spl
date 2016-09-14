@@ -323,6 +323,7 @@ static kmutex_t vmem_sleep_lock;
 static kmutex_t vmem_nosleep_lock;
 static kmutex_t vmem_pushpage_lock;
 static kmutex_t vmem_panic_lock;
+static kmutex_t vmem_flush_free_lock;
 static vmem_t *vmem_list;
 static vmem_t *vmem_metadata_arena;
 static vmem_t *vmem_seg_arena;
@@ -2124,6 +2125,7 @@ vmem_init(const char *heap_name,
 	mutex_init(&vmem_nosleep_lock, "vmem_nosleep_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&vmem_pushpage_lock, "vmem_pushpage_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&vmem_panic_lock, "vmem_panic_lock", MUTEX_DEFAULT, NULL);
+	mutex_init(&vmem_flush_free_lock, "vmem_flush_free_lock", MUTEX_DEFAULT, NULL);
 	
 	while (--nseg >= 0)
 		vmem_putseg_global(&vmem_seg0[nseg]);
@@ -2289,6 +2291,7 @@ void vmem_fini(vmem_t *heap)
 	osif_free(spl_root_initial_allocation, 512ULL*1024ULL*1024ULL);
 	
 #if 0 // Don't release, panics
+	mutex_destroy(&vmem_flush_free_lock);
 	mutex_destroy(&vmem_panic_lock);
 	mutex_destroy(&vmem_pushpage_lock);
 	mutex_destroy(&vmem_nosleep_lock);
@@ -2315,6 +2318,18 @@ vmem_vacuum_free_arena(void)
 	if (start_total == 0)
 		return;
 
+	mutex_enter(&vmem_flush_free_lock);
+
+	extern void segkmem_free(vmem_t *, void *, size_t);
+
+	if (free_arena->vm_source_free != segkmem_free) {
+		printf("SPL: %s ERROR: free_arena->vm_source_free should be %p, is %p\n",
+		    __func__, segkmem_free, free_arena->vm_source_free);
+		mutex_exit(&vmem_flush_free_lock);
+		return;
+	}
+
+
 	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, free_arena);
 
 	uint64_t end_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
@@ -2329,6 +2344,7 @@ vmem_vacuum_free_arena(void)
 		    __func__, difference);
 		vmem_free_memory_released += difference;
 	}
+	mutex_exit(&vmem_flush_free_lock);
 }
 
 static uint64_t
@@ -2340,6 +2356,8 @@ vmem_flush_free_to_root()
 
 	if (start_total == 0)
 		return(0);
+
+	mutex_enter(&vmem_flush_free_lock);
 
 	dprintf("SPL: %s starting, current free_arena == %llu\n",
 	    __func__, start_total);
@@ -2382,7 +2400,9 @@ vmem_flush_free_to_root()
 		dprintf("SPL: %s flushed  %llu bytes from free_arena back into spl_root_arena.\n",
 		    __func__, difference);
 		vmem_free_memory_recycled += difference;
+		mutex_exit(&vmem_flush_free_lock);
 		return (difference);
 	}
+	mutex_exit(&vmem_flush_free_lock);
 	return (0);
 }
