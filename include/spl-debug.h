@@ -46,8 +46,16 @@
 #include <machine/limits.h>
 //#include <linux/sched.h>
 #include <osx/sched.h>
-#include <kern/debug.h>
+#ifdef  __cplusplus
+// To make C++ happier about strnlen in kcdata.h
+extern "C" {
+#endif
 #include <sys/debug.h>
+#ifdef  __cplusplus
+}
+#endif
+
+
 
 void spl_backtrace(char *thesignal);
 int getpcstack(uintptr_t *pcstack, int pcstack_limit);
