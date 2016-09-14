@@ -2013,6 +2013,14 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 	// below we can fight for XNU memory with other non-spl allocators.
 	if (vm_page_free_wanted > 0 || vm_page_free_count <= vm_page_free_min) {
 		vmem_vacuum_free_arena();
+	} else {
+		// vacuum if we are fragmented (or have ample free in root)
+		// fragmentation metric: 25% free space
+		size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
+		size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
+
+		if (rfree > rtotal / 4)
+			vmem_vacuum_free_arena();
 	}
 
 	uint64_t recovered = vmem_flush_free_to_root();
