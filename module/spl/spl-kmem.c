@@ -513,19 +513,9 @@ struct {
 	kmem_bufctl_t	*kmp_bufctl;	/* bufctl */
 } kmem_panic_info;
 
-extern uint64_t stat_osif_malloc_denied;
 extern uint64_t stat_osif_malloc_success;
 extern uint64_t stat_osif_malloc_fail;
 extern uint64_t stat_osif_free;
-extern uint64_t stat_osif_reserve_inuse;
-extern uint64_t stat_osif_cum_reserve_allocs;
-extern uint64_t stat_osif_cum_reserve_bytes;
-extern uint64_t stat_osif_uncapped_calls;
-extern uint64_t stat_osif_capped_calls;
-extern uint64_t stat_osif_default_calls;
-extern uint64_t tunable_osif_memory_cap;
-extern uint64_t tunable_osif_memory_reserve;
-extern uint64_t tunable_osif_pushpage_waitlimit;
 
 extern uint64_t vmem_free_memory_recycled;
 extern uint64_t vmem_free_memory_released;
@@ -553,19 +543,9 @@ typedef struct spl_stats {
 	kstat_named_t spl_spl_free_negative_count;
 	kstat_named_t spl_spl_minimal_uses_spl_free;
 	kstat_named_t spl_spl_reap_timeout_seconds;
-	kstat_named_t spl_osif_malloc_denied;
 	kstat_named_t spl_osif_malloc_success;
 	kstat_named_t spl_osif_malloc_fail;
 	kstat_named_t spl_osif_free;
-	kstat_named_t spl_osif_cum_reserve_allocs;
-	kstat_named_t spl_osif_cum_reserve_bytes;
-	kstat_named_t spl_osif_uncapped_calls;
-	kstat_named_t spl_osif_capped_calls;
-	kstat_named_t spl_osif_default_calls;
-	kstat_named_t spl_cur_bytes_above_total_memory;
-	kstat_named_t spl_tunable_osif_memory_cap;
-	kstat_named_t spl_tunable_osif_memory_reserve;
-	kstat_named_t spl_tunable_osif_pushpage_waitlimit;
 	kstat_named_t spl_vmem_free_memory_recycled;
 	kstat_named_t spl_vmem_free_memory_released;
 } spl_stats_t;
@@ -591,19 +571,9 @@ static spl_stats_t spl_stats = {
 	{"spl_spl_free_negative_count", KSTAT_DATA_UINT64},
 	{"spl_spl_minimal_uses_spl_free", KSTAT_DATA_INT64},
 	{"spl_spl_reap_timeout_seconds", KSTAT_DATA_INT64},
-	{"spl_osif_malloc_denied", KSTAT_DATA_UINT64},
 	{"spl_osif_malloc_success", KSTAT_DATA_UINT64},
 	{"spl_osif_malloc_fail", KSTAT_DATA_UINT64},
 	{"spl_osif_free", KSTAT_DATA_UINT64},
-	{"spl_osif_cum_reserve_allocs", KSTAT_DATA_UINT64},
-	{"spl_osif_cum_reserve_bytes", KSTAT_DATA_UINT64},
-	{"spl_osif_uncapped_calls", KSTAT_DATA_UINT64},
-	{"spl_osif_capped_calls", KSTAT_DATA_UINT64},
-	{"spl_osif_default_calls", KSTAT_DATA_UINT64},
-	{"spl_cur_bytes_above_total_memory", KSTAT_DATA_UINT64},
-	{"spl_tunable_osif_memory_cap", KSTAT_DATA_UINT64},
-	{"spl_tunable_osif_memory_reserve", KSTAT_DATA_UINT64},
-	{"spl_tunable_osif_pushpage_waitlimit", KSTAT_DATA_UINT64},
 	{"spl_vmem_free_memory_recycled", KSTAT_DATA_UINT64},
 	{"spl_vmem_free_memory_released", KSTAT_DATA_UINT64},
 };
@@ -4439,18 +4409,6 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		  spl_reap_timeout_seconds = ks->spl_spl_reap_timeout_seconds.value.ui64;
 		}
 
-		if (ks->spl_tunable_osif_memory_cap.value.ui64 != tunable_osif_memory_cap) {
-			tunable_osif_memory_cap = ks->spl_tunable_osif_memory_cap.value.ui64;
-		}
-
-		if (ks->spl_tunable_osif_memory_reserve.value.ui64 != tunable_osif_memory_reserve) {
-			tunable_osif_memory_reserve = ks->spl_tunable_osif_memory_reserve.value.ui64;
-		}
-
-		if (ks->spl_tunable_osif_pushpage_waitlimit.value.ui64 != tunable_osif_pushpage_waitlimit) {
-			tunable_osif_pushpage_waitlimit = ks->spl_tunable_osif_pushpage_waitlimit.value.ui64;
-		}
-
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
 		ks->spl_active_threads.value.ui64 = zfs_threads;
@@ -4465,23 +4423,9 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_spl_free_delta_ema.value.i64 = spl_free_delta_ema;
 		ks->spl_spl_minimal_uses_spl_free.value.i64 = spl_minimal_uses_spl_free;
 		ks->spl_spl_reap_timeout_seconds.value.ui64 = spl_reap_timeout_seconds;
-		ks->spl_osif_malloc_denied.value.ui64 = stat_osif_malloc_denied;
 		ks->spl_osif_malloc_success.value.ui64 = stat_osif_malloc_success;
 		ks->spl_osif_malloc_fail.value.ui64 = stat_osif_malloc_fail;
 		ks->spl_osif_free.value.ui64 = stat_osif_free;
-		ks->spl_osif_cum_reserve_allocs.value.ui64 = stat_osif_cum_reserve_allocs;
-		ks->spl_osif_cum_reserve_bytes.value.ui64 = stat_osif_cum_reserve_bytes;
-		ks->spl_osif_uncapped_calls.value.ui64 = stat_osif_uncapped_calls;
-		ks->spl_osif_capped_calls.value.ui64 = stat_osif_capped_calls;
-		ks->spl_osif_default_calls.value.ui64 = stat_osif_default_calls;
-		if(total_memory >= segkmem_total_mem_allocated)
-		  stat_cur_bytes_above_total_memory = 0;
-		else
-		  stat_cur_bytes_above_total_memory = segkmem_total_mem_allocated - total_memory;
-		ks->spl_cur_bytes_above_total_memory.value.ui64 = stat_cur_bytes_above_total_memory;
-		ks->spl_tunable_osif_memory_cap.value.ui64 = tunable_osif_memory_cap;
-		ks->spl_tunable_osif_memory_reserve.value.ui64 = tunable_osif_memory_reserve;
-		ks->spl_tunable_osif_pushpage_waitlimit.value.ui64 = tunable_osif_pushpage_waitlimit;
 		ks->spl_vmem_free_memory_recycled.value.ui64 = vmem_free_memory_recycled;
 		ks->spl_vmem_free_memory_released.value.ui64 = vmem_free_memory_released;
 	}

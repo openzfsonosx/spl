@@ -138,209 +138,35 @@ vmem_t *zio_arena;							/* arena for allocating zio memory */
 
 #ifdef _KERNEL
 extern uint64_t total_memory;
-uint64_t tunable_osif_memory_cap = 0;
-uint64_t tunable_osif_memory_reserve = 0;
-uint64_t tunable_osif_pushpage_waitlimit = hz*10ULL;
 #endif
-uint64_t stat_osif_malloc_denied = 0;
 uint64_t stat_osif_malloc_success = 0;
 uint64_t stat_osif_malloc_fail = 0;
 uint64_t stat_osif_free = 0;
-uint64_t stat_osif_cum_reserve_allocs = 0;
-uint64_t stat_osif_cum_reserve_bytes = 0;
-uint64_t stat_osif_uncapped_calls = 0;
-uint64_t stat_osif_capped_calls = 0;
-uint64_t stat_osif_default_calls = 0;
-
-
-#define OSIF_RESERVE_PERCENT_ULL 10ULL // percent above cap we can allocate
-
-// slowpath: segkmem_total_mem_allocated + size > total_memory
-inline static void *
-osif_malloc_reserve_cap(uint64_t size)
-{
-#ifdef _KERNEL
-	void *tr;
-	kern_return_t kr;
-
-	if (tunable_osif_memory_cap == 0 && total_memory > 0) {
-		tunable_osif_memory_cap = total_memory + (1024ULL * 1024ULL * 1024ULL);
-	}
-
-	if (tunable_osif_memory_reserve <=
-	    (tunable_osif_memory_cap + (1024ULL * 1024ULL * 1024ULL))
-	    && total_memory > 0) {
-		extern uint64_t real_total_memory;
-		tunable_osif_memory_reserve =
-		    MIN((real_total_memory / 80ULL * 100ULL),
-			(tunable_osif_memory_cap + (2ULL * 1024ULL * 1024ULL * 1024ULL)));
-	}
-
-	atomic_inc_64(&stat_osif_cum_reserve_allocs);
-
-	volatile extern unsigned int vm_page_free_wanted;
-	volatile extern unsigned int vm_page_free_count;
-	volatile extern unsigned int vm_page_speculative_count;
-
-	if (vm_page_free_wanted > 0) {
-		atomic_inc_64(&stat_osif_malloc_fail);
-		return (NULL);
-	}
-
-	if ((vm_page_speculative_count + vm_page_free_count) < (4001 + (size / PAGESIZE))) {
-		atomic_inc_64(&stat_osif_malloc_fail);
-		return (NULL);
-	}
-
-	if (segkmem_total_mem_allocated + size <= tunable_osif_memory_reserve) {
-		kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0,
-					    SPL_TAG);
-
-		if (kr == KERN_SUCCESS) {
-			stat_osif_malloc_success++;
-			atomic_add_64(&segkmem_total_mem_allocated, size);
-			if (segkmem_total_mem_allocated > total_memory) {	// close enough, logically
-				// rather than burn a variable to determine what fraction
-				// of this allocation is above total_memory threshold
-				// and anyway, that's maybe less interesting than this count for now
-				atomic_add_64(&stat_osif_cum_reserve_bytes,
-					      size);
-			}
-			return (tr);
-		} else {
-			atomic_inc_64(&stat_osif_malloc_fail);
-			return (NULL);
-		}
-	} else {
-		atomic_inc_64(&stat_osif_malloc_denied);
-		return (NULL);
-	}
-#else
-	return ((void *) malloc(size));
-#endif
-}
-
-inline static void *
-osif_malloc_uncapped(uint64_t size)
-{
-#ifdef _KERNEL
-	void *tr;
-	kern_return_t kr;
-
-	atomic_inc_64(&stat_osif_uncapped_calls);
-
-	kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0,
-				    SPL_TAG);
-
-	if (kr == KERN_SUCCESS) {
-		stat_osif_malloc_success++;
-		atomic_add_64(&segkmem_total_mem_allocated, size);
-		return (tr);
-	} else {
-		atomic_inc_64(&stat_osif_malloc_fail);
-		return (NULL);
-	}
-#else
-	return ((void *) malloc(size));
-#endif				/* _KERNEL */
-}
-
-inline static void *
-osif_malloc_capped(uint64_t size)
-{
-#ifdef _KERNEL
-	void *tr;
-	kern_return_t kr;
-
-	atomic_inc_64(&stat_osif_capped_calls);
-
-	if (tunable_osif_memory_cap == 0 && total_memory > 0) {
-		tunable_osif_memory_cap = total_memory + (1024ULL * 1024ULL * 1024ULL);
-	}
-
-	if ((segkmem_total_mem_allocated + size) > tunable_osif_memory_cap &&
-	    (tunable_osif_memory_cap > 0) &&
-	    (segkmem_total_mem_allocated > 0)) {
-		atomic_inc_64(&stat_osif_malloc_denied);
-		return (NULL);
-	}
-
-	kr = kernel_memory_allocate(kernel_map, &tr, size, PAGESIZE, 0,
-				    SPL_TAG);
-
-	if (kr == KERN_SUCCESS) {
-		stat_osif_malloc_success++;
-		atomic_add_64(&segkmem_total_mem_allocated, size);
-		return (tr);
-	} else {
-		atomic_inc_64(&stat_osif_malloc_fail);
-		return (NULL);
-	}
-#else
-	return ((void *) malloc(size));
-#endif				/* _KERNEL */
-}
-
-static inline void *
-osif_malloc_pushpage(size_t size, const char *caller)
-{
-	static uint64_t lastsuccess = 0;
-
-	void *ret = osif_malloc_reserve_cap(size);
-
-	if (ret != NULL) {
-		lastsuccess = zfs_lbolt();
-		return (ret);
-	}
-
-	uint64_t now = zfs_lbolt();
-	uint64_t elapsed = now - lastsuccess;
-
-	volatile extern unsigned int vm_page_free_wanted;
-	volatile extern unsigned int vm_page_free_count;
-
-	if (elapsed > tunable_osif_pushpage_waitlimit) {
-		if (vm_page_free_wanted == 0
-		    && vm_page_free_count > (size / PAGESIZE)) {
-			printf("SPL: %s stuck for %llu ticks, force allocating %lu.\n",
-			    caller, elapsed, size);
-			lastsuccess = now;
-			return osif_malloc_uncapped(size);
-		} else if (vm_page_free_wanted == 0) {
-			printf("SPL: %s stuck for %llu ticks, vm_page_free_count is only %u, "
-			    "force allocating %lu anyway.\n",
-			    caller, elapsed, vm_page_free_count, size);
-			lastsuccess = now;
-			return osif_malloc_uncapped(size);
-		} else if (elapsed > (6*tunable_osif_pushpage_waitlimit)
-		    || (now % (hz*60))==0) {
-			printf("SPL: %s stuck for %llu seconds, vm_page_free_wanted = %u, "
-			    "vm_page_free_count = %u, force_allocating %lu nevertheless.\n",
-			    caller, (elapsed / hz),
-			    vm_page_free_wanted, vm_page_free_count,
-			    size);
-			lastsuccess = now;
-			return osif_malloc_uncapped(size);
-		} else if ((now % (10*hz))==0) {
-			printf("SPL: %s stuck badly, been %llu seconds, "
-			    "vm_page_free_wanted = %u, vm_page_free_count = %u, still waiting for %lu.\n",
-			    caller, (elapsed/hz),
-			    vm_page_free_wanted, vm_page_free_count,
-			    size);
-			return (NULL);
-		}
-	}
-
-	return (NULL);
-}
 
 void *
 osif_malloc(uint64_t size)
 {
-	return(osif_malloc_pushpage(size, __func__));
+#ifdef _KERNEL
+
+	void *tr;
+
+	kern_return_t kr = kernel_memory_allocate(kernel_map,
+	    &tr, size, PAGESIZE, 0, SPL_TAG);
+
+	if (kr == KERN_SUCCESS) {
+		stat_osif_malloc_success++;
+		atomic_add_64(&segkmem_total_mem_allocated, size);
+		return(tr);
+	} else {
+		atomic_inc_64(&stat_osif_malloc_fail);
+		return(NULL);
+	}
+#else
+	return(malloc(size));
+#endif
 }
 
-inline static void
+void
 osif_free(void* buf, uint64_t size)
 {
 #ifdef _KERNEL
@@ -350,12 +176,6 @@ osif_free(void* buf, uint64_t size)
 #else
     free(buf);
 #endif /* _KERNEL */
-}
-
-void
-osif_free_noninline(void *buf, uint64_t size)
-{
-	osif_free(buf, size);
 }
 
 /*
@@ -377,169 +197,20 @@ void kernelheap_fini(void)
 void *
 segkmem_alloc(vmem_t * vmp, size_t size, int maybe_unmasked_vmflag)
 {
-	void *ret = NULL;
-	bool called = false;
-
-	volatile extern unsigned int vm_page_free_wanted;
-	volatile extern unsigned int vm_page_free_count;
-
-	int vmflag = maybe_unmasked_vmflag & VM_KMFLAGS;
-
-	if (vmflag == VM_SLEEP) {
-		if (vm_page_free_wanted > 0) {
-			atomic_inc_64(&stat_osif_malloc_fail);
-			return (NULL);
-		}
-		ret = osif_malloc_capped(size);
-		called = true;
-	}
-
-	uint8_t vmflags = vmflag & 0xff;
-
-	if (!ret && vmflags & VM_PANIC) {
-		ret = osif_malloc_uncapped(size);
-		called = true;
-	}
-
-	if (!called && vmflags & VM_PUSHPAGE) {
-		if (vm_page_free_wanted > 0) {
-			atomic_inc_64(&stat_osif_malloc_fail);
-			return (NULL);
-		}
-		ret = osif_malloc_pushpage(size, __func__);
-		called = true;
-	}
-
-	if (!called && vmflags & VM_NORMALPRI && !(vmflags & (VM_NOSLEEP | VM_PANIC))) {
-		if (vm_page_free_wanted > 0) {
-			atomic_inc_64(&stat_osif_malloc_fail);
-			return (NULL);
-		}
-		if (vm_page_free_count < 4 * (size / PAGESIZE)) {
-			atomic_inc_64(&stat_osif_malloc_fail);
-			return (NULL);
-		}
-		ret = osif_malloc_capped(size);
-		called = true;
-	}
-
-	if (!called && vmflags & VM_NORMALPRI && !(vmflags & (VM_NOSLEEP | VM_PANIC))) {
-		ret = osif_malloc_capped(size);
-		called = true;
-	}
-
-	if (!called && vmflags & VM_NOSLEEP) {
-		return (osif_malloc_capped(size));
-	}
-
-	if (ret != NULL) {
-		cv_signal(&vmp->vm_cv);
-		return (ret);
-	} else if (called == true) {
-		// should we or not signal?
-		// since adjusting vmem_update(), probably not
-		//cv_signal(&vmp->vm_cv);
-		return (NULL);
-	}
-
-	printf("SPL: %s default alloc, size = %lu, vmflag = %x.\n",
-	       __func__, size, vmflag);
-	atomic_inc_64(&stat_osif_default_calls);
-	return (osif_malloc_capped(size));
-}
-
-
-void *
-segkmem_zio_alloc(vmem_t *vmp, size_t size, int maybe_unmasked_vmflag)
-{
-	void *ret = NULL;
-	bool called = false;
-
-	volatile extern unsigned int vm_page_free_count;
-	volatile extern unsigned int vm_page_free_wanted;
-
-	int vmflag = maybe_unmasked_vmflag & VM_KMFLAGS;
-
-	if (vm_page_free_wanted >  0 ||
-	    vm_page_free_count < 4 * (size / PAGESIZE)) {
-		kpreempt(KPREEMPT_SYNC);
-	}
-
-	if (vmflag == VM_SLEEP) {
-		if (vm_page_free_wanted > 0) {
-			atomic_inc_64(&stat_osif_malloc_fail);
-			return (NULL);
-		}
-		ret = osif_malloc_capped(size);
-		called = true;
-	}
-
-	uint8_t vmflags = vmflag & 0xff;
-
-	if (!ret && vmflags & VM_PANIC) {
-		ret = osif_malloc_uncapped(size);
-		called = true;
-	}
-
-	if (!called && vmflags & VM_PUSHPAGE) {
-		if (vm_page_free_wanted > 0) {
-			atomic_inc_64(&stat_osif_malloc_fail);
-			return (NULL);
-		}
-		ret = osif_malloc_pushpage(size, __func__);
-		called = true;
-	}
-
-	if (!called && vmflags & VM_NORMALPRI && vmflags & VM_NOSLEEP) {
-		if (vm_page_free_wanted > 0) {
-			atomic_inc_64(&stat_osif_malloc_fail);
-			return (NULL);
-		}
-		if (vm_page_free_count < 4 * (size / PAGESIZE)) {
-			atomic_inc_64(&stat_osif_malloc_fail);
-			return (NULL);
-		}
-		ret = osif_malloc_capped(size);
-		called = true;
-	}
-
-	if (!called && vmflags & VM_NORMALPRI) {
-		ret = osif_malloc_capped(size);
-		called = true;
-	}
-
-	if (!called && vmflags & VM_NOSLEEP) {
-		return (osif_malloc_capped(size));
-	}
-
-	if (ret != NULL) {
-		cv_signal(&vmp->vm_cv);
-		return (ret);
-	} else if (called == true) {
-		// should we or not signal?
-		// since adjusting vmem_update(), probably not
-		//cv_signal(&vmp->vm_cv);
-		return (NULL);
-	}
-
-	printf("SPL: %s default alloc, size = %lu, vmflag = %x.\n",
-	       __func__, size, vmflag);
-	atomic_inc_64(&stat_osif_default_calls);
-	return (osif_malloc_capped(size));
+	return(osif_malloc(size));
 }
 
 void
 segkmem_free(vmem_t *vmp, void *inaddr, size_t size)
 {
 	osif_free(inaddr, size);
-	cv_signal(&vmp->vm_cv);
-}
-
-void
-segkmem_zio_free(vmem_t *vmp, void *inaddr, size_t size)
-{
-	osif_free(inaddr, size);
-	cv_signal(&vmp->vm_cv);
+	//since this is mainly called by spl_root_arena and free_arena,
+	//do we really want to wake up a waiter, just because we have
+	//transferred from one to the other?
+	//we already have vmem_add_a_gibibyte waking up waiters
+	//so specializing here seems wasteful
+	//(originally included in vmem_experiments)
+	//cv_signal(&vmp->vm_cv);
 }
 
 /*
@@ -591,5 +262,3 @@ segkmem_zio_fini(void)
 		vmem_destroy(zio_arena);
 	}
 }
-
-

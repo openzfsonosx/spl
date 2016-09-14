@@ -333,7 +333,6 @@ vmem_t *spl_root_arena; // The bottom-most arena for SPL
 static void *spl_root_initial_allocation;
 static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
-static struct timespec  vmem_fast_update_interval = {1, 0};  // for when there are waiting threads
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
 static struct timespec  vmem_vacuum_thread_interval = {30, 0};
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
@@ -391,7 +390,6 @@ vmem_seg_t *_vnext = (vsp)->vs_##type##next;			\
 /// vmem thread block count
 uint64_t spl_vmem_threads_waiting = 0;
 
-extern uint64_t tunable_osif_memory_cap;
 extern void spl_free_set_emergency_pressure(int64_t p);
 extern uint64_t segkmem_total_mem_allocated;
 extern uint64_t total_memory;
@@ -914,41 +912,8 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			 * a VM_NOSLEEP allocation, let vmem_xalloc() handle it.
 			 * Otherwise, wait until another thread frees something.
 			 */
-			extern void *segkmem_alloc(vmem_t *, size_t, int);
-			extern void *segkmem_zio_alloc(vmem_t *, size_t, int);
-			if (spl_vmem_threads_waiting > 0 &&
-			    (vmp->vm_source_alloc == segkmem_zio_alloc ||
-				vmp->vm_source_alloc == segkmem_alloc) &&
-			    segkmem_total_mem_allocated > tunable_osif_memory_cap &&
-			    (!(vmflag & (VM_NOSLEEP | VM_PANIC)))) {
-				// special case: these are the _parent heaps and
-				// not a VM_NOSLEEP or VM_PANIC allocation
-				vmp->vm_kstat.vk_nextfit_root_wait.value.ui64++;
-				printf("SPL: %s TIMED waiting for %lu sized alloc after full circle, arena %s, threads waiting %lld.\n",
-				    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
-				atomic_inc_64(&spl_vmem_threads_waiting);
-				int waittime = 0;
-				if (vmp->vm_source_alloc == segkmem_zio_alloc)
-					waittime = hz * 10;
-				else
-					waittime = hz / 10;
-				int tim = cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, ddi_get_lbolt() + waittime);
-				if (spl_vmem_threads_waiting > 0)
-					atomic_dec_64(&spl_vmem_threads_waiting);
-				if (tim > 0) {
-					// another thread woke us up, go around again
-					vsp = rotor->vs_anext;
-					continue;
-				} else {
-					dprintf("SPL: %s allocating %lu after cv_timedwait timeout, arena %s.\n",
-					    __func__, size, vmp->vm_name);
-					mutex_exit(&vmp->vm_lock);
-					vmp->vm_kstat.vk_nextfit_xalloc.value.ui64++;
-					return (vmem_xalloc(vmp, size, vmp->vm_quantum,
-						0, 0, NULL, NULL, vmflag & VM_KMFLAGS));
-				}
-			} else if (vmp->vm_source_alloc != NULL ||
-				(vmflag & VM_NOSLEEP)) {
+			if (vmp->vm_source_alloc != NULL ||
+			    (vmflag & VM_NOSLEEP)) {
 				mutex_exit(&vmp->vm_lock);
 				vmp->vm_kstat.vk_nextfit_xalloc.value.ui64++;
 				return (vmem_xalloc(vmp, size, vmp->vm_quantum,
@@ -1551,16 +1516,7 @@ vmem_size(vmem_t *vmp, int typemask)
 size_t
 spl_vmem_size(vmem_t *vmp, int typemask)
 {
-	uint64_t size = 0;
-
-	if (typemask & VMEM_ALLOC)
-		size += vmp->vm_kstat.vk_mem_inuse.value.ui64;
-	if (typemask & VMEM_FREE) {
-		size += MAX(tunable_osif_memory_cap, total_memory) -
-		    vmp->vm_kstat.vk_mem_inuse.value.ui64;
-			return (vmem_size(vmp, typemask));
-	}
-	return ((size_t)size);
+	return(vmem_size(vmp, typemask));
 }
 
 /*
@@ -1886,11 +1842,6 @@ vmem_hash_rescale(vmem_t *vmp)
 /*
  * Perform periodic maintenance on all vmem arenas.
  */
-#define MAX_VMEM_FASTS 17ULL
-#define VMEM_FAST_STRIDE 4ULL
-#define VMEM_FAST_RELEASE (32ULL * 1024ULL * 1024ULL)
-static uint64_t vmem_update_fast_count = 0;
-static uint64_t vmem_update_original_memory_cap = 0;
 static uint64_t zfs_arc_c_min = 0;
 static uint64_t spl_target_arc_c_min = 0;
 static uint64_t original_zfs_arc_min = 0;
@@ -1958,9 +1909,6 @@ vmem_update(void *dummy)
 {
 	vmem_t *vmp;
 
-	uint64_t prev = spl_vmem_threads_waiting;
-	_Bool fast = false;
-
 	mutex_enter(&vmem_list_lock);
 	for (vmp = vmem_list; vmp != NULL; vmp = vmp->vm_next) {
 		/*
@@ -1979,98 +1927,7 @@ vmem_update(void *dummy)
 
 	atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
 
-	if (prev > 0) {
-		if (tunable_osif_memory_cap < segkmem_total_mem_allocated) {
-			uint64_t bytes_above_cap =
-			    segkmem_total_mem_allocated - tunable_osif_memory_cap;
-			printf
-			    ("SPL: %s: waited threads = %llu (%llu), bytes above cap = %llu\n",
-				__func__, prev, spl_vmem_threads_waiting, bytes_above_cap);
-			spl_free_set_emergency_pressure(bytes_above_cap);
-			// there is not really all that much we can do if arc*min is too big
-			// for tunable_osif_memory_cap.   the gap between the two may need
-			// to be increased dynamically (and temporarily), but we can only do
-			// that if one or both is at default.
-		}
-	}
-
-	// has the above recovered some memory?
-	// note: currently only affects the tunable_osif_memory_cap,
-	//       may have to involve tunable_osif_memory_reserve
-	//       (in module/spl/spl-seg_kmem.c)
-
-	if (segkmem_total_mem_allocated < tunable_osif_memory_cap)
-		increment_arc_c_min(VMEM_FAST_RELEASE);
-
-	if (vmem_update_original_memory_cap > 0 &&
-	    segkmem_total_mem_allocated < tunable_osif_memory_cap) {
-		atomic_swap_64(&vmem_update_fast_count, 0ULL);
-		fast = false;
-		printf("SPL: %s total alloc %llu < tunable cap %llu\n",
-		    __func__, segkmem_total_mem_allocated, tunable_osif_memory_cap);
-		if (vmem_update_original_memory_cap > 0 &&
-		    vmem_update_original_memory_cap != tunable_osif_memory_cap) {
-			printf("SPL: %s emergency memory cap %llu reduced back to %llu (delta %lld)\n",
-			    __func__, tunable_osif_memory_cap, vmem_update_original_memory_cap,
-			    (int64_t)((int64_t)vmem_update_original_memory_cap - (int64_t)tunable_osif_memory_cap));
-			atomic_swap_64(&tunable_osif_memory_cap, vmem_update_original_memory_cap);
-			atomic_swap_64(&vmem_update_original_memory_cap, 0ULL);
-		} else {
-			atomic_swap_64(&vmem_update_original_memory_cap, 0ULL);
-		}
-	} else if (segkmem_total_mem_allocated >= tunable_osif_memory_cap && prev > 0) {
-		if(vmem_update_original_memory_cap == 0) {
-			atomic_swap_64(&vmem_update_original_memory_cap, tunable_osif_memory_cap);
-		}
-		atomic_inc_64(&vmem_update_fast_count);
-		printf("SPL: %s out of memory pass %llu\n", __func__, vmem_update_fast_count);
-		fast = true;
-		if ((vmem_update_fast_count % VMEM_FAST_STRIDE)==0 || vmem_update_fast_count > MAX_VMEM_FASTS) {
-			// strategies here might include:
-			// 1. temporarily increase the cap (by 32MiB, 2 * max spa block size)
-			// 2. (try to) force arc to shrink below arc min
-			// 3. (really) force arc to shrink below arc min
-
-			uint64_t newcap = tunable_osif_memory_cap + VMEM_FAST_RELEASE;
-
-			if (vmem_update_fast_count > MAX_VMEM_FASTS) {
-				extern volatile unsigned int vm_page_free_wanted;
-				extern volatile unsigned int vm_page_free_count;
-				extern volatile unsigned int vm_page_speculative_count;
-				extern volatile unsigned int vm_page_free_min;
-
-				if (vm_page_free_wanted == 0 &&
-				    (vm_page_free_count + vm_page_speculative_count) > (2 * vm_page_free_min)) {
-					newcap = tunable_osif_memory_cap + (4 * VMEM_FAST_RELEASE);
-				}
-			}
-
-			printf("SPL: %s raising current cap %llu by %llu to %llu from original %llu (cum. delta %lld)\n",
-			    __func__, tunable_osif_memory_cap, VMEM_FAST_RELEASE,
-			    newcap, vmem_update_original_memory_cap,
-			    (int64_t)((int64_t)newcap -
-				(int64_t)vmem_update_original_memory_cap));
-
-			spl_free_set_emergency_pressure(32LL * 1024LL * 1024LL);
-
-			extern volatile unsigned int vm_page_free_count;
-			extern volatile unsigned int vm_page_free_min;
-			if (segkmem_total_mem_allocated >= tunable_osif_memory_cap ||
-			    vm_page_free_count < (2 * vm_page_free_min))
-				deflate_arc_c_min(VMEM_FAST_RELEASE);
-
-			atomic_swap_64(&tunable_osif_memory_cap, newcap);
-			kpreempt(KPREEMPT_SYNC);
-			fast = true;
-		}
-	}
-
-
-	if(fast) {
-		(void) bsd_timeout(vmem_update, dummy, &vmem_fast_update_interval);
-	} else {
-		(void) bsd_timeout(vmem_update, dummy, &vmem_update_interval);
-	}
+	(void) bsd_timeout(vmem_update, dummy, &vmem_update_interval);
 }
 
 /*
@@ -2103,6 +1960,8 @@ spl_root_refill(void *dummy)
 
 		uint32_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
 
+		if (pages == 0)
+			spl_free_set_emergency_pressure(mib);
 		if (pages != gib_pages)
 			dprintf("SPL: %s got %u instead of %u (1GiB) pages.\n",
 			    __func__, pages, gib_pages);
@@ -2416,8 +2275,8 @@ void vmem_fini(vmem_t *heap)
 	dprintf("SPL: Released %llu bytes from arenas\n", total);
 	list_destroy(&freelist);
 
-	extern void osif_free_noninline(void *, uint64_t);
-	osif_free_noninline(spl_root_initial_allocation, 512ULL*1024ULL*1024ULL);
+	extern void osif_free(void *, uint64_t);
+	osif_free(spl_root_initial_allocation, 512ULL*1024ULL*1024ULL);
 	
 #if 0 // Don't release, panics
 	mutex_destroy(&vmem_panic_lock);
