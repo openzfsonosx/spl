@@ -2019,7 +2019,7 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 		size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 		size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
 
-		if (rfree > rtotal / 4)
+		if (rtotal > (2 * gibibyte) && rfree > (rtotal / 4))
 			vmem_vacuum_free_arena();
 	}
 
@@ -2209,7 +2209,9 @@ vmem_init(const char *heap_name,
 										   VM_NOSLEEP | VM_BESTFIT | VM_PANIC);
 	}
 
+	printf("SPL: starting vmem_update() thread\n");
 	vmem_update(NULL);
+	printf("SPL: starting vmem_vacuum_thread() thread\n");
 	vmem_vacuum_thread(NULL);
 	
 	return (heap);
@@ -2309,6 +2311,9 @@ vmem_vacuum_free_arena(void)
 		return;
 
 	uint64_t start_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
+
+	if (start_total == 0)
+		return;
 
 	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, free_arena);
 
