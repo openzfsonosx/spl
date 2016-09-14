@@ -1962,15 +1962,6 @@ spl_root_refill(void *dummy)
 
 		if (pages == 0) {
 			spl_free_set_emergency_pressure(mib);
-		} else if (spl_vmem_threads_waiting && pages >= mib_pages) {
-			for (uint32_t iter = 0;
-			     iter < mib_pages &&
-				 iter < (mib_pages * (uint32_t)spl_vmem_threads_waiting);
-			     iter++) {
-				mutex_enter(&spl_root_arena->vm_lock);
-				cv_signal(&spl_root_arena->vm_cv);
-				mutex_exit(&spl_root_arena->vm_lock);
-			}
 		}
 	}
 	bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval);
@@ -2022,26 +2013,16 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 
 	uint64_t recovered = vmem_flush_free_to_root();
 
-	// waik up waiters, if any, if there is sufficient space
-	const uint64_t onemeg = 1024ULL*1024ULL;
+	// if there is sufficient space, we can return
+	// waiters have been awakened by the cv_broadcast
+	// in vmem_freelist_insert<-vmem_span_create<-vmem_add_as_import
+	// if they have all stopped waiting, then we can return what
+	// was recovered by recycling free_arena memory
+
 	if (vmp == spl_root_arena &&
-	    recovered > onemeg &&
-	    spl_vmem_threads_waiting > 0) {
-		for (uint64_t iter = 0;
-		     iter < (recovered/onemeg) &&
-			 iter < spl_vmem_threads_waiting; iter++) {
-			mutex_enter(&vmp->vm_lock);
-			cv_signal(&vmp->vm_cv);
-			mutex_exit(&vmp->vm_lock);
-			kpreempt(KPREEMPT_SYNC);
-		}
-		mutex_enter(&vmp->vm_lock);
-		if (spl_vmem_threads_waiting == 0 ||
-		    recovered > (onemeg * spl_vmem_threads_waiting)) {
-			mutex_exit(&vmp->vm_lock);
-			return(recovered/PAGESIZE);
-		}
-		mutex_exit(&vmp->vm_lock);
+	    recovered > minalloc &&
+	    spl_vmem_threads_waiting == 0) {
+		return(recovered/PAGESIZE);
 	}
 
 	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
