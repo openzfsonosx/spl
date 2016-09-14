@@ -2020,7 +2020,7 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 
 	static boolean_t suppress_message = false;
 
-#define UNSUPPRESS do { suppress_message = false; vmem_add_a_gibibyte_unsuppress_message(); } while(suppress_message)
+#define UNSUPPRESS do { if (suppress_message) vmem_add_a_gibibyte_unsuppress_message(); suppress_message=false; } while(suppress_message)
 
 	// in critically low memory, just return anything in free_arena to XNU, as
 	// below we can fight for XNU memory with other non-spl allocators.
