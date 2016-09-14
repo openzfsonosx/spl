@@ -335,6 +335,7 @@ static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  vmem_fast_update_interval = {1, 0};  // for when there are waiting threads
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
+static struct timespec  vmem_vacuum_thread_interval = {30, 0};
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
@@ -1946,6 +1947,13 @@ void vmem_vacuum_free_arena(void);
 static uint32_t vmem_add_a_gibibyte(vmem_t *, boolean_t);
 
 void
+vmem_vacuum_thread(void *dummy)
+{
+	vmem_vacuum_free_arena();
+	bsd_timeout(vmem_vacuum_thread, dummy, &vmem_vacuum_thread_interval);
+}
+
+void
 vmem_update(void *dummy)
 {
 	vmem_t *vmp;
@@ -1968,8 +1976,6 @@ vmem_update(void *dummy)
 		vmem_hash_rescale(vmp);
 	}
 	mutex_exit(&vmem_list_lock);
-
-	vmem_vacuum_free_arena();
 
 	atomic_swap_64(&spl_vmem_threads_waiting, 0ULL);
 
@@ -2103,7 +2109,7 @@ spl_root_refill(void *dummy)
 		if (spl_vmem_threads_waiting && pages >= mib_pages) {
 			for (uint32_t iter = 0;
 			     iter < mib_pages &&
-				 iter < (mib_pages * (uint32_t)spl_vm_threads_waiting);
+				 iter < (mib_pages * (uint32_t)spl_vmem_threads_waiting);
 			     iter++) {
 				mutex_enter(&spl_root_arena->vm_lock);
 				cv_signal(&spl_root_arena->vm_cv);
@@ -2337,6 +2343,7 @@ vmem_init(const char *heap_name,
 	}
 
 	vmem_update(NULL);
+	vmem_vacuum_thread(NULL);
 	
 	return (heap);
 }
@@ -2372,6 +2379,7 @@ void vmem_fini(vmem_t *heap)
 
 	bsd_untimeout(spl_root_refill, NULL);
 	bsd_untimeout(vmem_update, NULL);
+	bsd_untimeout(vmem_vacuum_thread, NULL);
 	
 	/* Create a list of slabs to free by walking the list of allocs */
 	list_create(&freelist, sizeof (struct free_slab),
