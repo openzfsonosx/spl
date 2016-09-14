@@ -921,12 +921,9 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 					0, 0, NULL, NULL, vmflag & (VM_KMFLAGS | VM_NEXTFIT)));
 			}
 			vmp->vm_kstat.vk_wait.value.ui64++;
-			printf("SPL: %s: waiting for %lu sized alloc after full circle, arena %s.\n",
-			    __func__, size, vmp->vm_name);
+			printf("SPL: %s: waiting for %lu sized alloc after full circle of  %, other threads waiting = %llu.\n",
+			    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
 			atomic_inc_64(&spl_vmem_threads_waiting);
-			if (spl_vmem_threads_waiting > 1)
-				printf("SPL: %s threads waiting now %llu\n",
-				    __func__, spl_vmem_threads_waiting);
 			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 			if (spl_vmem_threads_waiting > 0)
 				atomic_dec_64(&spl_vmem_threads_waiting);
@@ -1215,12 +1212,9 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		if (vmflag & VM_NOSLEEP)
 			break;
 		vmp->vm_kstat.vk_wait.value.ui64++;
-		printf("SPL: %s: vmem waiting for %lu sized alloc, arena %s\n",
-		    __func__, size, vmp->vm_name);
+		printf("SPL: %s: vmem waiting for %lu sized alloc for %s, other threads waiting = %llu\n",
+		    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
 		atomic_inc_64(&spl_vmem_threads_waiting);
-		if (spl_vmem_threads_waiting > 1)
-			printf("SPL: %s threads waiting now %llu\n",
-			    __func__, spl_vmem_threads_waiting);
 		cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 		if (spl_vmem_threads_waiting > 0)
 			atomic_dec_64(&spl_vmem_threads_waiting);
