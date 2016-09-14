@@ -69,6 +69,8 @@ do {									\
 	spl_debug_bug(__FILE__, __FUNCTION__, __LINE__, 0);		\
 } while (0)
 #endif
+
+extern void panic(const char *string, ...);
 #define	PANIC panic
 
 #define __ASSERT(x)			((void)0)
