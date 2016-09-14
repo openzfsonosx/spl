@@ -1955,18 +1955,14 @@ spl_root_refill(void *dummy)
 		vm_page_free_count > (unsigned int)(onegig/PAGESIZE) + 4096) ||
 	    mem_in_use < onegig) {
 		const uint32_t gib = 1024*1024*1024;
-		const uint32_t gib_pages = gib/PAGESIZE;
 		const uint32_t mib = 1024*1024;
 		const uint32_t mib_pages = mib/PAGESIZE;
 
 		uint64_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
 
-		if (pages == 0)
+		if (pages == 0) {
 			spl_free_set_emergency_pressure(mib);
-		if (pages != (uint64_t)gib_pages)
-			dprintf("SPL: %s got %llu instead of %u (1GiB) pages.\n",
-			    __func__, pages, gib_pages);
-		if (spl_vmem_threads_waiting && pages >= mib_pages) {
+		} else if (spl_vmem_threads_waiting && pages >= mib_pages) {
 			for (uint32_t iter = 0;
 			     iter < mib_pages &&
 				 iter < (mib_pages * (uint32_t)spl_vmem_threads_waiting);
@@ -1996,6 +1992,12 @@ vmem_qcache_reap(vmem_t *vmp)
 
 static uint64_t vmem_flush_free_to_root();
 
+static inline void
+vmem_add_a_gibibyte_unsuppress_message()
+{
+	printf("SPL: vmem_add_a_gibibyte: have memory again\n");
+}
+
 static uint64_t
 vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 {
@@ -2009,6 +2011,10 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 	extern volatile unsigned int vm_page_free_wanted;
 	extern volatile unsigned int vm_page_free_count;
 	extern volatile unsigned int vm_page_free_min;
+
+	static boolean_t suppress_message = false;
+
+#define UNSUPPRESS do { suppress_message = false; vmem_add_a_gibibyte_unsuppress_message(); } while(suppress_message)
 
 	// in critically low memory, just return anything in free_arena to XNU, as
 	// below we can fight for XNU memory with other non-spl allocators.
@@ -2043,6 +2049,7 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 		if (spl_vmem_threads_waiting == 0 ||
 		    recovered > (onemeg * spl_vmem_threads_waiting)) {
 			mutex_exit(&vmp->vm_lock);
+			UNSUPPRESS;
 			return(recovered/PAGESIZE);
 		}
 		mutex_exit(&vmp->vm_lock);
@@ -2051,8 +2058,11 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
 
-	if (recovered >= gibibyte)
+	if (recovered >= gibibyte) {
+		suppress_message = false;
+		vmem_add_a_gibibyte_unsuppress_message();
 		return (recovered/PAGESIZE);
+	}
 
 	if (recovered > minalloc && // recovered is also < 1GiB
 	    rtotal > (2ULL * gibibyte) &&
@@ -2061,20 +2071,27 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 		uint64_t minallocs_recovered = recovered / minalloc;
 		if (allocs > minallocs_recovered)
 			allocs -= minallocs_recovered; // won't underflow because of previous if->return
-		else
+		else {
+			UNSUPPRESS;
 			return (recovered / PAGESIZE);
+		}
 	}
 
 	if (recovered > minalloc) {
 		if (vm_page_free_wanted > 0 || vm_page_free_count < (4 * vm_page_free_min))
+			suppress_message = false;
+			vmem_add_a_gibibyte_unsuppress_message();
 			return (recovered/PAGESIZE);
 	}
 
 	for (uint64_t i = 0; i < allocs; i++) {
 		void *a = osif_malloc(minalloc);
 		if (a == NULL) {
-			printf("SPL: WOAH! %s bailing out after only %lluu pages for %s.\n",
+			printf("SPL: WOAH! %s bailing out after only %llu pages for %s.\n",
 			    __func__, i * pages_per_alloc, vmp->vm_name);
+			if (i > 0)  {
+				UNSUPPRESS;
+			}
 			return (i);
 		} else {
 			if (debug && (i % 16ULL) == 0)
@@ -2082,15 +2099,19 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 				    __func__, i * pages_per_alloc, vmp->vm_name);
 		        vmem_add_as_import(vmp, a, minalloc, VM_NOSLEEP);
 			vmp->vm_kstat.vk_parent_alloc.value.ui64++;
+			UNSUPPRESS;
 		}
 		if (vm_page_free_wanted > 0 || vm_page_free_count < (2 * vm_page_free_min)) {
-			if (recovered == 0 && i == 0)
+			if (recovered == 0 && i == 0 && !suppress_message) {
+				suppress_message = true;
 				printf("SPL: %s NO MEMORY, bailing out, %s.\n",
 				    __func__, vmp->vm_name);
+			}
 			return (i);
 		}
 	}
 	return (pages);
+#undef UNSUPPRESS
 }
 
 /*
