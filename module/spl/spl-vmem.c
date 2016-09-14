@@ -2092,16 +2092,23 @@ spl_root_refill(void *dummy)
 	    mem_in_use < onegig) {
 		const uint32_t gib = 1024*1024*1024;
 		const uint32_t gib_pages = gib/PAGESIZE;
+		const uint32_t mib = 1024*1024;
+		const uint32_t mib_pages = mib/PAGESIZE;
 
 		uint32_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
 
 		if (pages != gib_pages)
 			dprintf("SPL: %s got %u instead of %u (1GiB) pages.\n",
 			    __func__, pages, gib_pages);
-		if (spl_vmem_threads_waiting && pages >= (1024*1024)/PAGESIZE) {
-			mutex_enter(&spl_root_arena->vm_lock);
-			cv_broadcast(&spl_root_arena->vm_cv);
-			mutex_exit(&spl_root_arena->vm_lock);
+		if (spl_vmem_threads_waiting && pages >= mib_pages) {
+			for (uint32_t iter = 0;
+			     iter < mib_pages &&
+				 iter < (mib_pages * (uint32_t)spl_vm_threads_waiting);
+			     iter++) {
+				mutex_enter(&spl_root_arena->vm_lock);
+				cv_signal(&spl_root_arena->vm_cv);
+				mutex_exit(&spl_root_arena->vm_lock);
+			}
 		}
 	}
 	bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval);
