@@ -1520,6 +1520,12 @@ spl_vmem_size(vmem_t *vmp, int typemask)
 	return(vmem_size(vmp, typemask));
 }
 
+size_t
+spl_free_arena_size(void)
+{
+	return(vmem_size(free_arena, VMEM_ALLOC | VMEM_FREE));
+}
+
 /*
  * Create an arena called name whose initial span is [base, base + size).
  * The arena's natural unit of currency is quantum, so vmem_alloc()
