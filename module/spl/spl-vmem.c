@@ -921,7 +921,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 					0, 0, NULL, NULL, vmflag & (VM_KMFLAGS | VM_NEXTFIT)));
 			}
 			vmp->vm_kstat.vk_wait.value.ui64++;
-			printf("SPL: %s: waiting for %lu sized alloc after full circle of  %, other threads waiting = %llu.\n",
+			printf("SPL: %s: waiting for %lu sized alloc after full circle of  %s, other threads waiting = %llu.\n",
 			    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
 			atomic_inc_64(&spl_vmem_threads_waiting);
 			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
@@ -1896,7 +1896,7 @@ increment_arc_c_min(uint64_t howmuch)
 
 void vmem_vacuum_free_arena(void);
 
-static uint64_t vmem_add_a_gibibyte(vmem_t *, boolean_t);
+static uint64_t vmem_add_a_gibibyte_to_spl_root_arena();
 
 void
 vmem_vacuum_thread(void *dummy)
@@ -1954,11 +1954,10 @@ spl_root_refill(void *dummy)
 		!vm_page_free_wanted &&
 		vm_page_free_count > (unsigned int)(onegig/PAGESIZE) + 4096) ||
 	    mem_in_use < onegig) {
-		const uint32_t gib = 1024*1024*1024;
 		const uint32_t mib = 1024*1024;
-		const uint32_t mib_pages = mib/PAGESIZE;
 
-		uint64_t pages = vmem_add_a_gibibyte(spl_root_arena, false);
+
+		uint64_t pages = vmem_add_a_gibibyte_to_spl_root_arena();
 
 		if (pages == 0) {
 			spl_free_set_emergency_pressure(mib);
@@ -1982,9 +1981,10 @@ vmem_qcache_reap(vmem_t *vmp)
 
 
 static uint64_t vmem_flush_free_to_root();
+static uint64_t vmem_vacuum_spl_root_arena();
 
 static uint64_t
-vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
+vmem_add_a_gibibyte_to_spl_root_arena()
 {
 	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
 	const uint64_t pages = (gibibyte/PAGESIZE);
@@ -1997,18 +1997,21 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 	extern volatile unsigned int vm_page_free_count;
 	extern volatile unsigned int vm_page_free_min;
 
+	// vacuum if we are fragmented (or have ample free in root)
+	// fragmentation metric: 25% free space
+	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
+	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
+	size_t rused = vmem_size(spl_root_arena, VMEM_ALLOC);
+
+	if (rtotal > (2 * gibibyte) && rfree > (rtotal / 4))
+		vmem_vacuum_spl_root_arena();
+	else if (rtotal / 2 > rused)
+		vmem_vacuum_spl_root_arena();
+
 	// in critically low memory, just return anything in free_arena to XNU, as
 	// below we can fight for XNU memory with other non-spl allocators.
 	if (vm_page_free_wanted > 0 || vm_page_free_count <= vm_page_free_min) {
 		vmem_vacuum_free_arena();
-	} else {
-		// vacuum if we are fragmented (or have ample free in root)
-		// fragmentation metric: 25% free space
-		size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
-		size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
-
-		if (rtotal > (2 * gibibyte) && rfree > (rtotal / 4))
-			vmem_vacuum_free_arena();
 	}
 
 	uint64_t recovered = vmem_flush_free_to_root();
@@ -2019,18 +2022,18 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 	// if they have all stopped waiting, then we can return what
 	// was recovered by recycling free_arena memory
 
-	if (vmp == spl_root_arena &&
-	    recovered > minalloc &&
+	if (recovered > minalloc &&
 	    spl_vmem_threads_waiting == 0) {
 		return(recovered/PAGESIZE);
 	}
 
-	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
-	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
-
 	if (recovered >= gibibyte) {
 		return (recovered/PAGESIZE);
 	}
+
+	rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
+	rfree = vmem_size(spl_root_arena, VMEM_FREE);
+	rused = vmem_size(spl_root_arena, VMEM_ALLOC);
 
 	if (recovered > minalloc && // recovered is also < 1GiB
 	    rtotal > (2ULL * gibibyte) &&
@@ -2053,21 +2056,18 @@ vmem_add_a_gibibyte(vmem_t *vmp, boolean_t debug)
 		void *a = osif_malloc(minalloc);
 		if (a == NULL) {
 			printf("SPL: WOAH! %s bailing out after only %llu pages for %s.\n",
-			    __func__, i * pages_per_alloc, vmp->vm_name);
-			vmp->vm_kstat.vk_fail.value.ui64++;
+			    __func__, i * pages_per_alloc, spl_root_arena->vm_name);
+			spl_root_arena->vm_kstat.vk_fail.value.ui64++;
 			return (i);
 		} else {
-			if (debug && (i % 16ULL) == 0)
-				printf("SPL: %s adding page %llu for %s\n",
-				    __func__, i * pages_per_alloc, vmp->vm_name);
-		        vmem_add_as_import(vmp, a, minalloc, VM_NOSLEEP);
-			vmp->vm_kstat.vk_parent_alloc.value.ui64++;
+		        vmem_add_as_import(spl_root_arena, a, minalloc, VM_NOSLEEP);
+			spl_root_arena->vm_kstat.vk_parent_alloc.value.ui64++;
 		}
 		if (vm_page_free_wanted > 0 || vm_page_free_count < (2 * vm_page_free_min)) {
 			if (recovered == 0 && i == 0) {
-				vmp->vm_kstat.vk_fail.value.ui64++;
+				spl_root_arena->vm_kstat.vk_fail.value.ui64++;
 				dprintf("SPL: %s NO MEMORY, bailing out, %s.\n",
-				    __func__, vmp->vm_name);
+				    __func__, spl_root_arena->vm_name);
 			}
 			return (i);
 		}
@@ -2390,6 +2390,62 @@ vmem_flush_free_to_root()
 		dprintf("SPL: %s flushed  %llu bytes from free_arena back into spl_root_arena.\n",
 		    __func__, difference);
 		vmem_free_memory_recycled += difference;
+		mutex_exit(&vmem_flush_free_lock);
+		return (difference);
+	}
+	mutex_exit(&vmem_flush_free_lock);
+	return (0);
+}
+
+static uint64_t
+vmem_vacuum_spl_root_arena()
+{
+	extern void segkmem_free(vmem_t *, void *, size_t);
+
+	uint64_t start_total = spl_root_arena->vm_kstat.vk_mem_total.value.ui64;
+
+	if (start_total == 0)
+		return(0);
+
+	mutex_enter(&vmem_flush_free_lock);
+
+	dprintf("SPL: %s starting, current spl_root_arena == %llu\n",
+	    __func__, start_total);
+
+	mutex_enter(&spl_root_arena->vm_lock);
+
+	spl_root_arena->vm_source_free = segkmem_free;
+
+	mutex_exit(&spl_root_arena->vm_lock);
+
+	dprintf("SPL: %s walking\n", __func__);
+	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, spl_root_arena);
+
+	uint64_t end_total = spl_root_arena->vm_kstat.vk_mem_total.value.ui64;
+
+	dprintf("SPL: %s walked, current free arena == %llu\n",
+	    __func__, end_total);
+
+	mutex_enter(&free_arena->vm_lock);
+	mutex_enter(&spl_root_arena->vm_lock);
+
+	free_arena->vm_source_free = segkmem_free;
+
+	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
+
+	mutex_exit(&spl_root_arena->vm_lock);
+	mutex_exit(&free_arena->vm_lock);
+
+	uint64_t difference;
+	if (end_total > start_total) {
+		difference = end_total - start_total;
+		printf("SPL: %s WOAH!, spl_root_arena grew by %llu.\n",
+		    __func__, difference);
+	} else if (start_total > end_total) {
+		difference = start_total - end_total;
+		dprintf("SPL: %s released  %llu bytes from spl_root_arena.\n",
+		    __func__, difference);
+		vmem_free_memory_released += difference;
 		mutex_exit(&vmem_flush_free_lock);
 		return (difference);
 	}
