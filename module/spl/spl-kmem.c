@@ -4161,6 +4161,15 @@ spl_free_thread()
 			emergency_lowmem = true;
 		}
 
+		// when in lowmem, limit growth (especially do not encourage arc_no_grow to go false)
+		if (lowmem && spl_free > 32ULL * 1024ULL * 1024ULL)
+			spl_free = 32ULL * 1024ULL * 1024ULL; // 2 * SPA_MAXBLOCKSIZE
+
+		// when in emergency lowmem, do not allow spl_free  to be more than 128k
+		// it does not have to be negative, because we vmem size to deflate
+		if (emergency_lowmem && spl_free > 128ULL * 1024ULL)
+			spl_free = 128ULL * 1024ULL;
+
 		double delta = spl_free - base;
 
 		mutex_exit(&spl_free_lock);
@@ -4169,8 +4178,8 @@ spl_free_thread()
 			// shove this right into arc_reclaim_thread, rather than waiting for eventual reaction
 			// to a negative spl_free.
 			extern vmem_t *spl_root_arena;
-			int64_t vmem_total = (int64_t)spl_root_arena->vm_kstat.vk_mem_total.value.ui64;
-			spl_free_set_emergency_pressure(vmem_total / 200LL);
+			int64_t vmem_dynamic = (int64_t)spl_root_arena->vm_kstat.vk_mem_import.value.ui64;
+			spl_free_set_emergency_pressure(vmem_dynamic / 128LL);
 		}
 
 		if (spl_free < 0)
