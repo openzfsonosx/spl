@@ -392,6 +392,9 @@ vmem_seg_t *_vnext = (vsp)->vs_##type##next;			\
 uint64_t spl_vmem_threads_waiting = 0;
 uint64_t spl_vmem_threads_waiting_large = 0;
 
+// number of allocations > 1 MiB
+uint64_t spl_vmem_large_allocs = 0;
+
 extern void spl_free_set_emergency_pressure(int64_t p);
 extern uint64_t segkmem_total_mem_allocated;
 extern uint64_t total_memory;
@@ -1060,6 +1063,9 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 	size_t xsize;
 	int hb, flist, resv;
 	uint32_t mtbf;
+
+	if (size > 1024ULL*1024ULL)
+		spl_vmem_large_allocs++;
 	
 	if ((align | phase | nocross) & (vmp->vm_quantum - 1))
 		panic("vmem_xalloc(%p, %lu, %lu, %lu, %lu, %p, %p, %x): "
@@ -1401,6 +1407,9 @@ vmem_alloc(vmem_t *vmp, size_t size, int vmflag)
 	int hb;
 	int flist = 0;
 	uint32_t mtbf;
+
+	if (size > 1024ULL*1024ULL)
+		spl_vmem_large_allocs++;
 	
 	if (size - 1 < vmp->vm_qcache_max)
 		return (kmem_cache_alloc(vmp->vm_qcache[(size - 1) >>

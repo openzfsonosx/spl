@@ -519,6 +519,7 @@ extern uint64_t stat_osif_free;
 
 extern uint64_t vmem_free_memory_recycled;
 extern uint64_t vmem_free_memory_released;
+extern uint64_t spl_vmem_large_allocs;
 
 uint64_t stat_cur_bytes_above_total_memory = 0;
 
@@ -548,6 +549,7 @@ typedef struct spl_stats {
 	kstat_named_t spl_osif_free;
 	kstat_named_t spl_vmem_free_memory_recycled;
 	kstat_named_t spl_vmem_free_memory_released;
+	kstat_named_t spl_vmem_large_allocs;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -576,6 +578,7 @@ static spl_stats_t spl_stats = {
 	{"spl_osif_free", KSTAT_DATA_UINT64},
 	{"spl_vmem_free_memory_recycled", KSTAT_DATA_UINT64},
 	{"spl_vmem_free_memory_released", KSTAT_DATA_UINT64},
+	{"spl_vmem_large_allocs", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4435,6 +4438,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_osif_free.value.ui64 = stat_osif_free;
 		ks->spl_vmem_free_memory_recycled.value.ui64 = vmem_free_memory_recycled;
 		ks->spl_vmem_free_memory_released.value.ui64 = vmem_free_memory_released;
+		ks->spl_vmem_large_allocs.value.ui64 = spl_vmem_large_allocs;
 	}
 
 	return (0);
