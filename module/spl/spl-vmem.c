@@ -2062,12 +2062,32 @@ vmem_qcache_reap(vmem_t *vmp)
 static uint64_t vmem_flush_free_to_root();
 static uint64_t vmem_vacuum_spl_root_arena();
 
+/*
+ * vmem_add_a_gibibyte_to_spl_root_arena()
+ *
+ * if we cannot recycle memory sitting in free_memory arena,
+ * then we do our best (given instantaneous behaviour of xnu vm  memory)
+ * to add minalloc-sized spans to spl_root_arena as imported spans
+ * (so they can be freed dynamically and also appear in the import kstat)
+ * until we reach 1 GiB.
+ *
+ * minalloc == 1GiB is fine for any system where the most common
+ * recordsize/volblocksize <= 1 MiB.
+ *
+ * larger allocations will either (if possible) come directly from the huge span
+ * added to spl_root early in vmem_init(), or via a call out from vmem_xalloc()
+ * to code that if necessary adds a largeer allocation
+ *
+ * should minalloc be different? dynamic? run-time tunable?
+ *
+ */
+
 static uint64_t
 vmem_add_a_gibibyte_to_spl_root_arena()
 {
 	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
 	const uint64_t pages = (gibibyte/PAGESIZE);
-	const uint64_t minalloc = 1024*1024;
+	const uint64_t minalloc = 1024*1024; // TUNEME 
 	const uint64_t pages_per_alloc = minalloc/PAGESIZE;
 	uint64_t allocs = (gibibyte/minalloc);
 
@@ -2215,24 +2235,36 @@ vmem_init(const char *heap_name,
 	 * go direct to the OS.
 	 */
 
-	// first add 512MiB in one alloc
+	// first add 1/4 of real_total_memory in one alloc
+	// TUNE ME!
+	// this needs to be small enough not to be annoying, since
+	// it will never be released back to the operating system,
+	// but where it's large it will reduce freelist and tlb work
+	// significantly, AND it will also offer enough space that
+	// the (> minalloc) large path in vmem_xalloc will not be taken
 
-	const uint64_t halfgig = 512ULL*1024ULL*1024ULL;
+	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
+	extern uint64_t real_total_memory;
+	uint64_t vmem_initial_heap_size =
+	    MAX(real_total_memory / 8, gibibyte);
+
+	printf("SPL: %s: doing initial allocation of %llu bytes\n",
+	    __func__, vmem_initial_heap_size);
 
 	extern void *osif_malloc(uint64_t);
-	spl_root_initial_allocation = osif_malloc(halfgig);
+	spl_root_initial_allocation = osif_malloc(vmem_initial_heap_size);
 
 	if (spl_root_initial_allocation == NULL) {
-		panic("SPL: %s unable to allocate half a gigabyte (%llu)\n",
-		    __func__, halfgig);
+		panic("SPL: %s unable to make initial spl_roto allocation of %llu bytes\n",
+		    __func__, vmem_initial_heap_size);
 	}
 
 	spl_root_arena = vmem_create("spl_root_arena",
-	    spl_root_initial_allocation, halfgig, heap_quantum,
+	    spl_root_initial_allocation, vmem_initial_heap_size, heap_quantum,
 	    NULL, spl_root_arena_free_to_free_arena, NULL, 0, VM_SLEEP);
 
 	printf("SPL: %s created spl_root_arena with %llu bytes.\n",
-	    __func__, halfgig);
+	    __func__, vmem_initial_heap_size);
 
 	extern void segkmem_free(vmem_t *, void *, size_t);
 	free_arena = vmem_create("free_arena",
