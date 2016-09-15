@@ -390,6 +390,7 @@ vmem_seg_t *_vnext = (vsp)->vs_##type##next;			\
 
 /// vmem thread block count
 uint64_t spl_vmem_threads_waiting = 0;
+uint64_t spl_vmem_threads_waiting_large = 0;
 
 extern void spl_free_set_emergency_pressure(int64_t p);
 extern uint64_t segkmem_total_mem_allocated;
@@ -970,6 +971,78 @@ vmem_canalloc(vmem_t *vmp, size_t size)
 	return (flist);
 }
 
+static void *vmem_add_as_import(vmem_t *, void *, size_t, int);
+
+static boolean_t
+vmem_add_large_as_import(size_t size)
+{
+	extern volatile unsigned int vm_page_free_count;
+	extern volatile unsigned int vm_page_free_min;
+	extern volatile unsigned int vm_page_speculative_count;
+
+	uint64_t bytes_free = (uint64_t)vm_page_free_count * (uint64_t)PAGESIZE;
+	uint64_t bytes_min = (uint64_t)vm_page_free_min * (uint64_t)PAGESIZE;
+	uint64_t bytes_spec = (uint64_t)vm_page_speculative_count * (uint64_t)PAGESIZE;
+
+	uint64_t useful_free = bytes_free + bytes_spec - bytes_min;
+
+	// size -> size_wanted; next power of two above size
+
+	uint64_t r = 0;
+	uint64_t s = size;
+	while (s >>= 1)
+		r++;
+
+	uint64_t size_wanted = 1 << (r+1);
+
+	if (size_wanted >= useful_free)
+		return(false);
+
+	extern void *osif_malloc(uint64_t);
+	void *a = osif_malloc(size);
+
+	if (a == NULL)
+		return(false);
+
+	spl_root_arena->vm_kstat.vk_parent_xalloc.value.ui64++;
+	vmem_add_as_import(spl_root_arena, a, size, VM_SLEEP);
+
+	printf("SPL: %s: added span of %llu bytes for %zu\n", __func__,
+	    size_wanted, size);
+
+	return (true);
+}
+/*
+ * look for a successful large allocation for five minutes,
+ * and if it doesn't happen, then if we have space segkmem_alloc it.
+ */
+static inline boolean_t
+vmem_wait_big_spl_root_arena_xalloc(size_t size)
+{
+	// spl_root->vm_lock mutex held on entry
+	atomic_inc_64(&spl_vmem_threads_waiting_large);
+	printf("SPL: %s(%zu) wanted, waiting. (large thread: %llu)\n", __func__, size,
+		spl_vmem_threads_waiting_large);
+	uint64_t timenow = zfs_lbolt();
+	uint64_t expire_after = timenow + ((uint64_t)hz * 5ULL * 60ULL);
+
+	spl_root_arena->vm_kstat.vk_populate_wait.value.ui64++;
+
+	for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
+		cv_wait(&spl_root_arena->vm_cv, &spl_root_arena->vm_lock);
+		if (vmem_canalloc(spl_root_arena, size)) {
+			atomic_dec_64(&spl_vmem_threads_waiting_large);
+			return(true);
+		}
+	}
+	printf("SPL: %s(%zu) expired without vmem_canalloc() being true\n", __func__, size);
+	atomic_dec_64(&spl_vmem_threads_waiting_large);
+	boolean_t r = vmem_add_large_as_import(size);
+	if (!r)
+		spl_root_arena->vm_kstat.vk_populate_fail.value.ui64++;
+	return(r);
+
+}
 /*
  * Allocate size bytes at offset phase from an align boundary such that the
  * resulting segment [addr, addr + size) is a subset of [minaddr, maxaddr)
@@ -1212,12 +1285,18 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		if (vmflag & VM_NOSLEEP)
 			break;
 		vmp->vm_kstat.vk_wait.value.ui64++;
-		printf("SPL: %s: vmem waiting for %lu sized alloc for %s, other threads waiting = %llu\n",
-		    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
-		atomic_inc_64(&spl_vmem_threads_waiting);
-		cv_wait(&vmp->vm_cv, &vmp->vm_lock);
-		if (spl_vmem_threads_waiting > 0)
-			atomic_dec_64(&spl_vmem_threads_waiting);
+		if (vmp == spl_root_arena && size > 1024*1024) {
+			boolean_t r = vmem_wait_big_spl_root_arena_xalloc(size);
+			if (!r)
+				break;
+		} else {
+			printf("SPL: %s: vmem waiting for %lu sized alloc for %s, other threads waiting = %llu\n",
+			    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
+			atomic_inc_64(&spl_vmem_threads_waiting);
+			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
+			if (spl_vmem_threads_waiting > 0)
+				atomic_dec_64(&spl_vmem_threads_waiting);
+		}
 	}
 	if (vbest != NULL) {
 		ASSERT(vbest->vs_type == VMEM_FREE);
