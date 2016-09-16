@@ -1297,8 +1297,9 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 			if (!r)
 				break;
 		} else {
-			printf("SPL: %s: vmem waiting for %lu sized alloc for %s, other threads waiting = %llu\n",
-			    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
+			if (size != 1024ULL*1024ULL && spl_vmem_threads_waiting != 0)
+				printf("SPL: %s: vmem waiting for %lu sized alloc for %s, other threads waiting = %llu\n",
+				    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
 			atomic_inc_64(&spl_vmem_threads_waiting);
 			cv_wait(&vmp->vm_cv, &vmp->vm_lock);
 			if (spl_vmem_threads_waiting > 0)
