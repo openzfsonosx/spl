@@ -4243,7 +4243,7 @@ reap_thread()
 		} else if ((zfs_lbolt() - last_reap > (hz*spl_reap_timeout_seconds))) {
 			reap_now = 0;
 			mutex_exit(&reap_now_lock);
-			printf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
+			dprintf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
 				   __func__, (zfs_lbolt() - last_reap)/hz, om);
 			last_reap = zfs_lbolt();
 			previous_segkmem_total_mem_allocated = om;
