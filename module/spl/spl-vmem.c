@@ -2244,6 +2244,7 @@ vmem_init(const char *heap_name,
 	 * go direct to the OS.
 	 */
 
+#ifdef _KERNEL
 	// first add 1/4 of real_total_memory in one alloc
 	// TUNE ME!
 	// this needs to be small enough not to be annoying, since
@@ -2280,10 +2281,16 @@ vmem_init(const char *heap_name,
 	    NULL, 0,
 	    PAGESIZE, NULL, segkmem_free, NULL, 0, VM_SLEEP);
 
+#else
+	spl_root_arena = vmem_create("spl_root_arena",
+	    NULL, 0, heap_quantum,
+	    segkmem_alloc, segkmem_free, NULL, 0, VM_SLEEP);
+#endif
+
 	heap_parent = vmem_create("heap_parent",
 							  NULL, 0, heap_quantum,
-							  vmem_alloc, vmem_free, spl_root_arena, 256*1024,
-							  VM_SLEEP | VMC_NO_QCACHE);
+							  vmem_alloc, vmem_free, spl_root_arena, 0,
+							  VM_SLEEP);
 	
 	heap = vmem_create(heap_name,
 					   NULL, 0, heap_quantum,
@@ -2397,8 +2404,10 @@ void vmem_fini(vmem_t *heap)
 	dprintf("SPL: Released %llu bytes from arenas\n", total);
 	list_destroy(&freelist);
 
+#ifdef _KERNEL
 	extern void osif_free(void *, uint64_t);
 	osif_free(spl_root_initial_allocation, 512ULL*1024ULL*1024ULL);
+#endif
 	
 #if 0 // Don't release, panics
 	mutex_destroy(&vmem_flush_free_lock);
