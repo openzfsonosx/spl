@@ -332,6 +332,7 @@ static vmem_t *vmem_vmem_arena;
 static vmem_t *free_arena;
 vmem_t *spl_root_arena; // The bottom-most arena for SPL
 static void *spl_root_initial_allocation;
+static size_t spl_root_initial_allocation_size;
 static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
@@ -2255,26 +2256,26 @@ vmem_init(const char *heap_name,
 
 	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
-	uint64_t vmem_initial_heap_size =
+	spl_root_initial_allocation_size =
 	    MAX(real_total_memory / 8, gibibyte);
 
-	printf("SPL: %s: doing initial allocation of %llu bytes\n",
-	    __func__, vmem_initial_heap_size);
+	printf("SPL: %s: doing initial allocation of %zu bytes\n",
+	    __func__, spl_root_initial_allocation_size);
 
 	extern void *osif_malloc(uint64_t);
-	spl_root_initial_allocation = osif_malloc(vmem_initial_heap_size);
+	spl_root_initial_allocation = osif_malloc(spl_root_initial_allocation_size);
 
 	if (spl_root_initial_allocation == NULL) {
-		panic("SPL: %s unable to make initial spl_roto allocation of %llu bytes\n",
-		    __func__, vmem_initial_heap_size);
+		panic("SPL: %s unable to make initial spl_roto allocation of %zu bytes\n",
+		    __func__, spl_root_initial_allocation_size);
 	}
 
 	spl_root_arena = vmem_create("spl_root_arena",
-	    spl_root_initial_allocation, vmem_initial_heap_size, heap_quantum,
+	    spl_root_initial_allocation, spl_root_initial_allocation_size, heap_quantum,
 	    NULL, spl_root_arena_free_to_free_arena, NULL, 0, VM_SLEEP);
 
-	printf("SPL: %s created spl_root_arena with %llu bytes.\n",
-	    __func__, vmem_initial_heap_size);
+	printf("SPL: %s created spl_root_arena with %zu bytes.\n",
+	    __func__, spl_root_initial_allocation_size);
 
 	extern void segkmem_free(vmem_t *, void *, size_t);
 	free_arena = vmem_create("free_arena",
@@ -2406,7 +2407,9 @@ void vmem_fini(vmem_t *heap)
 
 #ifdef _KERNEL
 	extern void osif_free(void *, uint64_t);
-	osif_free(spl_root_initial_allocation, 512ULL*1024ULL*1024ULL);
+	printf("SPL: %s freeing spl_root_initial_allocation of %zu bytes.\n",
+	    __func__, spl_root_initial_allocation_size);
+	osif_free(spl_root_initial_allocation, spl_root_initial_allocation_size);
 #endif
 	
 #if 0 // Don't release, panics
