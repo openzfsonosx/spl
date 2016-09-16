@@ -185,7 +185,7 @@ osif_free(void* buf, uint64_t size)
 void
 kernelheap_init()
 {
-	heap_arena = vmem_init("heap", NULL, 0, PAGESIZE, segkmem_alloc, segkmem_free);
+	heap_arena = vmem_init("heap", NULL, 0, 512, segkmem_alloc, segkmem_free);
 }
 
 
@@ -237,19 +237,19 @@ segkmem_zio_init()
 	zio_arena_parent_parent = NULL;
 
 	zio_arena_parent = vmem_create("zfs_file_data_p", NULL, 0,
-	    PAGESIZE, vmem_alloc, vmem_free, spl_root_arena,
+	    512, vmem_alloc, vmem_free, spl_root_arena,
 	    256*1024, VM_SLEEP | VMC_NO_QCACHE);
 #else
 	zio_arena_parent_parent = vmem_create("zfs_file_data_p_p", NULL, 0,
-	    4*1024*1024, NULL, NULL, NULL, 0, VM_SLEEP);
+	    512, NULL, NULL, NULL, 0, VM_SLEEP);
 
 	zio_arena_parent = vmem_create("zfs_file_data_p", NULL, 0,
-	    PAGESIZE, segkmem_zio_alloc, segkmem_zio_free, zio_arena_parent_parent,
+	    512, segkmem_zio_alloc, segkmem_zio_free, zio_arena_parent_parent,
 	    4*1024*1024, VM_SLEEP | VMC_NO_QCACHE);
 #endif
 
 	zio_arena = vmem_create("zfs_file_data", NULL, 0,
-	    PAGESIZE, vmem_alloc, vmem_free, zio_arena_parent,
+	    512, vmem_alloc, vmem_free, zio_arena_parent,
 	    64 * 1024, VM_SLEEP);
 
 	ASSERT(zio_arena != NULL);
