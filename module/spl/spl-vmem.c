@@ -2320,6 +2320,9 @@ vmem_init(const char *heap_name,
 	// significantly, AND it will also offer enough space that
 	// the (> minalloc) large path in vmem_xalloc will not be taken
 
+	vmem_t *spl_root_arena_parent = vmem_create("spl_root_arena_parent",
+	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP);
+
 	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
 	spl_root_initial_allocation_size =
@@ -2338,7 +2341,7 @@ vmem_init(const char *heap_name,
 
 	spl_root_arena = vmem_create("spl_root_arena",
 	    spl_root_initial_allocation, spl_root_initial_allocation_size, heap_quantum,
-	    spl_root_allocator, spl_root_arena_free_to_free_arena, NULL, 0, VM_SLEEP);
+	    spl_root_allocator, spl_root_arena_free_to_free_arena, spl_root_arena_parent, 0, VM_SLEEP);
 
 	printf("SPL: %s created spl_root_arena with %zu bytes.\n",
 	    __func__, spl_root_initial_allocation_size);
