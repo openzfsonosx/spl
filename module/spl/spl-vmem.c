@@ -331,6 +331,7 @@ static vmem_t *vmem_hash_arena;
 static vmem_t *vmem_vmem_arena;
 static vmem_t *free_arena;
 vmem_t *spl_root_arena; // The bottom-most arena for SPL
+static vmem_t *spl_root_arena_parent;
 static void *spl_root_initial_allocation;
 static size_t spl_root_initial_allocation_size;
 static vmem_t *heap_parent;
@@ -1055,8 +1056,20 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 	// MUTEX NOT HELD ON ENTRY
 	ASSERT(!MUTEX_HELD(&vmp->vm_lock));
 
-	// this really should only be used for spl_root_arena
-	ASSERT(vmp == spl_root_arena);
+	// xalloc invokes this with vmp->vm_source in the first argument
+	// so it will be spl_root_arena_parent
+
+	if (vmp == spl_root_arena_parent)
+		vmp = spl_root_arena;
+	else
+		printf("SPL: %s WOAH! vmp is %s!\n",
+		    __func__, vmp->vm_name);
+
+	ASSERT(!MUTEX_HELD(&vmp->vm_lock));
+
+	if (mutex_owner(&vmp->vm_lock) == curthread)
+		printf("SPL: %s ERROR! I am holding the mutex lock for %s!\n",
+		    __func__, vmp->vm_name);
 
 	vmp->vm_kstat.vk_parent_xalloc.value.ui64++;
 
@@ -1103,8 +1116,11 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 			return (NULL);
 		else if (vmflags & (VM_ABORT | VM_NOSLEEP))
 			return (NULL);
-		else
+		else {
+			printf("SPL: %s still waiting for %llu for %s, flags = %u\n",
+			    __func__, (uint64_t)size, vmp->vm_name, vmflags);
 			vmp->vm_kstat.vk_populate_fail.value.ui64++;
+		}
 	}
 }
 
@@ -2303,7 +2319,7 @@ vmem_init(const char *heap_name,
 	 */
 
 
-	vmem_t *spl_root_arena_parent = vmem_create("spl_root_arena_parent",
+	spl_root_arena_parent = vmem_create("spl_root_arena_parent",
 	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP);
 
 #ifdef _KERNEL
