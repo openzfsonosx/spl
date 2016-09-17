@@ -2302,6 +2302,10 @@ vmem_init(const char *heap_name,
 	 * go direct to the OS.
 	 */
 
+
+	vmem_t *spl_root_arena_parent = vmem_create("spl_root_arena_parent",
+	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP);
+
 #ifdef _KERNEL
 	// first add 1/4 of real_total_memory in one alloc
 	// TUNE ME!
@@ -2310,9 +2314,6 @@ vmem_init(const char *heap_name,
 	// but where it's large it will reduce freelist and tlb work
 	// significantly, AND it will also offer enough space that
 	// the (> minalloc) large path in vmem_xalloc will not be taken
-
-	vmem_t *spl_root_arena_parent = vmem_create("spl_root_arena_parent",
-	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP);
 
 	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
@@ -2345,7 +2346,7 @@ vmem_init(const char *heap_name,
 #else
 	spl_root_arena = vmem_create("spl_root_arena",
 	    NULL, 0, heap_quantum,
-	    segkmem_alloc, segkmem_free, NULL, 0, VM_SLEEP);
+	    segkmem_alloc, segkmem_free, spl_root_arena_parent, 0, VM_SLEEP);
 #endif
 
 	heap_parent = vmem_create("heap_parent",
