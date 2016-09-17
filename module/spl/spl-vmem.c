@@ -1125,7 +1125,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 	int hb, flist, resv;
 	uint32_t mtbf;
 
-	if (size > 1024ULL*1024ULL)
+	if (size > 1024ULL*1024ULL) //minalloc
 		spl_vmem_large_allocs++;
 	
 	if ((align | phase | nocross) & (vmp->vm_quantum - 1))
@@ -1352,7 +1352,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		if (vmflag & VM_NOSLEEP)
 			break;
 		vmp->vm_kstat.vk_wait.value.ui64++;
-		if (size != 1024ULL*1024ULL && spl_vmem_threads_waiting != 0) {
+		if (size != 1024ULL*1024ULL && spl_vmem_threads_waiting != 0) { //minalloc
 			printf("SPL: %s: vmem waiting for %lu sized alloc for %s, other threads waiting = %llu\n",
 			    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
 		}
@@ -1465,7 +1465,7 @@ vmem_alloc(vmem_t *vmp, size_t size, int vmflag)
 	int flist = 0;
 	uint32_t mtbf;
 
-	if (size > 1024ULL*1024ULL)
+	if (size > 1024ULL*1024ULL) // minalloc
 		spl_vmem_large_allocs++;
 	
 	if (size - 1 < vmp->vm_qcache_max)
@@ -2099,7 +2099,7 @@ spl_root_refill(void *dummy)
 		!vm_page_free_wanted &&
 		vm_page_free_count > (unsigned int)(onegig/PAGESIZE) + 4096) ||
 	    mem_in_use < onegig) {
-		const uint32_t mib = 1024*1024;
+		const uint32_t mib = 1024*1024; // minalloc
 
 
 		uint64_t pages = vmem_add_a_gibibyte_to_spl_root_arena();
@@ -2153,7 +2153,7 @@ vmem_add_a_gibibyte_to_spl_root_arena()
 {
 	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
 	const uint64_t pages = (gibibyte/PAGESIZE);
-	const uint64_t minalloc = 1024*1024; // TUNEME 
+	const uint64_t minalloc = 1024*1024; // TUNEME (see other places commented minalloc)
 	const uint64_t pages_per_alloc = minalloc/PAGESIZE;
 	uint64_t allocs = (gibibyte/minalloc);
 
