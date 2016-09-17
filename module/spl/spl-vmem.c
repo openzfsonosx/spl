@@ -1016,7 +1016,8 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 
 	if (!vm_page_free_wanted && useful_free >= size_wanted) {
 		void *p = osif_malloc(size_wanted);
-		vmem_add_as_import(vmp, p, size_wanted, vmflags);
+		if (p != NULL)
+			vmem_add_as_import(vmp, p, size_wanted, vmflags);
 		return(NULL);
 	} else if (!vm_page_free_wanted && useful_free >= size)
 		return(osif_malloc(size));
