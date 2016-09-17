@@ -5903,7 +5903,7 @@ int
 spl_vm_pool_low(void) 
 {
 	if (vm_page_free_wanted > 0 ||
-		(vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
+		(vm_page_free_count + vm_page_speculative_count/2) < VM_PAGE_FREE_MIN) {
 		cv_signal(&memory_monitor_thread_cv); // wake MMT to shrink
 		return (1);
 	}

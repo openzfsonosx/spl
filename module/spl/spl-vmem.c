@@ -1001,7 +1001,7 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 	uint64_t bytes_min = (uint64_t)vm_page_free_min * (uint64_t)PAGESIZE;
 	uint64_t bytes_spec = (uint64_t)vm_page_speculative_count * (uint64_t)PAGESIZE;
 
-	uint64_t useful_free = bytes_free + bytes_spec - bytes_min;
+	uint64_t useful_free = bytes_free + (bytes_spec/2) - bytes_min;
 
 	// next power of two higher than size
 
