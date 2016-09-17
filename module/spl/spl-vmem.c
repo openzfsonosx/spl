@@ -1016,13 +1016,20 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 
 	if (!vm_page_free_wanted && useful_free >= size_wanted) {
 		void *p = osif_malloc(size_wanted);
+		printf("SPL: %s adding as import (%s, p, %llu, %d)\n",
+		    __func__, vmp->vm_name, size_wanted, vmflags);
 		if (p != NULL)
 			vmem_add_as_import(vmp, p, size_wanted, vmflags);
 		return(NULL);
-	} else if (!vm_page_free_wanted && useful_free >= size)
-		return(osif_malloc(size));
-	else
+	} else if (!vm_page_free_wanted && useful_free >= size) {
+		void *p = osif_malloc(size);
+		printf("SPL: %s returning ptr of size %zu\n", __func__, size);
+		return(p);
+	} else {
+		printf("SPL: %s returning NULL: useful_free=%llu, size=%zu, size_wanted=%llu\n",
+		    __func__, useful_free, size, size_wanted);
 		return(NULL);
+	}
 }
 
 static inline int
@@ -1032,6 +1039,8 @@ vmem_canalloc_nomutex(vmem_t *vmp, size_t size)
 	mutex_enter(&vmp->vm_lock);
 	int r = vmem_canalloc(vmp, size);
 	mutex_exit(&vmp->vm_lock);
+	printf("SPL: vmem_canalloc_nomutex(%s, %zu) == %d\n",
+	     vmp->vm_name, size, r);
 	return (r);
 }
 
@@ -1060,28 +1069,28 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 	vmp->vm_kstat.vk_parent_xalloc.value.ui64++;
 
+	printf("SPL: %s entered (%s, %zu, %d)\n", __func__, vmp->vm_name, size, vmflags);
+
 	while (1) {
 
 		if (!(vmflags & (VM_NOSLEEP | VM_ABORT))) {
 
 			atomic_inc_64(&spl_vmem_threads_waiting);
 
-			const uint64_t timenow = zfs_lbolt();
-			const uint64_t five_seconds = 5ULL * (uint64_t)hz;
-			const uint64_t expire_after = timenow + five_seconds;
+			uint64_t timenow = zfs_lbolt();
+			uint64_t five_seconds = 5ULL * (uint64_t)hz;
+			uint64_t expire_after = timenow + five_seconds;
 
 			for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
 				mutex_enter(&vmp->vm_lock);
 				vmp->vm_kstat.vk_populate_wait.value.ui64++;
 				(void) cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, expire_after);
-				// we hold the mutex after cv_timedwait
-				if (vmem_canalloc(vmp, size)) {
+				mutex_exit(&vmp->vm_lock);
+				if (vmem_canalloc_nomutex(vmp, size)) {
 					if (spl_vmem_threads_waiting > 0)
 						atomic_dec_64(&spl_vmem_threads_waiting);
-					mutex_exit(&vmp->vm_lock);
 					return (NULL);
 				}
-				mutex_exit(&vmp->vm_lock);
 			}
 
 			if (spl_vmem_threads_waiting > 0)
