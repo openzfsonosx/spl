@@ -1088,8 +1088,8 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 				atomic_dec_64(&spl_vmem_threads_waiting);
 
 			if (size <= 1024ULL*1024ULL && !vmem_canalloc_nomutex(vmp, size))  // minalloc
-				printf("SPL: WOAH %s timed out waiting for %zu sized alloc for %s!\n",
-				    __func__, size, vmp->vm_name);
+				printf("SPL: WOAH %s timed out waiting for %llu sized alloc for %s!\n",
+				    __func__, (uint64_t)size, vmp->vm_name);
 		}
 
 		if (vmem_canalloc_nomutex(vmp, size))
@@ -2319,23 +2319,23 @@ vmem_init(const char *heap_name,
 	spl_root_initial_allocation_size =
 	    MAX(real_total_memory / 8, gibibyte);
 
-	printf("SPL: %s: doing initial allocation of %zu bytes\n",
-	    __func__, spl_root_initial_allocation_size);
+	printf("SPL: %s: doing initial allocation of %llu bytes\n",
+	    __func__, (uint64_t)spl_root_initial_allocation_size);
 
 	extern void *osif_malloc(uint64_t);
 	spl_root_initial_allocation = osif_malloc(spl_root_initial_allocation_size);
 
 	if (spl_root_initial_allocation == NULL) {
-		panic("SPL: %s unable to make initial spl_roto allocation of %zu bytes\n",
-		    __func__, spl_root_initial_allocation_size);
+		panic("SPL: %s unable to make initial spl_roto allocation of %llu bytes\n",
+		    __func__, (uint64_t)spl_root_initial_allocation_size);
 	}
 
 	spl_root_arena = vmem_create("spl_root_arena",
 	    spl_root_initial_allocation, spl_root_initial_allocation_size, heap_quantum,
 	    spl_root_allocator, spl_root_arena_free_to_free_arena, spl_root_arena_parent, 0, VM_SLEEP);
 
-	printf("SPL: %s created spl_root_arena with %zu bytes.\n",
-	    __func__, spl_root_initial_allocation_size);
+	printf("SPL: %s created spl_root_arena with %llu bytes.\n",
+	    __func__, (uint64_t)spl_root_initial_allocation_size);
 
 	extern void segkmem_free(vmem_t *, void *, size_t);
 	free_arena = vmem_create("free_arena",
@@ -2467,8 +2467,8 @@ void vmem_fini(vmem_t *heap)
 
 #ifdef _KERNEL
 	extern void osif_free(void *, uint64_t);
-	printf("SPL: %s freeing spl_root_initial_allocation of %zu bytes.\n",
-	    __func__, spl_root_initial_allocation_size);
+	printf("SPL: %s freeing spl_root_initial_allocation of %llu bytes.\n",
+	    __func__, (uint64_t)spl_root_initial_allocation_size);
 	osif_free(spl_root_initial_allocation, spl_root_initial_allocation_size);
 #endif
 	
