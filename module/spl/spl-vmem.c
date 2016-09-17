@@ -1582,7 +1582,7 @@ vmem_add_as_import(vmem_t *vmp, void *vaddr, size_t size, int vmflag)
 	ASSERT(!vmem_contains(vmp, vaddr, size));
 
 	mutex_enter(&vmp->vm_lock);
-	if (vmem_populate(vmp, vmflag))
+	if (vmem_populate(vmp, vmflag | VMC_POPULATOR))
 		(void) vmem_span_create(vmp, vaddr, size, 1);
 	else
 		vaddr = NULL;
