@@ -1015,15 +1015,28 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 
 	extern void *osif_malloc(uint64_t);
 
-	if (!vm_page_free_wanted && useful_free >= size_wanted) {
+	mutex_enter(&vmem_flush_free_lock);
+
+	void *ret = NULL;
+
+	if (!vm_page_free_wanted && useful_free > size_wanted) {
 		void *p = osif_malloc(size_wanted);
-		if (p != NULL)
+		if (p != NULL) {
 			vmem_add_as_import(vmp, p, size_wanted, vmflags);
-		return(NULL);
-	} else if (!vm_page_free_wanted && useful_free >= size)
-		return(osif_malloc(size));
-	else
-		return(NULL);
+			atomic_add_64(&spl_root_arena_parent->vm_kstat.vk_mem_import.value.ui64, size_wanted);
+		}
+		ret = NULL;
+	} else if (!vm_page_free_wanted && useful_free > size) {
+		void *p = osif_malloc(size);
+		if (p != NULL)
+			atomic_add_64(&spl_root_arena_parent->vm_kstat.vk_mem_import.value.ui64, size);
+		ret = p;
+	} else
+		ret = NULL;
+
+	mutex_exit(&vmem_flush_free_lock);
+
+	return(ret);
 }
 
 static inline int
@@ -1050,6 +1063,8 @@ vmem_canalloc_nomutex(vmem_t *vmp, size_t size)
  * the cv_wait in vmem_xalloc (assuming not VM_NOSLEEP, VM_ABORT or VM_PANIC)
  */
 
+static uint64_t vmem_flush_free_to_root();
+
 static void *
 spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 {
@@ -1071,9 +1086,12 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		printf("SPL: %s ERROR! I am holding the mutex lock for %s!\n",
 		    __func__, vmp->vm_name);
 
-	vmp->vm_kstat.vk_parent_xalloc.value.ui64++;
+	spl_root_arena_parent->vm_kstat.vk_parent_xalloc.value.ui64++; // just convenience; avoid double-counting
 
 	while (1) {
+
+		if (vmem_size(free_arena, VMEM_FREE) > 0 && !vmem_canalloc_nomutex(vmp, size))
+			(void) vmem_flush_free_to_root();
 
 		if (!(vmflags & (VM_NOSLEEP | VM_ABORT))) {
 
@@ -1085,7 +1103,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 			for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
 				mutex_enter(&vmp->vm_lock);
-				vmp->vm_kstat.vk_populate_wait.value.ui64++;
+				spl_root_arena_parent->vm_kstat.vk_populate_wait.value.ui64++; // avoid double-counting
 				(void) cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, expire_after);
 				// we hold the mutex after cv_timedwait
 				if (vmem_canalloc(vmp, size)) {
@@ -2141,8 +2159,6 @@ vmem_qcache_reap(vmem_t *vmp)
 			kmem_cache_reap_now(vmp->vm_qcache[i]);
 }
 
-
-static uint64_t vmem_flush_free_to_root();
 static uint64_t vmem_vacuum_spl_root_arena();
 
 /*
