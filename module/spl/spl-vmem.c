@@ -1014,12 +1014,13 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 	uint64_t size_wanted = 1 << (r+1);
 
 	extern void *osif_malloc(uint64_t);
+	const uint64_t minalloc = 1024ULL * 1024ULL; // minalloc
 
 	mutex_enter(&vmem_flush_free_lock);
 
 	void *ret = NULL;
 
-	if (!vm_page_free_wanted && useful_free > size_wanted) {
+	if (!vm_page_free_wanted && size > minalloc && useful_free > size_wanted) {
 		void *p1 = osif_malloc(size);
 		void *p2 = osif_malloc(size);
 		if (p1 != NULL) {
@@ -1155,8 +1156,8 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		else if (vmflags & (VM_ABORT | VM_NOSLEEP))
 			return (NULL);
 		else {
-			printf("SPL: %s still waiting for %llu for %s, flags = %u\n",
-			    __func__, (uint64_t)size, vmp->vm_name, vmflags);
+			printf("SPL: %s still waiting for %llu for %s, flags = %u, pass = %u\n",
+			    __func__, (uint64_t)size, vmp->vm_name, vmflags, pass);
 			vmp->vm_kstat.vk_populate_fail.value.ui64++;
 		}
 	}
