@@ -1020,12 +1020,17 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 	void *ret = NULL;
 
 	if (!vm_page_free_wanted && useful_free > size_wanted) {
-		void *p = osif_malloc(size_wanted);
-		if (p != NULL) {
-			vmem_add_as_import(vmp, p, size_wanted, vmflags);
-			atomic_add_64(&spl_root_arena_parent->vm_kstat.vk_mem_import.value.ui64, size_wanted);
+		void *p1 = osif_malloc(size);
+		void *p2 = osif_malloc(size);
+		if (p1 != NULL) {
+			vmem_add_as_import(vmp, p1, size, vmflags);
+			atomic_add_64(&spl_root_arena_parent->vm_kstat.vk_mem_import.value.ui64, size);
+			ret = NULL;
 		}
-		ret = NULL;
+		if (p2 != NULL) {
+			atomic_add_64(&spl_root_arena_parent->vm_kstat.vk_mem_import.value.ui64, size);
+			ret = p2;
+		}
 	} else if (!vm_page_free_wanted && useful_free > size) {
 		void *p = osif_malloc(size);
 		if (p != NULL)
@@ -1105,12 +1110,15 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 			const uint64_t timenow = zfs_lbolt();
 			const uint64_t five_seconds = 5ULL * (uint64_t)hz;
 			const uint64_t half_second = 5ULL * (uint64_t)hz;
-			uint64_t expire_after;
+			const uint64_t sixty_seconds = 60ULL * (uint64_t)hz;
+			uint64_t expire_after = timenow;
 
 			if (pass == 1 && size > minalloc)
-				expire_after = half_second;
+				expire_after += half_second;
+			else if (size > minalloc)
+				expire_after += five_seconds;
 			else
-				expire_after = five_seconds;
+				expire_after += sixty_seconds; // lots of time for the refill and vacuum threads
 
 			for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
 				mutex_enter(&vmp->vm_lock);
@@ -1129,9 +1137,10 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 			if (spl_vmem_threads_waiting > 0)
 				atomic_dec_64(&spl_vmem_threads_waiting);
 
+			uint64_t time_elapsed = (zfs_lbolt() - timenow)/hz;
 			if (size <= minalloc && !vmem_canalloc_nomutex(vmp, size))  // minalloc
-				printf("SPL: WOAH %s timed out waiting for %llu sized alloc for %s!\n",
-				    __func__, (uint64_t)size, vmp->vm_name);
+				printf("SPL: WOAH %s timed out waiting for %llu sized alloc for %s after %llu seconds!\n",
+				    __func__, (uint64_t)size, vmp->vm_name, time_elapsed);
 		}
 
 		if (vmem_canalloc_nomutex(vmp, size))
