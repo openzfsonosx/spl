@@ -520,7 +520,33 @@ extern uint64_t stat_osif_free;
 extern uint64_t vmem_free_memory_recycled;
 extern uint64_t vmem_free_memory_released;
 extern uint64_t spl_vmem_large_allocs;
-extern uint64_t spl_vmem_fallthrough_import_bytes;
+
+// stats for vmem_add_or_return_memory_if_space()
+extern uint64_t spl_vmem_fallthrough_imported_bytes;
+extern uint64_t spl_vmem_fallthrough_returned_bytes;
+extern uint64_t spl_vmem_add_or_return_calls;
+extern uint64_t spl_vmem_add_or_return_fails;
+
+// stats for spl_root_allocator();
+extern uint64_t spl_root_allocator_bytes_asked;
+extern uint64_t spl_root_allocator_calls;
+extern uint64_t spl_root_allocator_cv_timedwaits;
+extern uint64_t spl_root_allocator_wait_expired;
+extern uint64_t spl_vmem_large_bytes_unneeded;
+extern uint64_t spl_vmem_nonwait_satisfied_large;
+extern uint64_t spl_vmem_nonwait_then_large;
+extern uint64_t spl_vmem_nonwait_unsatisfied;
+extern uint64_t spl_vmem_nonwait_unsatisfied_bytes;
+extern uint64_t spl_vmem_nonwait_unsatisfied_large;
+extern uint64_t spl_vmem_nonwait_unsatisfied_large_bytes;
+extern uint64_t spl_vmem_nonwait_with_allocation;
+extern uint64_t spl_vmem_spl_root_allocator_outer;
+extern uint64_t spl_vmem_total_large_bytes_alloc;
+extern uint64_t spl_vmem_total_large_bytes_asked;
+extern uint64_t spl_vmem_wait_satisfied_large;
+extern uint64_t spl_vmem_wait_then_large;
+extern uint64_t spl_vmem_wait_with_allocation;
+extern uint64_t spl_vmem_wait_without_allocation;
 
 uint64_t stat_cur_bytes_above_total_memory = 0;
 
@@ -551,7 +577,29 @@ typedef struct spl_stats {
 	kstat_named_t spl_vmem_free_memory_recycled;
 	kstat_named_t spl_vmem_free_memory_released;
 	kstat_named_t spl_vmem_large_allocs;
-	kstat_named_t spl_vmem_fallthrough_import_bytes;
+	kstat_named_t spl_vmem_fallthrough_imported_bytes;
+	kstat_named_t spl_vmem_fallthrough_returned_bytes;
+	kstat_named_t spl_vmem_add_or_return_calls;
+	kstat_named_t spl_vmem_add_or_return_fails;
+	kstat_named_t spl_root_allocator_bytes_asked;
+	kstat_named_t spl_root_allocator_calls;
+	kstat_named_t spl_root_allocator_cv_timedwaits;
+	kstat_named_t spl_root_allocator_wait_expired;
+	kstat_named_t spl_vmem_large_bytes_unneeded;
+	kstat_named_t spl_vmem_nonwait_satisfied_large;
+	kstat_named_t spl_vmem_nonwait_then_large;
+	kstat_named_t spl_vmem_nonwait_unsatisfied;
+	kstat_named_t spl_vmem_nonwait_unsatisfied_bytes;
+	kstat_named_t spl_vmem_nonwait_unsatisfied_large;
+	kstat_named_t spl_vmem_nonwait_unsatisfied_large_bytes;
+	kstat_named_t spl_vmem_nonwait_with_allocation;
+	kstat_named_t spl_vmem_spl_root_allocator_outer;
+	kstat_named_t spl_vmem_total_large_bytes_alloc;
+	kstat_named_t spl_vmem_total_large_bytes_asked;
+	kstat_named_t spl_vmem_wait_satisfied_large;
+	kstat_named_t spl_vmem_wait_then_large;
+	kstat_named_t spl_vmem_wait_with_allocation;
+	kstat_named_t spl_vmem_wait_without_allocation;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -581,7 +629,29 @@ static spl_stats_t spl_stats = {
 	{"spl_vmem_free_memory_recycled", KSTAT_DATA_UINT64},
 	{"spl_vmem_free_memory_released", KSTAT_DATA_UINT64},
 	{"spl_vmem_large_allocs", KSTAT_DATA_UINT64},
-	{"fallthrough_import_bytes", KSTAT_DATA_UINT64},
+	{"vaormis_imported_bytes", KSTAT_DATA_UINT64},
+	{"vaormis__returned_bytes", KSTAT_DATA_UINT64},
+	{"vmem_add_or_return_calls", KSTAT_DATA_UINT64},
+	{"vmem_add_or_return_fails", KSTAT_DATA_UINT64},
+	{"sra_bytes_asked", KSTAT_DATA_UINT64},
+	{"sra_calls", KSTAT_DATA_UINT64},
+	{"sra_cv_timedwaits", KSTAT_DATA_UINT64},
+	{"sra_wait_expired", KSTAT_DATA_UINT64},
+	{"sra_large_bytes_unneeded", KSTAT_DATA_UINT64},
+	{"sra_nonwait_satisfied_large", KSTAT_DATA_UINT64},
+	{"sra_nonwait_then_large", KSTAT_DATA_UINT64},
+	{"sra_nonwait_unsatisfied", KSTAT_DATA_UINT64},
+	{"sra_nonwait_unsatisfied_bytes", KSTAT_DATA_UINT64},
+	{"sra_nonwait_unsatisfied_large", KSTAT_DATA_UINT64},
+	{"sra_unsatisfied_large_bytes", KSTAT_DATA_UINT64},
+	{"sra_nonwait_with_allocation", KSTAT_DATA_UINT64},
+	{"spl_root_allocator_outer", KSTAT_DATA_UINT64},
+	{"sra_total_large_bytes_alloc", KSTAT_DATA_UINT64},
+	{"sra_total_large_bytes_asked", KSTAT_DATA_UINT64},
+	{"sra_wait_satisfied_large", KSTAT_DATA_UINT64},
+	{"sra_wait_then_large", KSTAT_DATA_UINT64},
+	{"sra_wait_with_allocation", KSTAT_DATA_UINT64},
+	{"sra_wait_without_allocation", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4451,7 +4521,29 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_vmem_free_memory_recycled.value.ui64 = vmem_free_memory_recycled;
 		ks->spl_vmem_free_memory_released.value.ui64 = vmem_free_memory_released;
 		ks->spl_vmem_large_allocs.value.ui64 = spl_vmem_large_allocs;
-		ks->spl_vmem_fallthrough_import_bytes.value.ui64 = spl_vmem_fallthrough_import_bytes;
+		ks->spl_vmem_fallthrough_imported_bytes.value.ui64 = spl_vmem_fallthrough_imported_bytes;
+		ks->spl_vmem_fallthrough_returned_bytes.value.ui64 = spl_vmem_fallthrough_returned_bytes;
+		ks->spl_vmem_add_or_return_calls.value.ui64 = spl_vmem_add_or_return_calls;
+		ks->spl_vmem_add_or_return_fails.value.ui64 = spl_vmem_add_or_return_fails;
+		ks->spl_root_allocator_bytes_asked.value.ui64 = spl_root_allocator_bytes_asked;
+		ks->spl_root_allocator_calls.value.ui64 = spl_root_allocator_calls;
+		ks->spl_root_allocator_cv_timedwaits.value.ui64 = spl_root_allocator_cv_timedwaits;
+		ks->spl_root_allocator_wait_expired.value.ui64 = spl_root_allocator_wait_expired;
+		ks->spl_vmem_large_bytes_unneeded.value.ui64 = spl_vmem_large_bytes_unneeded;
+		ks->spl_vmem_nonwait_satisfied_large.value.ui64 = spl_vmem_nonwait_satisfied_large;
+		ks->spl_vmem_nonwait_then_large.value.ui64 = spl_vmem_nonwait_then_large;
+		ks->spl_vmem_nonwait_unsatisfied.value.ui64 = spl_vmem_nonwait_unsatisfied;
+		ks->spl_vmem_nonwait_unsatisfied_bytes.value.ui64 = spl_vmem_nonwait_unsatisfied_bytes;
+		ks->spl_vmem_nonwait_unsatisfied_large.value.ui64 = spl_vmem_nonwait_unsatisfied_large;
+		ks->spl_vmem_nonwait_unsatisfied_large_bytes.value.ui64 = spl_vmem_nonwait_unsatisfied_large_bytes;
+		ks->spl_vmem_nonwait_with_allocation.value.ui64 = spl_vmem_nonwait_with_allocation;
+		ks->spl_vmem_spl_root_allocator_outer.value.ui64 = spl_vmem_spl_root_allocator_outer;
+		ks->spl_vmem_total_large_bytes_alloc.value.ui64 = spl_vmem_total_large_bytes_alloc;
+		ks->spl_vmem_total_large_bytes_asked.value.ui64 = spl_vmem_total_large_bytes_asked;
+		ks->spl_vmem_wait_satisfied_large.value.ui64 = spl_vmem_wait_satisfied_large;
+		ks->spl_vmem_wait_then_large.value.ui64 = spl_vmem_wait_then_large;
+		ks->spl_vmem_wait_with_allocation.value.ui64 = spl_vmem_wait_with_allocation;
+		ks->spl_vmem_wait_without_allocation.value.ui64 = spl_vmem_wait_without_allocation;
 	}
 
 	return (0);

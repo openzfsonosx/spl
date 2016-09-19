@@ -393,8 +393,37 @@ vmem_seg_t *_vnext = (vsp)->vs_##type##next;			\
 /// vmem thread block count
 uint64_t spl_vmem_threads_waiting = 0;
 
-// number of allocations > 1 MiB
+static uint64_t spl_minalloc = 1024ULL*1024ULL;
+// number of allocations > minalloc
 uint64_t spl_vmem_large_allocs = 0;
+
+// stats for vmem_add_or_return_memory_if_space()
+uint64_t spl_vmem_fallthrough_imported_bytes = 0;
+uint64_t spl_vmem_fallthrough_returned_bytes = 0;
+uint64_t spl_vmem_add_or_return_calls = 0;
+uint64_t spl_vmem_add_or_return_fails = 0;
+
+// stats for spl_root_allocator()
+uint64_t spl_root_allocator_bytes_asked = 0;
+uint64_t spl_root_allocator_calls = 0;
+uint64_t spl_root_allocator_cv_timedwaits = 0;
+uint64_t spl_root_allocator_wait_expired = 0;
+uint64_t spl_vmem_large_bytes_unneeded = 0;
+uint64_t spl_vmem_nonwait_satisfied_large = 0;
+uint64_t spl_vmem_nonwait_then_large = 0;
+uint64_t spl_vmem_nonwait_unsatisfied = 0;
+uint64_t spl_vmem_nonwait_unsatisfied_bytes = 0;
+uint64_t spl_vmem_nonwait_unsatisfied_large = 0;
+uint64_t spl_vmem_nonwait_unsatisfied_large_bytes = 0;
+uint64_t spl_vmem_nonwait_with_allocation = 0;
+uint64_t spl_vmem_spl_root_allocator_outer = 0;
+uint64_t spl_vmem_total_large_bytes_alloc = 0;
+uint64_t spl_vmem_total_large_bytes_asked = 0;
+uint64_t spl_vmem_wait_satisfied_large = 0;
+uint64_t spl_vmem_wait_then_large = 0;
+uint64_t spl_vmem_wait_with_allocation = 0;
+uint64_t spl_vmem_wait_without_allocation = 0;
+
 
 extern void spl_free_set_emergency_pressure(int64_t p);
 extern uint64_t segkmem_total_mem_allocated;
@@ -993,6 +1022,8 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 
 	//MUTEX NOT HELD ON ENTRY
 
+	atomic_inc_64(&spl_vmem_add_or_return_calls);
+
 	extern volatile unsigned int vm_page_free_count;
 	extern volatile unsigned int vm_page_free_min;
 	extern volatile unsigned int vm_page_speculative_count;
@@ -1014,7 +1045,7 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 	uint64_t size_wanted = 1 << (r+1);
 
 	extern void *osif_malloc(uint64_t);
-	const uint64_t minalloc = 1024ULL * 1024ULL; // minalloc
+	const uint64_t minalloc = spl_minalloc;
 
 	mutex_enter(&vmem_flush_free_lock);
 
@@ -1025,20 +1056,23 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 		void *p2 = osif_malloc(size);
 		if (p1 != NULL) {
 			vmem_add_as_import(vmp, p1, size, vmflags);
-			atomic_add_64(&spl_root_arena_parent->vm_kstat.vk_mem_import.value.ui64, size);
+			atomic_add_64(&spl_vmem_fallthrough_imported_bytes, size);
 			ret = NULL;
 		}
 		if (p2 != NULL) {
-			atomic_add_64(&spl_root_arena_parent->vm_kstat.vk_mem_import.value.ui64, size);
+			atomic_add_64(&spl_vmem_fallthrough_returned_bytes, size);
 			ret = p2;
 		}
 	} else if (!vm_page_free_wanted && useful_free > size) {
 		void *p = osif_malloc(size);
 		if (p != NULL)
-			atomic_add_64(&spl_root_arena_parent->vm_kstat.vk_mem_import.value.ui64, size);
+			atomic_add_64(&spl_vmem_fallthrough_returned_bytes, size);
 		ret = p;
 	} else
 		ret = NULL;
+
+	if (ret == NULL)
+		atomic_inc_64(&spl_vmem_add_or_return_fails);
 
 	mutex_exit(&vmem_flush_free_lock);
 
@@ -1092,10 +1126,13 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		printf("SPL: %s ERROR! I am holding the mutex lock for %s!\n",
 		    __func__, vmp->vm_name);
 
-	spl_root_arena_parent->vm_kstat.vk_parent_xalloc.value.ui64++; // just convenience; avoid double-counting
+	atomic_inc_64(&spl_root_allocator_calls);
+	atomic_add_64(&spl_root_allocator_bytes_asked, size);
+	if (size > spl_minalloc)
+		atomic_add_64(&spl_vmem_total_large_bytes_asked, size);
 
 	uint32_t pass = 0;
-	uint64_t minalloc = 1024ULL*1024ULL; // minalloc
+	uint64_t minalloc = spl_minalloc;
 
 	while (1) {
 
@@ -1123,42 +1160,79 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 			for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
 				mutex_enter(&vmp->vm_lock);
-				spl_root_arena_parent->vm_kstat.vk_populate_wait.value.ui64++; // avoid double-counting
+				atomic_inc_64(&spl_root_allocator_cv_timedwaits);
 				(void) cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, expire_after);
 				// we hold the mutex after cv_timedwait
 				if (vmem_canalloc(vmp, size)) {
 					if (spl_vmem_threads_waiting > 0)
 						atomic_dec_64(&spl_vmem_threads_waiting);
 					mutex_exit(&vmp->vm_lock);
+					atomic_inc_64(&spl_vmem_wait_without_allocation);
+					if (size > spl_minalloc) {
+						atomic_inc_64(&spl_vmem_wait_satisfied_large);
+						atomic_add_64(&spl_vmem_large_bytes_unneeded, size);
+					}
 					return (NULL);
 				}
 				mutex_exit(&vmp->vm_lock);
 			}
 
+			atomic_inc_64(&spl_root_allocator_wait_expired);
+
 			if (spl_vmem_threads_waiting > 0)
 				atomic_dec_64(&spl_vmem_threads_waiting);
 
 			uint64_t time_elapsed = (zfs_lbolt() - timenow)/hz;
-			if (size <= minalloc && !vmem_canalloc_nomutex(vmp, size))  // minalloc
+			if (size <= minalloc && !vmem_canalloc_nomutex(vmp, size))
 				printf("SPL: WOAH %s timed out waiting for %llu sized alloc for %s after %llu seconds!\n",
 				    __func__, (uint64_t)size, vmp->vm_name, time_elapsed);
 		}
 
-		if (vmem_canalloc_nomutex(vmp, size))
+		if (vmem_canalloc_nomutex(vmp, size)) {
+			if (size > minalloc)
+				atomic_add_64(&spl_vmem_large_bytes_unneeded, size);
+			if (vmflags & (VM_NOSLEEP | VM_ABORT))
+				atomic_inc_64(&spl_vmem_nonwait_satisfied_large);
+			else
+				atomic_inc_64(&spl_vmem_wait_satisfied_large);
 			return (NULL);
+		}
 
 		void *p = vmem_add_or_return_memory_if_space(vmp, size, vmflags);
 
-		if (p != NULL)
+		if (p != NULL) {
+			if (vmflags & (VM_NOSLEEP | VM_ABORT)) {
+				atomic_inc_64(&spl_vmem_nonwait_with_allocation);
+				if (size > minalloc)
+					atomic_add_64(&spl_vmem_nonwait_then_large, size);
+			} else {
+				atomic_inc_64(&spl_vmem_wait_with_allocation);
+				if (size > minalloc)
+					atomic_add_64(&spl_vmem_wait_then_large, size);
+			}
+			if (size > spl_minalloc)
+				atomic_add_64(&spl_vmem_total_large_bytes_alloc, size);
 			return (p);
-		else if (vmem_canalloc_nomutex(vmp, size))
+		} else if (vmem_canalloc_nomutex(vmp, size)) {
+			if (size > minalloc)
+				atomic_add_64(&spl_vmem_large_bytes_unneeded, size);
+			if (vmflags & (VM_NOSLEEP | VM_ABORT))
+				atomic_inc_64(&spl_vmem_nonwait_satisfied_large);
+			else
+				atomic_inc_64(&spl_vmem_wait_satisfied_large);
 			return (NULL);
-		else if (vmflags & (VM_ABORT | VM_NOSLEEP))
+		} else if (vmflags & (VM_ABORT | VM_NOSLEEP)) {
+			atomic_inc_64(&spl_vmem_nonwait_unsatisfied);
+			atomic_add_64(&spl_vmem_nonwait_unsatisfied_bytes, size);
+			if (size > spl_minalloc) {
+				atomic_inc_64(&spl_vmem_nonwait_unsatisfied_large);
+				atomic_add_64(&spl_vmem_nonwait_unsatisfied_large_bytes, size);
+			}
 			return (NULL);
-		else {
+		} else {
 			printf("SPL: %s still waiting for %llu for %s, flags = %u, pass = %u\n",
 			    __func__, (uint64_t)size, vmp->vm_name, vmflags, pass);
-			vmp->vm_kstat.vk_populate_fail.value.ui64++;
+			atomic_inc_64(&spl_vmem_spl_root_allocator_outer);
 		}
 	}
 }
@@ -1181,7 +1255,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 	int hb, flist, resv;
 	uint32_t mtbf;
 
-	if (size > 1024ULL*1024ULL) //minalloc
+	if (size > spl_minalloc)
 		spl_vmem_large_allocs++;
 	
 	if ((align | phase | nocross) & (vmp->vm_quantum - 1))
@@ -1408,7 +1482,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		if (vmflag & VM_NOSLEEP)
 			break;
 		vmp->vm_kstat.vk_wait.value.ui64++;
-		if (size != 1024ULL*1024ULL && spl_vmem_threads_waiting != 0) { //minalloc
+		if (size != spl_minalloc && spl_vmem_threads_waiting != 0) {
 			printf("SPL: %s: vmem waiting for %lu sized alloc for %s, other threads waiting = %llu\n",
 			    __func__, size, vmp->vm_name, spl_vmem_threads_waiting);
 		}
@@ -1521,7 +1595,7 @@ vmem_alloc(vmem_t *vmp, size_t size, int vmflag)
 	int flist = 0;
 	uint32_t mtbf;
 
-	if (size > 1024ULL*1024ULL) // minalloc
+	if (size > spl_minalloc)
 		spl_vmem_large_allocs++;
 	
 	if (size - 1 < vmp->vm_qcache_max)
@@ -2155,13 +2229,13 @@ spl_root_refill(void *dummy)
 		!vm_page_free_wanted &&
 		vm_page_free_count > (unsigned int)(onegig/PAGESIZE) + 4096) ||
 	    mem_in_use < onegig) {
-		const uint32_t mib = 1024*1024; // minalloc
+		const uint32_t minalloc = (uint32_t)spl_minalloc;
 
 
 		uint64_t pages = vmem_add_a_gibibyte_to_spl_root_arena();
 
 		if (pages == 0) {
-			spl_free_set_emergency_pressure(mib);
+			spl_free_set_emergency_pressure(2LL * (int64_t)minalloc);
 		}
 	}
 	bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval);
@@ -2207,7 +2281,7 @@ vmem_add_a_gibibyte_to_spl_root_arena()
 {
 	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
 	const uint64_t pages = (gibibyte/PAGESIZE);
-	const uint64_t minalloc = 1024*1024; // TUNEME (see other places commented minalloc)
+	const uint64_t minalloc = spl_minalloc;
 	const uint64_t pages_per_alloc = minalloc/PAGESIZE;
 	uint64_t allocs = (gibibyte/minalloc);
 
