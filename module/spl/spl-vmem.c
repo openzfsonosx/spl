@@ -2445,7 +2445,7 @@ vmem_init(const char *heap_name,
 	const uint64_t quarter_gibibyte = 256ULL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
 	spl_root_initial_allocation_size =
-	    MAX(real_total_memory / 32, quarter_gibibyte);
+	    MAX(real_total_memory / 64, quarter_gibibyte);
 
 	printf("SPL: %s: doing initial allocation of %llu bytes\n",
 	    __func__, (uint64_t)spl_root_initial_allocation_size);
