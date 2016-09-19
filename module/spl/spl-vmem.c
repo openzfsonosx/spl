@@ -1088,7 +1088,12 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 	spl_root_arena_parent->vm_kstat.vk_parent_xalloc.value.ui64++; // just convenience; avoid double-counting
 
+	uint32_t pass = 0;
+	uint64_t minalloc = 1024ULL*1024ULL; // minalloc
+
 	while (1) {
+
+		pass++;
 
 		if (vmem_size(free_arena, VMEM_FREE) > 0 && !vmem_canalloc_nomutex(vmp, size))
 			(void) vmem_flush_free_to_root();
@@ -1099,7 +1104,13 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 			const uint64_t timenow = zfs_lbolt();
 			const uint64_t five_seconds = 5ULL * (uint64_t)hz;
-			const uint64_t expire_after = timenow + five_seconds;
+			const uint64_t half_second = 5ULL * (uint64_t)hz;
+			uint64_t expire_after;
+
+			if (pass == 1 && size > minalloc)
+				expire_after = half_second;
+			else
+				expire_after = five_seconds;
 
 			for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
 				mutex_enter(&vmp->vm_lock);
@@ -1118,7 +1129,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 			if (spl_vmem_threads_waiting > 0)
 				atomic_dec_64(&spl_vmem_threads_waiting);
 
-			if (size <= 1024ULL*1024ULL && !vmem_canalloc_nomutex(vmp, size))  // minalloc
+			if (size <= minalloc && !vmem_canalloc_nomutex(vmp, size))  // minalloc
 				printf("SPL: WOAH %s timed out waiting for %llu sized alloc for %s!\n",
 				    __func__, (uint64_t)size, vmp->vm_name);
 		}
@@ -2347,10 +2358,10 @@ vmem_init(const char *heap_name,
 	// significantly, AND it will also offer enough space that
 	// the (> minalloc) large path in vmem_xalloc will not be taken
 
-	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
+	const uint64_t quarter_gibibyte = 256ULL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
 	spl_root_initial_allocation_size =
-	    MAX(real_total_memory / 8, gibibyte);
+	    MAX(real_total_memory / 32, quarter_gibibyte);
 
 	printf("SPL: %s: doing initial allocation of %llu bytes\n",
 	    __func__, (uint64_t)spl_root_initial_allocation_size);
