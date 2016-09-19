@@ -2460,7 +2460,8 @@ vmem_init(const char *heap_name,
 
 	spl_root_arena = vmem_create("spl_root_arena",
 	    spl_root_initial_allocation, spl_root_initial_allocation_size, heap_quantum,
-	    spl_root_allocator, spl_root_arena_free_to_free_arena, spl_root_arena_parent, 0, VM_SLEEP);
+	    spl_root_allocator, spl_root_arena_free_to_free_arena, spl_root_arena_parent, 0,
+	    VM_SLEEP | VMC_POPULATOR);
 
 	printf("SPL: %s created spl_root_arena with %llu bytes.\n",
 	    __func__, (uint64_t)spl_root_initial_allocation_size);
