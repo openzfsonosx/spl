@@ -1145,6 +1145,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 	atomic_inc_64(&spl_root_allocator_calls);
 
+	// try shortcut for large allocations
 	if (size > spl_minalloc) {
 		void *p = spl_try_large_reserve_alloc(size, vmflags);
 		if (p != NULL)
@@ -1165,10 +1166,28 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		}
 	}
 
+	// if we are under less heavy memory pressure AND we have ample large_reserve_alloc space
+
+	extern volatile unsigned int vm_page_free_count;
+	extern volatile unsigned int vm_page_speculative_count;
+	extern volatile unsigned int vm_page_free_min;
+	// mimic logic in vmem_add_or_return_memory_if_space()
+	const unsigned int useful_pages_free = vm_page_free_count +
+	    (vm_page_speculative_count/2) - vm_page_free_min;
+	const unsigned int threshold = (unsigned int)(spl_root_initial_reserve_import_size / PAGESIZE) / 2;
+	const unsigned int reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
+	if (reserve_free >= threshold && size >= useful_pages_free) {
+		void *p = spl_try_large_reserve_alloc(size, vmflags);
+		if (p != NULL) {
+			atomic_inc_64(&spl_root_allocator_pressure_short_circuit);
+			return(p);
+		}
+	}
+
 	atomic_add_64(&spl_root_allocator_bytes_asked, size);
 
 	uint32_t pass = 0;
-	uint64_t minalloc = spl_minalloc;
+	const uint64_t minalloc = spl_minalloc;
 
 	while (1) {
 
@@ -1181,7 +1200,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 			atomic_inc_64(&spl_vmem_threads_waiting);
 
-			const uint64_t timenow = zfs_lbolt();
+			uint64_t timenow = zfs_lbolt();
 			const uint64_t five_seconds = 5ULL * (uint64_t)hz;
 			const uint64_t half_second = 5ULL * (uint64_t)hz;
 			const uint64_t sixty_seconds = 60ULL * (uint64_t)hz;
