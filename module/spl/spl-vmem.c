@@ -223,7 +223,7 @@
 //#include <sys/panic.h>
 #include <stdbool.h>
 
-#define	VMEM_INITIAL		10	/* early vmem arenas */
+#define	VMEM_INITIAL		13	/* early vmem arenas */
 #define	VMEM_SEG_INITIAL	400
 //200	/* early segments */
 
@@ -332,8 +332,12 @@ static vmem_t *vmem_vmem_arena;
 static vmem_t *free_arena;
 vmem_t *spl_root_arena; // The bottom-most arena for SPL
 static vmem_t *spl_root_arena_parent;
-static void *spl_root_initial_allocation;
-static size_t spl_root_initial_allocation_size;
+static void *spl_root_initial_reserve_import;
+static  uint64_t spl_root_initial_reserve_import_size;
+static vmem_t *spl_large_reserve_arena;
+static void *spl_large_reserve_initial_allocation;
+static size_t spl_large_reserve_initial_allocation_size;
+#define NUMBER_OF_ARENAS_IN_VMEM_INIT 10
 static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
@@ -366,8 +370,8 @@ static vmem_kstat_t vmem_kstat_template = {
 	{ "nextfit_root_wait",	KSTAT_DATA_UINT64 },
 };
 
-// Warning, we know its 7 from inside of vmem_init()
-static void *global_vmem_reap[7] = {NULL};
+// Warning, we know its 10 from inside of vmem_init() - marcroized
+static void *global_vmem_reap[NUMBER_OF_ARENAS_IN_VMEM_INIT] = {NULL};
 
 
 /*
@@ -423,6 +427,7 @@ uint64_t spl_vmem_wait_satisfied_large = 0;
 uint64_t spl_vmem_wait_then_large = 0;
 uint64_t spl_vmem_wait_with_allocation = 0;
 uint64_t spl_vmem_wait_without_allocation = 0;
+uint64_t spl_root_allocator_pressure_short_circuit = 0;
 
 
 extern void spl_free_set_emergency_pressure(int64_t p);
@@ -1106,6 +1111,18 @@ vmem_canalloc_nomutex(vmem_t *vmp, size_t size)
 static uint64_t vmem_flush_free_to_root();
 
 static void *
+spl_try_large_reserve_alloc(size_t size, int vmflags)
+{
+	// MUTEX_NOT_HELD !
+	ASSERT(!MUTEX_HELD(&spl_large_reserve_arena->vm_lock));
+
+	if (vmem_canalloc_nomutex(spl_large_reserve_arena, size))
+		return (vmem_alloc(spl_large_reserve_arena, size, vmflags));
+	else
+		return (NULL);
+}
+
+static void *
 spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 {
 	// MUTEX NOT HELD ON ENTRY
@@ -1127,9 +1144,28 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		    __func__, vmp->vm_name);
 
 	atomic_inc_64(&spl_root_allocator_calls);
+
+	if (size > spl_minalloc) {
+		void *p = spl_try_large_reserve_alloc(size, vmflags);
+		if (p != NULL)
+			return(p);
+		else
+			atomic_add_64(&spl_vmem_total_large_bytes_asked, size);
+	}
+
+	// if we are under memory pressure then check if we have space in large_reserve_alloc
+	// and use it if there is.
+
+	extern volatile unsigned int vm_page_free_wanted;
+	if (vm_page_free_wanted) {
+		void *p = spl_try_large_reserve_alloc(size, vmflags);
+		if (p != NULL) {
+			atomic_inc_64(&spl_root_allocator_pressure_short_circuit);
+			return(p);
+		}
+	}
+
 	atomic_add_64(&spl_root_allocator_bytes_asked, size);
-	if (size > spl_minalloc)
-		atomic_add_64(&spl_vmem_total_large_bytes_asked, size);
 
 	uint32_t pass = 0;
 	uint64_t minalloc = spl_minalloc;
@@ -2373,6 +2409,21 @@ vmem_add_a_gibibyte_to_spl_root_arena()
  */
 
 static void
+spl_segkmem_free_if_not_big(vmem_t *vmp, void *inaddr, size_t size)
+{
+	if (vmem_contains(spl_large_reserve_arena, inaddr, size)) {
+		bzero(inaddr, size);
+		vmem_free(spl_large_reserve_arena, inaddr, size);
+		mutex_enter(&spl_large_reserve_arena->vm_lock);
+		cv_broadcast(&spl_large_reserve_arena->vm_cv);
+		mutex_exit(&spl_large_reserve_arena->vm_lock);
+	} else {
+		extern void segkmem_free(vmem_t *, void *, size_t);
+		segkmem_free(vmp, inaddr, size);
+	}
+}
+
+static void
 vmem_free_transfer(vmem_t *source, void *inaddr, size_t size, vmem_t *destination)
 {
 	bzero(inaddr, size);
@@ -2382,7 +2433,15 @@ vmem_free_transfer(vmem_t *source, void *inaddr, size_t size, vmem_t *destinatio
 static void
 spl_root_arena_free_to_free_arena(vmem_t *vmp, void *inaddr, size_t size)
 {
-	vmem_free_transfer(vmp, inaddr, size, free_arena);
+	if (vmem_contains(spl_large_reserve_arena, inaddr, size)) {
+		bzero(inaddr, size);
+		vmem_free(spl_large_reserve_arena, inaddr, size);
+		mutex_enter(&spl_large_reserve_arena->vm_lock);
+		cv_broadcast(&spl_large_reserve_arena->vm_cv);
+		mutex_exit(&spl_large_reserve_arena->vm_lock);
+	} else {
+		vmem_free_transfer(vmp, inaddr, size, free_arena);
+	}
 }
 
 static void
@@ -2430,7 +2489,7 @@ vmem_init(const char *heap_name,
 	 */
 
 
-	spl_root_arena_parent = vmem_create("spl_root_arena_parent",
+	spl_root_arena_parent = vmem_create("spl_root_arena_parent",  // id 0
 	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP);
 
 #ifdef _KERNEL
@@ -2444,45 +2503,64 @@ vmem_init(const char *heap_name,
 
 	const uint64_t quarter_gibibyte = 256ULL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
-	spl_root_initial_allocation_size =
+	spl_large_reserve_initial_allocation_size =
 	    MAX(real_total_memory / 64, quarter_gibibyte);
 
-	printf("SPL: %s: doing initial allocation of %llu bytes\n",
-	    __func__, (uint64_t)spl_root_initial_allocation_size);
+	printf("SPL: %s: doing initial large allocation of %llu bytes\n",
+	    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
 
 	extern void *osif_malloc(uint64_t);
-	spl_root_initial_allocation = osif_malloc(spl_root_initial_allocation_size);
+	spl_large_reserve_initial_allocation = osif_malloc(spl_large_reserve_initial_allocation_size);
 
-	if (spl_root_initial_allocation == NULL) {
-		panic("SPL: %s unable to make initial spl_roto allocation of %llu bytes\n",
-		    __func__, (uint64_t)spl_root_initial_allocation_size);
+	if (spl_large_reserve_initial_allocation == NULL) {
+		panic("SPL: %s unable to make initial spl_large_reserve_arena allocation of %llu bytes\n",
+		    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
 	}
 
-	spl_root_arena = vmem_create("spl_root_arena",
-	    spl_root_initial_allocation, spl_root_initial_allocation_size, heap_quantum,
+	spl_large_reserve_arena = vmem_create("spl_large_reserve_arena",  // id 1
+	    spl_large_reserve_initial_allocation, spl_large_reserve_initial_allocation_size, heap_quantum,
+	    NULL, NULL, spl_root_arena_parent, 0, VM_SLEEP | VMC_POPULATOR);
+
+	printf("SPL: %s created spl_large_reserve_arena with %llu bytes.\n",
+	    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
+
+	spl_root_initial_reserve_import_size = quarter_gibibyte/8;
+	spl_root_initial_reserve_import = vmem_alloc(spl_large_reserve_arena,
+	    spl_root_initial_reserve_import_size, VM_PANIC | VM_NOSLEEP);
+
+	if (spl_root_initial_reserve_import == NULL)
+		panic("vmem_init: unable to vmem_alloc %llu bytes!", spl_root_initial_reserve_import_size);
+
+	spl_root_arena = vmem_create("spl_root_arena", // id 2
+	    spl_root_initial_reserve_import, spl_root_initial_reserve_import_size, heap_quantum,
 	    spl_root_allocator, spl_root_arena_free_to_free_arena, spl_root_arena_parent, 0,
 	    VM_SLEEP | VMC_POPULATOR);
 
-	printf("SPL: %s created spl_root_arena with %llu bytes.\n",
-	    __func__, (uint64_t)spl_root_initial_allocation_size);
+	printf("SPL: %s created spl_root_arena.\n", __func__);
 
 	extern void segkmem_free(vmem_t *, void *, size_t);
-	free_arena = vmem_create("free_arena",
+	free_arena = vmem_create("free_arena", // id 3
 	    NULL, 0,
 	    PAGESIZE, NULL, segkmem_free, NULL, 0, VM_SLEEP);
 
 #else
-	spl_root_arena = vmem_create("spl_root_arena",
+	spl_large_reserve_arena = vmem_create("spl_large_reserve_arena", // id 1 (userland)
+	    NULL, 0, heap_quantum, NULL, NULL, 0, VM_SLEEP);
+
+	spl_root_arena = vmem_create("spl_root_arena", // id 2 (userland)
 	    NULL, 0, heap_quantum,
-	    segkmem_alloc, segkmem_free, spl_root_arena_parent, 0, VM_SLEEP);
+	    segkmem_alloc, segkmem_free, spl_root_arena_parent, 0, VM_SLEEP | VMC_POPULATOR);
+
+	free_arena = vmem_create("spl_free_arena",  // id 3 (userland)
+	    NULL, 0, heap_quantum, NULL, NULL, 0, VM_SLEEP);
 #endif
 
-	heap_parent = vmem_create("heap_parent",
+	heap_parent = vmem_create("heap_parent",  // id 4
 							  NULL, 0, heap_quantum,
 							  vmem_alloc, vmem_free, spl_root_arena, 0,
 							  VM_SLEEP);
 	
-	heap = vmem_create(heap_name,
+	heap = vmem_create(heap_name,  // id 5
 					   NULL, 0, heap_quantum,
 					   vmem_alloc, vmem_free, heap_parent, 0,
 					   VM_SLEEP);
@@ -2491,27 +2569,27 @@ vmem_init(const char *heap_name,
 	// Root all the low bandwidth metadata arenas off heap_parent,
 	// which is essentially the OS heap. This may give us some
 	// chance of cleaning up in an orderly manner.
-	vmem_metadata_arena = vmem_create("vmem_metadata",
+	vmem_metadata_arena = vmem_create("vmem_metadata", // id 6
 									  NULL, 0, heap_quantum,
 									  vmem_alloc, vmem_free, heap_parent, 8 * PAGESIZE,
 									  VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
 	
-	vmem_seg_arena = vmem_create("vmem_seg",
+	vmem_seg_arena = vmem_create("vmem_seg", // id 7
 								 NULL, 0, heap_quantum,
 								 vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								 VM_SLEEP | VMC_POPULATOR);
 	
-	vmem_hash_arena = vmem_create("vmem_hash",
+	vmem_hash_arena = vmem_create("vmem_hash", // id 8
 								  NULL, 0, 8,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 	
-	vmem_vmem_arena = vmem_create("vmem_vmem",
+	vmem_vmem_arena = vmem_create("vmem_vmem", // id 9
 								  vmem0, sizeof (vmem0), 1,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 	
-	// 7 vmem_create before this line.
+	// 10 (0-based) vmem_create before this line. - macroized NUMBER_OF_ARENAS_IN_VMEM_INIT
 	for (id = 0; id < vmem_id; id++) {
 		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
 										   1, 0, 0, &vmem0[id], &vmem0[id + 1],
@@ -2525,9 +2603,6 @@ vmem_init(const char *heap_name,
 	
 	return (heap);
 }
-
-
-extern void segkmem_free(vmem_t *vmp, void *inaddr, size_t size);
 
 struct free_slab {
 	vmem_t *vmp;
@@ -2549,7 +2624,8 @@ static void vmem_fini_freelist(void *vmp, void *start, size_t size)
 	list_insert_tail(&freelist, fs);
 }
 
-void vmem_fini(vmem_t *heap)
+void
+vmem_fini(vmem_t *heap)
 {
 	uint32_t id;
 	struct free_slab *fs;
@@ -2579,7 +2655,7 @@ void vmem_fini(vmem_t *heap)
 	vmem_walk(spl_root_arena, VMEM_ALLOC,
 	    vmem_fini_freelist, spl_root_arena);
 
-	for (id = 0; id < 7; id++) {// From vmem_init, 7 vmem_create
+	for (id = 0; id < NUMBER_OF_ARENAS_IN_VMEM_INIT; id++) {// From vmem_init, 10 vmem_create macroized
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
 	}
 	
@@ -2588,17 +2664,18 @@ void vmem_fini(vmem_t *heap)
 	while((fs = list_head(&freelist))) {
 		total+=fs->slabsize;
 		list_remove(&freelist, fs);
+		extern void segkmem_free(vmem_t *, void *, size_t);
 		segkmem_free(fs->vmp, fs->slab, fs->slabsize);
 		FREE(fs, M_TEMP);
 	}
-	dprintf("SPL: Released %llu bytes from arenas\n", total);
+	printf("SPL: Released %llu bytes from arenas\n", total);
 	list_destroy(&freelist);
 
 #ifdef _KERNEL
 	extern void osif_free(void *, uint64_t);
-	printf("SPL: %s freeing spl_root_initial_allocation of %llu bytes.\n",
-	    __func__, (uint64_t)spl_root_initial_allocation_size);
-	osif_free(spl_root_initial_allocation, spl_root_initial_allocation_size);
+	printf("SPL: %s freeing spl_large_reserve_initial_allocation of %llu bytes.\n",
+	    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
+	osif_free(spl_large_reserve_initial_allocation, spl_large_reserve_initial_allocation_size);
 #endif
 	
 #if 0 // Don't release, panics
@@ -2640,7 +2717,6 @@ vmem_vacuum_free_arena(void)
 		return;
 	}
 
-
 	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, free_arena);
 
 	uint64_t end_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
@@ -2661,8 +2737,6 @@ vmem_vacuum_free_arena(void)
 static uint64_t
 vmem_flush_free_to_root()
 {
-	extern void segkmem_free(vmem_t *, void *, size_t);
-
 	uint64_t start_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
 
 	if (start_total == 0)
@@ -2694,6 +2768,7 @@ vmem_flush_free_to_root()
 	mutex_enter(&free_arena->vm_lock);
 	mutex_enter(&spl_root_arena->vm_lock);
 
+	extern void segkmem_free(vmem_t *, void *, size_t);
 	free_arena->vm_source_free = segkmem_free;
 
 	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
@@ -2721,8 +2796,6 @@ vmem_flush_free_to_root()
 static uint64_t
 vmem_vacuum_spl_root_arena()
 {
-	extern void segkmem_free(vmem_t *, void *, size_t);
-
 	uint64_t start_total = spl_root_arena->vm_kstat.vk_mem_total.value.ui64;
 
 	if (start_total == 0)
@@ -2735,7 +2808,7 @@ vmem_vacuum_spl_root_arena()
 
 	mutex_enter(&spl_root_arena->vm_lock);
 
-	spl_root_arena->vm_source_free = segkmem_free;
+	spl_root_arena->vm_source_free = spl_segkmem_free_if_not_big;
 
 	mutex_exit(&spl_root_arena->vm_lock);
 
@@ -2750,6 +2823,7 @@ vmem_vacuum_spl_root_arena()
 	mutex_enter(&free_arena->vm_lock);
 	mutex_enter(&spl_root_arena->vm_lock);
 
+	extern void segkmem_free(vmem_t *, void *, size_t);
 	free_arena->vm_source_free = segkmem_free;
 
 	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
