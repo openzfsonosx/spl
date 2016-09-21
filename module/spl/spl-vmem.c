@@ -2520,10 +2520,10 @@ vmem_init(const char *heap_name,
 	// significantly, AND it will also offer enough space that
 	// the (> minalloc) large path in vmem_xalloc will not be taken
 
-	const uint64_t quarter_gibibyte = 256ULL*1024ULL*1024ULL;
+	const uint64_t half_gibibyte = 512LL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
 	spl_large_reserve_initial_allocation_size =
-	    MAX(real_total_memory / 64, quarter_gibibyte);
+	    MAX(real_total_memory / 64, half_gibibyte);
 
 	printf("SPL: %s: doing initial large allocation of %llu bytes\n",
 	    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
@@ -2543,7 +2543,7 @@ vmem_init(const char *heap_name,
 	printf("SPL: %s created spl_large_reserve_arena with %llu bytes.\n",
 	    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
 
-	spl_root_initial_reserve_import_size = quarter_gibibyte/8;
+	spl_root_initial_reserve_import_size = half_gibibyte/16;
 	spl_root_initial_reserve_import = vmem_alloc(spl_large_reserve_arena,
 	    spl_root_initial_reserve_import_size, VM_PANIC | VM_NOSLEEP);
 
