@@ -2283,24 +2283,36 @@ spl_root_refill(void *dummy)
 
 	boolean_t wait = false;
 	const uint64_t onegig = 1024ULL*1024ULL*1024ULL;
-	uint64_t system_mem_in_use = spl_root_arena->vm_kstat.vk_mem_import.value.ui64 +
-	    spl_large_reserve_arena->vm_kstat.vk_mem_total.value.ui64;
-	uint64_t root_free = (uint64_t)vmem_size(spl_root_arena, VMEM_FREE);
 
-	// grab memory if there are waiting threads
-	// or if we are early after spl starts and haven't used much memory
-	// or if there is plenty of memory free
+	// amount pulled in by refill + initial amount allocated in vmem_init +
+	// anything not recycled or released yet
+	uint64_t sys_mem_in_use = spl_root_arena->vm_kstat.vk_mem_import.value.ui64 +
+	    spl_large_reserve_arena->vm_kstat.vk_mem_total.value.ui64 +
+	    free_arena->vm_kstat.vk_mem_import.value.ui64;
+
+	uint64_t root_free = (uint64_t)vmem_size(spl_root_arena, VMEM_FREE);
 
 	extern volatile unsigned int vm_page_free_wanted;
 	extern volatile unsigned int vm_page_free_count;
+	extern volatile unsigned int vm_page_speculative_count;
+	extern volatile unsigned int vm_page_free_min;
 
-	const uint64_t threshold_pages = (onegig/PAGESIZE) * 100ULL / 95ULL;
+	extern uint64_t real_total_memory;
+
+	// grab memory if there are waiting threads
+	// or if we there is lots of free xnu memory and < 1 GiB free in spl_root_arena
+	// or if there is less than 1/8 of real_physmem in spl_root_arena
+
+	uint32_t useful_free_pages = vm_page_free_count +
+	    (vm_page_speculative_count/2) - vm_page_free_min;
+
+	const uint32_t lots_free_pages = (onegig/PAGESIZE) + vm_page_free_min;
+	const uint32_t threshold_pages = (onegig/PAGESIZE) * 100ULL / 95ULL;
 
 	if (spl_vmem_threads_waiting > 0 ||
-	    (root_free < onegig &&
-		!vm_page_free_wanted &&
-		vm_page_free_count > (unsigned int)(onegig/PAGESIZE) + 4096) ||
-	    system_mem_in_use < onegig) {
+	    (root_free < onegig && !vm_page_free_wanted &&
+		    useful_free_pages > lots_free_pages) ||
+	    sys_mem_in_use < real_total_memory/8ULL) {
 		const uint32_t minalloc = (uint32_t)spl_minalloc;
 
 		uint64_t pages = vmem_add_a_gibibyte_to_spl_root_arena();
