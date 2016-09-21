@@ -2307,7 +2307,8 @@ spl_root_refill(void *dummy)
 	    (vm_page_speculative_count/2) - vm_page_free_min;
 
 	const uint32_t lots_free_pages = (onegig/PAGESIZE) + vm_page_free_min;
-	const uint32_t threshold_pages = (onegig/PAGESIZE) * 100ULL / 95ULL;
+	const uint32_t high_threshold_pages = (onegig/PAGESIZE) * 95ULL / 100ULL;
+	const uint32_t low_threshold_pages = (onegig/PAGESIZE) * 5ULL / 100ULL;
 
 	if (spl_vmem_threads_waiting > 0 ||
 	    (root_free < onegig && !vm_page_free_wanted &&
@@ -2321,9 +2322,9 @@ spl_root_refill(void *dummy)
 
 		if (pages == 0) {
 			spl_free_set_emergency_pressure(32LL * (int64_t)minalloc);
-		} else if (pages < threshold_pages) {
+		} else if (pages < low_threshold_pages) {
 			spl_free_set_emergency_pressure((int64_t)minalloc);
-		} else if (pages >= threshold_pages) {
+		} else if (pages >= high_threshold_pages) {
 			// we can inflate rapidly
 			wait = false;
 		}
