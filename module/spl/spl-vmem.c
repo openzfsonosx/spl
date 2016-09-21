@@ -341,6 +341,7 @@ static size_t spl_large_reserve_initial_allocation_size;
 static vmem_t *heap_parent;
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
+static struct timespec  spl_root_refill_interval_long = {0, MSEC2NSEC(100)};
 static struct timespec  vmem_vacuum_thread_interval = {30, 0};
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
@@ -2280,8 +2281,10 @@ void
 spl_root_refill(void *dummy)
 {
 
+	boolean_t wait = false;
 	const uint64_t onegig = 1024ULL*1024ULL*1024ULL;
-	uint64_t mem_in_use = spl_root_arena->vm_kstat.vk_mem_total.value.ui64;
+	uint64_t system_mem_in_use = spl_root_arena->vm_kstat.vk_mem_import.value.ui64 +
+	    spl_large_reserve_arena->vm_kstat.vk_mem_total.value.ui64;
 	uint64_t root_free = (uint64_t)vmem_size(spl_root_arena, VMEM_FREE);
 
 	// grab memory if there are waiting threads
@@ -2291,21 +2294,30 @@ spl_root_refill(void *dummy)
 	extern volatile unsigned int vm_page_free_wanted;
 	extern volatile unsigned int vm_page_free_count;
 
+	const uint64_t threshold_pages = (onegig/PAGESIZE) * 100ULL / 95ULL;
+
 	if (spl_vmem_threads_waiting > 0 ||
-	    (root_free < (onegig * 2ULL) &&
+	    (root_free < onegig &&
 		!vm_page_free_wanted &&
 		vm_page_free_count > (unsigned int)(onegig/PAGESIZE) + 4096) ||
-	    mem_in_use < onegig) {
+	    system_mem_in_use < onegig) {
 		const uint32_t minalloc = (uint32_t)spl_minalloc;
-
 
 		uint64_t pages = vmem_add_a_gibibyte_to_spl_root_arena();
 
+		wait = true;
+
 		if (pages == 0) {
-			spl_free_set_emergency_pressure(2LL * (int64_t)minalloc);
+			spl_free_set_emergency_pressure(16LL * (int64_t)minalloc);
+		} else if (pages > threshold_pages) {
+			// we can inflate rapidly
+			wait = false;
 		}
 	}
-	bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval);
+	if (wait)
+		bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval_long);
+	else
+		bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval);
 }
 
 void

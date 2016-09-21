@@ -64,10 +64,10 @@
 // proxy to the machine experiencing memory pressure.
 //
 // xnu vm variables
-extern unsigned int vm_page_free_wanted; // 0 by default smd
-extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min
-extern unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
-extern unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
+extern volatile unsigned int vm_page_free_wanted; // 0 by default smd
+extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min, rarely changes
+extern volatile unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
+extern volatile unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
 
 // VM_PAGE_FREE_MIN tunables principally used in kmem_avail()
 uint32_t vm_page_free_min_multiplier = 8;	// so 3500*this = 14000 pages
@@ -4230,16 +4230,16 @@ spl_free_thread()
 			size_t root_free = spl_vmem_size(spl_root_arena, VMEM_FREE);
 
 			if (root_free > root_sixteenth_total) {
-				spl_free += root_free / 4;
+				spl_free += root_free / 2;
 			} else if (!lowmem) {
 				spl_free -= root_sixteenth_total;
 				lowmem = true;
 			}
 		}
 
-		extern uint64_t spl_vmem_threads_waiting;
-		if (spl_vmem_threads_waiting > 2) {
-			spl_free = -16LL * 1024LL * 1024LL * spl_vmem_threads_waiting;
+		extern volatile uint64_t spl_vmem_threads_waiting;
+		if (spl_vmem_threads_waiting > 0) {
+			spl_free = -1LL * 1024LL * 1024LL * MAX(spl_vmem_threads_waiting, 1LL);
 			emergency_lowmem = true;
 		}
 
@@ -4380,7 +4380,7 @@ spl_mach_pressure_monitor_thread()
 		spl_stats.spl_spl_mach_pressure_monitor_wake_count.value.ui64++;
 
 		if (kr != KERN_SUCCESS) {
-			if (os_num_pages_wanted < 1) {
+			if (os_num_pages_wanted >= 1) {
 				mutex_enter(&spl_free_lock);
 				spl_free = -(int64_t)os_num_pages_wanted * PAGESIZE;
 				mutex_exit(&spl_free_lock);
@@ -4408,7 +4408,7 @@ spl_mach_pressure_monitor_thread()
 		CALLB_CPR_SAFE_BEGIN(&cpr);
 		(void) cv_timedwait(&spl_mach_pressure_monitor_thread_cv,
 							&spl_mach_pressure_monitor_thread_lock,
-							ddi_get_lbolt() + (hz / 10));
+							ddi_get_lbolt() + hz);
 		CALLB_CPR_SAFE_END(&cpr, &spl_mach_pressure_monitor_thread_lock);
 		dprintf("SPL: %s back from cv_timedwait\n", __func__);
 	} // while
