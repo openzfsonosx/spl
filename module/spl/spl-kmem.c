@@ -548,6 +548,8 @@ extern uint64_t spl_vmem_wait_then_large;
 extern uint64_t spl_vmem_wait_with_allocation;
 extern uint64_t spl_vmem_wait_without_allocation;
 extern uint64_t spl_root_allocator_pressure_short_circuit;
+extern uint64_t spl_root_allocator_large_reserve;
+extern uint64_t spl_root_allocator_small_reserve;
 
 uint64_t stat_cur_bytes_above_total_memory = 0;
 
@@ -602,6 +604,8 @@ typedef struct spl_stats {
 	kstat_named_t spl_vmem_wait_with_allocation;
 	kstat_named_t spl_vmem_wait_without_allocation;
 	kstat_named_t spl_root_allocator_pressure_short_circuit;
+	kstat_named_t spl_root_allocator_large_reserve;
+	kstat_named_t spl_root_allocator_small_reserve;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -655,6 +659,8 @@ static spl_stats_t spl_stats = {
 	{"sra_wait_with_allocation", KSTAT_DATA_UINT64},
 	{"sra_wait_without_allocation", KSTAT_DATA_UINT64},
 	{"sra_pressure_short_circuit", KSTAT_DATA_UINT64},
+	{"sra_large_reserve", KSTAT_DATA_UINT64},
+	{"sra_small_reserve", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4548,6 +4554,8 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_vmem_wait_with_allocation.value.ui64 = spl_vmem_wait_with_allocation;
 		ks->spl_vmem_wait_without_allocation.value.ui64 = spl_vmem_wait_without_allocation;
 		ks->spl_root_allocator_pressure_short_circuit.value.ui64 = spl_root_allocator_pressure_short_circuit;
+		ks->spl_root_allocator_large_reserve.value.ui64 = spl_root_allocator_large_reserve;
+		ks->spl_root_allocator_small_reserve.value.ui64 = spl_root_allocator_small_reserve;
 	}
 
 	return (0);

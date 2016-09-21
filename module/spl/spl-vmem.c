@@ -428,6 +428,8 @@ uint64_t spl_vmem_wait_then_large = 0;
 uint64_t spl_vmem_wait_with_allocation = 0;
 uint64_t spl_vmem_wait_without_allocation = 0;
 uint64_t spl_root_allocator_pressure_short_circuit = 0;
+uint64_t spl_root_allocator_large_reserve = 0;
+uint64_t spl_root_allocator_small_reserve = 0;
 
 
 extern void spl_free_set_emergency_pressure(int64_t p);
@@ -1145,12 +1147,13 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 	atomic_inc_64(&spl_root_allocator_calls);
 
-	// try shortcut for large allocations
-	if (size > spl_minalloc) {
+	// try shortcut for all large allocations
+	if (size > spl_minalloc) { // minalloc
 		void *p = spl_try_large_reserve_alloc(size, vmflags);
-		if (p != NULL)
+		if (p != NULL) {
+			atomic_inc_64(&spl_root_allocator_large_reserve);
 			return(p);
-		else
+		} else
 			atomic_add_64(&spl_vmem_total_large_bytes_asked, size);
 	}
 
@@ -1166,7 +1169,8 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		}
 	}
 
-	// if we are under less heavy memory pressure AND we have ample large_reserve_alloc space
+	// if we are under less heavy memory pressure AND
+	// (we have ample large_reserve_alloc space OR if we are a small allocation)
 
 	extern volatile unsigned int vm_page_free_count;
 	extern volatile unsigned int vm_page_speculative_count;
@@ -1174,7 +1178,8 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 	// mimic logic in vmem_add_or_return_memory_if_space()
 	unsigned int useful_pages_free = vm_page_free_count +
 	    (vm_page_speculative_count/2) - vm_page_free_min;
-	if (size / PAGESIZE >= useful_pages_free) {
+
+	if (size / PAGESIZE >= useful_pages_free || size < spl_minalloc) { // minalloc
 		unsigned int threshold = (unsigned int)(spl_root_initial_reserve_import_size / PAGESIZE) / 2;
 		unsigned int nosleep_threshold = threshold + (threshold/2);
 		unsigned int reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE) / PAGESIZE;
@@ -1182,7 +1187,10 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		    ((vmflags & VM_NOSLEEP) && reserve_free >= nosleep_threshold)) {
 			void *p = spl_try_large_reserve_alloc(size, vmflags);
 			if (p != NULL) {
-				atomic_inc_64(&spl_root_allocator_pressure_short_circuit);
+				if (size / PAGESIZE >= useful_pages_free)
+					atomic_inc_64(&spl_root_allocator_pressure_short_circuit);
+				if (size < spl_minalloc) // not else, as can be both
+					atomic_inc_64(&spl_root_allocator_small_reserve);
 				return(p);
 			}
 		}
