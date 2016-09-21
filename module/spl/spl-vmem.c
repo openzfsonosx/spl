@@ -2320,8 +2320,10 @@ spl_root_refill(void *dummy)
 		wait = true;
 
 		if (pages == 0) {
-			spl_free_set_emergency_pressure(16LL * (int64_t)minalloc);
-		} else if (pages > threshold_pages) {
+			spl_free_set_emergency_pressure(32LL * (int64_t)minalloc);
+		} else if (pages < threshold_pages) {
+			spl_free_set_emergency_pressure((int64_t)minalloc);
+		} else if (pages >= threshold_pages) {
 			// we can inflate rapidly
 			wait = false;
 		}
@@ -2442,7 +2444,7 @@ vmem_add_a_gibibyte_to_spl_root_arena()
 			printf("SPL: WOAH! %s bailing out after only %llu pages for %s.\n",
 			    __func__, i * pages_per_alloc, spl_root_arena->vm_name);
 			spl_root_arena->vm_kstat.vk_fail.value.ui64++;
-			return (i);
+			return (i/pages_per_alloc);
 		} else {
 		        vmem_add_as_import(spl_root_arena, a, minalloc, VM_NOSLEEP);
 			spl_root_arena->vm_kstat.vk_parent_alloc.value.ui64++;
@@ -2453,7 +2455,7 @@ vmem_add_a_gibibyte_to_spl_root_arena()
 				dprintf("SPL: %s NO MEMORY, bailing out, %s.\n",
 				    __func__, spl_root_arena->vm_name);
 			}
-			return (i);
+			return (i/pages_per_alloc);
 		}
 	}
 	return (pages);
