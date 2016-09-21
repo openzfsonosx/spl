@@ -1172,22 +1172,26 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 	extern volatile unsigned int vm_page_speculative_count;
 	extern volatile unsigned int vm_page_free_min;
 	// mimic logic in vmem_add_or_return_memory_if_space()
-	const unsigned int useful_pages_free = vm_page_free_count +
+	unsigned int useful_pages_free = vm_page_free_count +
 	    (vm_page_speculative_count/2) - vm_page_free_min;
-	const unsigned int threshold = (unsigned int)(spl_root_initial_reserve_import_size / PAGESIZE) / 2;
-	const unsigned int reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
-	if (reserve_free >= threshold && size >= useful_pages_free) {
-		void *p = spl_try_large_reserve_alloc(size, vmflags);
-		if (p != NULL) {
-			atomic_inc_64(&spl_root_allocator_pressure_short_circuit);
-			return(p);
+	if (size / PAGESIZE >= useful_pages_free) {
+		unsigned int threshold = (unsigned int)(spl_root_initial_reserve_import_size / PAGESIZE) / 2;
+		unsigned int nosleep_threshold = threshold + (threshold/2);
+		unsigned int reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE) / PAGESIZE;
+		if (reserve_free >= threshold ||
+		    ((vmflags & VM_NOSLEEP) && reserve_free >= nosleep_threshold)) {
+			void *p = spl_try_large_reserve_alloc(size, vmflags);
+			if (p != NULL) {
+				atomic_inc_64(&spl_root_allocator_pressure_short_circuit);
+				return(p);
+			}
 		}
 	}
 
 	atomic_add_64(&spl_root_allocator_bytes_asked, size);
 
 	uint32_t pass = 0;
-	const uint64_t minalloc = spl_minalloc;
+	uint64_t minalloc = spl_minalloc;
 
 	while (1) {
 
