@@ -4296,7 +4296,7 @@ spl_free_thread()
 
 		mutex_enter(&spl_free_thread_lock);
 		CALLB_CPR_SAFE_BEGIN(&cpr);
-		(void) cv_timedwait(&spl_free_thread_cv, &spl_free_thread_lock, ddi_get_lbolt() + (hz/10));
+		(void) cv_timedwait(&spl_free_thread_cv, &spl_free_thread_lock, ddi_get_lbolt() + (hz/100));
 		CALLB_CPR_SAFE_END(&cpr, &spl_free_thread_lock);
 	}
 	spl_free_thread_exit = FALSE;
@@ -4396,11 +4396,8 @@ spl_mach_pressure_monitor_thread()
 		spl_stats.spl_spl_mach_pressure_monitor_wake_count.value.ui64++;
 
 		if (kr != KERN_SUCCESS) {
-			if (os_num_pages_wanted >= 1) {
-				mutex_enter(&spl_free_lock);
-				spl_free = -(int64_t)os_num_pages_wanted * PAGESIZE;
-				mutex_exit(&spl_free_lock);
-			}
+			printf("SPL: %s: pages_reclaimed = %u, pages wanted = %d\n",
+			    __func__, pages_reclaimed, os_num_pages_wanted);
 		}
 
 		if (kr != KERN_SUCCESS) {
@@ -4462,7 +4459,7 @@ memory_monitor_thread()
 		dprintf("SPL: MMT calling cv_timedwait\n");
 		CALLB_CPR_SAFE_BEGIN(&cpr);
 		(void) cv_timedwait(&memory_monitor_thread_cv,
-						   &memory_monitor_lock, ddi_get_lbolt() + (hz / 10));
+						   &memory_monitor_lock, ddi_get_lbolt() + hz);
 		dprintf("SPL: MMT back from cv_timedwait\n");
 		CALLB_CPR_SAFE_END(&cpr, &memory_monitor_lock);
 	} // while
