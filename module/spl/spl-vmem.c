@@ -397,41 +397,50 @@ vmem_seg_t *_vnext = (vsp)->vs_##type##next;			\
 
 /// vmem thread block count
 uint64_t spl_vmem_threads_waiting = 0;
+// grab at least these bytes for me, spl_fill_thread() !
+volatile uint64_t spl_fill_thread_request = 0;
 
 static uint64_t spl_minalloc = 1024ULL*1024ULL;
 // number of allocations > minalloc
 uint64_t spl_vmem_large_allocs = 0;
 
-// stats for vmem_add_or_return_memory_if_space()
-uint64_t spl_vmem_fallthrough_imported_bytes = 0;
-uint64_t spl_vmem_fallthrough_returned_bytes = 0;
-uint64_t spl_vmem_add_or_return_calls = 0;
-uint64_t spl_vmem_add_or_return_fails = 0;
-
 // stats for spl_root_allocator()
-uint64_t spl_root_allocator_bytes_asked = 0;
 uint64_t spl_root_allocator_calls = 0;
-uint64_t spl_root_allocator_cv_timedwaits = 0;
-uint64_t spl_root_allocator_wait_expired = 0;
-uint64_t spl_vmem_large_bytes_unneeded = 0;
-uint64_t spl_vmem_nonwait_satisfied_large = 0;
-uint64_t spl_vmem_nonwait_then_large = 0;
-uint64_t spl_vmem_nonwait_unsatisfied = 0;
-uint64_t spl_vmem_nonwait_unsatisfied_bytes = 0;
-uint64_t spl_vmem_nonwait_unsatisfied_large = 0;
-uint64_t spl_vmem_nonwait_unsatisfied_large_bytes = 0;
-uint64_t spl_vmem_nonwait_with_allocation = 0;
-uint64_t spl_vmem_spl_root_allocator_outer = 0;
-uint64_t spl_vmem_total_large_bytes_alloc = 0;
-uint64_t spl_vmem_total_large_bytes_asked = 0;
-uint64_t spl_vmem_wait_satisfied_large = 0;
-uint64_t spl_vmem_wait_then_large = 0;
-uint64_t spl_vmem_wait_with_allocation = 0;
-uint64_t spl_vmem_wait_without_allocation = 0;
-uint64_t spl_root_allocator_pressure_short_circuit = 0;
+uint64_t spl_root_allocator_large_bytes_asked = 0;
+uint64_t spl_root_allocator_small_bytes_asked = 0;
+uint64_t spl_root_allocator_minalloc_bytes_asked = 0;
 uint64_t spl_root_allocator_large_reserve = 0;
 uint64_t spl_root_allocator_small_reserve = 0;
+uint64_t spl_root_allocator_minalloc_reserve = 0;
+uint64_t spl_root_allocator_short_circuit = 0;
+uint64_t spl_root_allocator_reserve_bytes = 0;
+uint64_t spl_root_allocator_panic_allocs = 0;
+uint64_t spl_root_allocator_panic_bytes = 0;
+uint64_t spl_root_allocator_panic_fail = 0;
+uint64_t spl_root_allocator_panic_fail_bytes = 0;
+uint64_t spl_root_allocator_nosleep_allocs = 0;
+uint64_t spl_root_allocator_nosleep_bytes = 0;
+uint64_t spl_root_allocator_nosleep_fail = 0;
+uint64_t spl_root_allocator_nosleep_fail_bytes = 0;
+uint64_t spl_root_allocator_recover_success = 0;
+uint64_t spl_root_allocator_recover_success_bytes = 0;
+uint64_t spl_root_allocator_cv_timedwaits = 0;
+uint64_t spl_root_allocator_wait_without_allocation = 0;
+uint64_t spl_root_allocator_wait_without_allocation_bytes = 0;
+uint64_t spl_root_allocator_waited = 0;
+uint64_t spl_root_allocator_wait_then_allocation = 0;
+uint64_t spl_root_allocator_wait_then_allocation_bytes = 0;
+uint64_t spl_root_allocator_outer_loop = 0;
 
+// allocator kstats
+uint64_t spl_vmem_unconditional_allocs = 0;
+uint64_t spl_vmem_unconditional_alloc_bytes = 0;
+uint64_t spl_vmem_conditional_allocs = 0;
+uint64_t spl_vmem_conditional_alloc_fail = 0;
+uint64_t spl_vmem_conditional_alloc_bytes = 0;
+uint64_t spl_vmem_conditional_alloc_fail_bytes = 0;
+uint64_t spl_vmem_conditional_alloc_deny = 0;
+uint64_t spl_vmem_conditional_alloc_deny_bytes = 0;
 
 extern void spl_free_set_emergency_pressure(int64_t p);
 extern uint64_t segkmem_total_mem_allocated;
@@ -1024,18 +1033,16 @@ static void *vmem_add_as_import(vmem_t *, void *, size_t, int);
  * vmem_canalloc_nomutex(vmp, size) going false
  */
 
-static void *
-vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
+static inline uint64_t
+spl_vmem_xnu_useful_bytes_free(void)
 {
-
-	//MUTEX NOT HELD ON ENTRY
-
-	atomic_inc_64(&spl_vmem_add_or_return_calls);
-
+	extern volatile unsigned int vm_page_free_wanted;
 	extern volatile unsigned int vm_page_free_count;
 	extern volatile unsigned int vm_page_free_min;
 	extern volatile unsigned int vm_page_speculative_count;
-	extern volatile unsigned int vm_page_free_wanted;
+
+	if (vm_page_free_wanted > 0)
+		return (0);
 
 	uint64_t bytes_free = (uint64_t)vm_page_free_count * (uint64_t)PAGESIZE;
 	uint64_t bytes_min = (uint64_t)vm_page_free_min * (uint64_t)PAGESIZE;
@@ -1043,48 +1050,20 @@ vmem_add_or_return_memory_if_space(vmem_t *vmp, size_t size, int vmflags)
 
 	uint64_t useful_free = bytes_free + (bytes_spec/2) - bytes_min;
 
-	// next power of two higher than size
+	return (useful_free);
+}
 
-	uint64_t r = 0;
-	uint64_t s = size;
-	while (s >>= 1)
-		r++;
+static inline boolean_t
+spl_vmem_critical_space(void)
+{
+	extern volatile unsigned int vm_page_free_wanted;
+	extern volatile unsigned int vm_page_free_count;
+	extern volatile unsigned int vm_page_free_min;
 
-	uint64_t size_wanted = 1 << (r+1);
-
-	extern void *osif_malloc(uint64_t);
-	const uint64_t minalloc = spl_minalloc;
-
-	mutex_enter(&vmem_flush_free_lock);
-
-	void *ret = NULL;
-
-	if (!vm_page_free_wanted && size > minalloc && useful_free > size_wanted) {
-		void *p1 = osif_malloc(size);
-		void *p2 = osif_malloc(size);
-		if (p1 != NULL) {
-			vmem_add_as_import(vmp, p1, size, vmflags);
-			atomic_add_64(&spl_vmem_fallthrough_imported_bytes, size);
-			ret = NULL;
-		}
-		if (p2 != NULL) {
-			atomic_add_64(&spl_vmem_fallthrough_returned_bytes, size);
-			ret = p2;
-		}
-	} else if (!vm_page_free_wanted && useful_free > size) {
-		void *p = osif_malloc(size);
-		if (p != NULL)
-			atomic_add_64(&spl_vmem_fallthrough_returned_bytes, size);
-		ret = p;
-	} else
-		ret = NULL;
-
-	if (ret == NULL)
-		atomic_inc_64(&spl_vmem_add_or_return_fails);
-
-	mutex_exit(&vmem_flush_free_lock);
-
-	return(ret);
+	if (vm_page_free_wanted > 0 || vm_page_free_count <= vm_page_free_min)
+		return (false);
+	else
+		return (true);
 }
 
 static inline int
@@ -1126,6 +1105,48 @@ spl_try_large_reserve_alloc(size_t size, int vmflags)
 }
 
 static void *
+spl_vmem_malloc_unconditionally(size_t size)
+{
+	extern void *osif_malloc(uint64_t);
+	atomic_inc_64(&spl_vmem_unconditional_allocs);
+	atomic_inc_64(&spl_vmem_unconditional_alloc_bytes);
+	return(osif_malloc(size));
+}
+
+static void *
+spl_vmem_malloc_if_no_pressure(size_t size)
+{
+	if (spl_vmem_xnu_useful_bytes_free() > size) {
+		extern void *osif_malloc(uint64_t);
+		void *p = osif_malloc(size);
+		if (p != NULL) {
+			atomic_inc_64(&spl_vmem_conditional_allocs);
+			atomic_add_64(&spl_vmem_conditional_alloc_bytes, size);
+		} else {
+			atomic_inc_64(&spl_vmem_conditional_alloc_fail);
+			atomic_add_64(&spl_vmem_conditional_alloc_fail_bytes, size);
+		}
+		return (p);
+	} else {
+		atomic_inc_64(&spl_vmem_conditional_alloc_deny);
+		atomic_add_64(&spl_vmem_conditional_alloc_deny, size);
+		return (NULL);
+	}
+}
+
+/*
+ * Loop:
+ * First, allocate from reserve/large arena if possible
+ * Alternernatively, for VM_NOSLEEP, VM_ABORT or VM_PANIC, allocate memory if possible or fail
+ * For VM_SLEEP, tell fill thread to grab memory, and wait a while for it
+ * If timeout and pass 0, goto Loop
+ * Else try to allocate
+ * Repeat
+ */
+
+static void *spl_fill_try_add_covering_span(vmem_t *vmp, size_t size, int vmflags);
+
+static void *
 spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 {
 	// MUTEX NOT HELD ON ENTRY
@@ -1148,160 +1169,113 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 	atomic_inc_64(&spl_root_allocator_calls);
 
-	// try shortcut for all large allocations
-	if (size > spl_minalloc) { // minalloc
-		void *p = spl_try_large_reserve_alloc(size, vmflags);
-		if (p != NULL) {
-			atomic_inc_64(&spl_root_allocator_large_reserve);
-			return(p);
-		} else
-			atomic_add_64(&spl_vmem_total_large_bytes_asked, size);
-	}
-
-	// if we are under memory pressure then check if we have space in large_reserve_alloc
-	// and use it if there is.
-
-	extern volatile unsigned int vm_page_free_wanted;
-	if (vm_page_free_wanted) {
-		void *p = spl_try_large_reserve_alloc(size, vmflags);
-		if (p != NULL) {
-			atomic_inc_64(&spl_root_allocator_pressure_short_circuit);
-			return(p);
-		}
-	}
-
-	// if we are under less heavy memory pressure AND
-	// (we have ample large_reserve_alloc space OR if we are a small allocation)
-
-	extern volatile unsigned int vm_page_free_count;
-	extern volatile unsigned int vm_page_speculative_count;
-	extern volatile unsigned int vm_page_free_min;
-	// mimic logic in vmem_add_or_return_memory_if_space()
-	unsigned int useful_pages_free = vm_page_free_count +
-	    (vm_page_speculative_count/2) - vm_page_free_min;
-
-	if (size / PAGESIZE >= useful_pages_free || size < spl_minalloc) { // minalloc
-		unsigned int threshold = (unsigned int)(spl_root_initial_reserve_import_size / PAGESIZE) / 2;
-		unsigned int nosleep_threshold = threshold + (threshold/2);
-		unsigned int reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE) / PAGESIZE;
-		if (reserve_free >= threshold ||
-		    ((vmflags & VM_NOSLEEP) && reserve_free >= nosleep_threshold)) {
-			void *p = spl_try_large_reserve_alloc(size, vmflags);
-			if (p != NULL) {
-				if (size / PAGESIZE >= useful_pages_free)
-					atomic_inc_64(&spl_root_allocator_pressure_short_circuit);
-				if (size < spl_minalloc) // not else, as can be both
-					atomic_inc_64(&spl_root_allocator_small_reserve);
-				return(p);
-			}
-		}
-	}
-
-	atomic_add_64(&spl_root_allocator_bytes_asked, size);
-
 	uint32_t pass = 0;
-	uint64_t minalloc = spl_minalloc;
+
+	if (size > spl_minalloc)
+		atomic_add_64(&spl_root_allocator_large_bytes_asked, size);
+	else if (size < spl_minalloc)
+		atomic_add_64(&spl_root_allocator_small_bytes_asked, size);
+	else
+		atomic_add_64(&spl_root_allocator_minalloc_bytes_asked, size);
 
 	while (1) {
 
 		pass++;
 
-		if (vmem_size(free_arena, VMEM_FREE) > 0 && !vmem_canalloc_nomutex(vmp, size))
-			(void) vmem_flush_free_to_root();
-
-		if (!(vmflags & (VM_NOSLEEP | VM_ABORT))) {
-
-			atomic_inc_64(&spl_vmem_threads_waiting);
-
-			uint64_t timenow = zfs_lbolt();
-			const uint64_t five_seconds = 5ULL * (uint64_t)hz;
-			const uint64_t half_second = 5ULL * (uint64_t)hz;
-			const uint64_t twenty_seconds = 20ULL * (uint64_t)hz;
-			uint64_t expire_after = timenow;
-
-			if (pass == 1 && size > minalloc)
-				expire_after += half_second;
-			else if (size > minalloc)
-				expire_after += five_seconds;
-			else
-				expire_after += twenty_seconds; // lots of time for the refill and vacuum threads
-
-			for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
-				mutex_enter(&vmp->vm_lock);
-				atomic_inc_64(&spl_root_allocator_cv_timedwaits);
-				(void) cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, expire_after);
-				// we hold the mutex after cv_timedwait
-				if (vmem_canalloc(vmp, size)) {
-					if (spl_vmem_threads_waiting > 0)
-						atomic_dec_64(&spl_vmem_threads_waiting);
-					mutex_exit(&vmp->vm_lock);
-					atomic_inc_64(&spl_vmem_wait_without_allocation);
-					if (size > spl_minalloc) {
-						atomic_inc_64(&spl_vmem_wait_satisfied_large);
-						atomic_add_64(&spl_vmem_large_bytes_unneeded, size);
-					}
-					return (NULL);
-				}
-				mutex_exit(&vmp->vm_lock);
-			}
-
-			atomic_inc_64(&spl_root_allocator_wait_expired);
-
-			if (spl_vmem_threads_waiting > 0)
-				atomic_dec_64(&spl_vmem_threads_waiting);
-
-			uint64_t time_elapsed = (zfs_lbolt() - timenow)/hz;
-			if (size <= minalloc && !vmem_canalloc_nomutex(vmp, size))
-				printf("SPL: WOAH %s timed out waiting for %llu sized alloc for %s after %llu seconds!\n",
-				    __func__, (uint64_t)size, vmp->vm_name, time_elapsed);
-		}
-
-		if (vmem_canalloc_nomutex(vmp, size)) {
-			if (size > minalloc)
-				atomic_add_64(&spl_vmem_large_bytes_unneeded, size);
-			if (vmflags & (VM_NOSLEEP | VM_ABORT))
-				atomic_inc_64(&spl_vmem_nonwait_satisfied_large);
-			else
-				atomic_inc_64(&spl_vmem_wait_satisfied_large);
-			return (NULL);
-		}
-
-		void *p = vmem_add_or_return_memory_if_space(vmp, size, vmflags);
+		void *p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
 
 		if (p != NULL) {
-			if (vmflags & (VM_NOSLEEP | VM_ABORT)) {
-				atomic_inc_64(&spl_vmem_nonwait_with_allocation);
-				if (size > minalloc)
-					atomic_add_64(&spl_vmem_nonwait_then_large, size);
+			if (size > spl_minalloc) { // minalloc
+				atomic_inc_64(&spl_root_allocator_large_reserve);
+			} else if (size < spl_minalloc) {
+				atomic_inc_64(&spl_root_allocator_small_reserve);
 			} else {
-				atomic_inc_64(&spl_vmem_wait_with_allocation);
-				if (size > minalloc)
-					atomic_add_64(&spl_vmem_wait_then_large, size);
+				atomic_inc_64(&spl_root_allocator_minalloc_reserve);
 			}
-			if (size > spl_minalloc)
-				atomic_add_64(&spl_vmem_total_large_bytes_alloc, size);
-			return (p);
-		} else if (vmem_canalloc_nomutex(vmp, size)) {
-			if (size > minalloc)
-				atomic_add_64(&spl_vmem_large_bytes_unneeded, size);
-			if (vmflags & (VM_NOSLEEP | VM_ABORT))
-				atomic_inc_64(&spl_vmem_nonwait_satisfied_large);
-			else
-				atomic_inc_64(&spl_vmem_wait_satisfied_large);
-			return (NULL);
-		} else if (vmflags & (VM_ABORT | VM_NOSLEEP)) {
-			atomic_inc_64(&spl_vmem_nonwait_unsatisfied);
-			atomic_add_64(&spl_vmem_nonwait_unsatisfied_bytes, size);
-			if (size > spl_minalloc) {
-				atomic_inc_64(&spl_vmem_nonwait_unsatisfied_large);
-				atomic_add_64(&spl_vmem_nonwait_unsatisfied_large_bytes, size);
-			}
-			return (NULL);
-		} else {
-			printf("SPL: %s still waiting for %llu for %s, flags = %u, pass = %u\n",
-			    __func__, (uint64_t)size, vmp->vm_name, vmflags, pass);
-			atomic_inc_64(&spl_vmem_spl_root_allocator_outer);
+			if (pass == 0)
+				atomic_inc_64(&spl_root_allocator_short_circuit);
+			atomic_add_64(&spl_root_allocator_reserve_bytes, size);
+			return(p);
 		}
+
+		if (vmflags & VM_PANIC &&
+		    vmflags & (VM_NOSLEEP | VM_ABORT)) {
+			void *a = spl_vmem_malloc_unconditionally(size);
+			if (a != NULL) {
+				atomic_inc_64(&spl_root_allocator_panic_allocs);
+				atomic_add_64(&spl_root_allocator_panic_bytes, size);
+			} else {
+				atomic_inc_64(&spl_root_allocator_panic_fail);
+				atomic_add_64(&spl_root_allocator_panic_fail_bytes, size);
+			}
+			return (a);
+		}
+
+		if (vmflags & (VM_NOSLEEP | VM_ABORT)) {
+			void *a = spl_vmem_malloc_if_no_pressure(size);
+			if (a != NULL) {
+				atomic_inc_64(&spl_root_allocator_nosleep_allocs);
+				atomic_add_64(&spl_root_allocator_nosleep_bytes, size);
+			} else {
+				atomic_inc_64(&spl_root_allocator_nosleep_fail);
+				atomic_add_64(&spl_root_allocator_nosleep_fail_bytes, size);
+			}
+			return (a);
+		}
+
+		// we're VMEM_WAIT here
+		if (vmem_size(free_arena, VMEM_FREE) > size) {
+			vmem_flush_free_to_root();
+			if (vmem_canalloc_nomutex(vmp, size)) {
+				atomic_inc_64(&spl_root_allocator_recover_success);
+				atomic_add_64(&spl_root_allocator_recover_success_bytes, size);
+				return (NULL);
+			}
+		}
+
+		atomic_inc_64(&spl_vmem_threads_waiting);
+		atomic_add_64(&spl_fill_thread_request, size); // async signal fill thread
+
+		uint64_t timenow = zfs_lbolt();
+		const uint64_t half_second =  (uint64_t)hz / 2ULL;
+		uint64_t expire_after = timenow + half_second;
+
+		for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
+			mutex_enter(&vmp->vm_lock);
+			atomic_inc_64(&spl_root_allocator_cv_timedwaits);
+			(void) cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, expire_after);
+			// we hold the mutex after cv_timedwait
+			if (vmem_canalloc(vmp, size)) {
+				if (spl_vmem_threads_waiting > 0)
+					atomic_dec_64(&spl_vmem_threads_waiting);
+				mutex_exit(&vmp->vm_lock);
+				atomic_inc_64(&spl_root_allocator_wait_without_allocation);
+				atomic_add_64(&spl_root_allocator_wait_without_allocation_bytes, size);
+				return (NULL);
+			} else if (vmem_canalloc_nomutex(spl_large_reserve_arena, size)) {
+				mutex_exit(&vmp->vm_lock);
+				break;
+			}
+			mutex_exit(&vmp->vm_lock);
+		}
+
+		atomic_inc_64(&spl_root_allocator_waited);
+
+		if (spl_vmem_threads_waiting > 0)
+			atomic_dec_64(&spl_vmem_threads_waiting);
+
+		if (vmem_canalloc_nomutex(spl_large_reserve_arena, size))
+			continue;
+
+		void *q = spl_fill_try_add_covering_span(vmp, size, vmflags);
+
+		if (q != NULL) {
+			atomic_inc_64(&spl_root_allocator_wait_then_allocation);
+			atomic_add_64(&spl_root_allocator_wait_then_allocation_bytes, size);
+			return (q);
+		} 
+
+		atomic_inc_64(&spl_root_allocator_outer_loop);
 	}
 }
 
@@ -2239,7 +2213,6 @@ increment_arc_c_min(uint64_t howmuch)
 
 void vmem_vacuum_free_arena(void);
 
-static uint64_t vmem_add_a_gibibyte_to_spl_root_arena(void);
 static uint64_t vmem_vacuum_spl_root_arena(void);
 
 void
@@ -2300,47 +2273,108 @@ vmem_update(void *dummy)
 /*
  * refill thread: regularly pull in memory, if needed and possible
  */
+static uint64_t vmem_add_memory_to_spl_root_arena(size_t);
+
+static void *
+spl_fill_try_add_covering_span(vmem_t *vmp, size_t min_size, int vmflags)
+{
+	uint64_t covering_size;
+
+	if (min_size <= spl_minalloc)
+		covering_size = spl_minalloc;
+	else if ((min_size & (min_size - 1)) == 0) // is a power-of-two
+		covering_size = min_size;
+	else {
+		// get next largest power-of-two
+		uint64_t r = 0;
+		uint64_t s = min_size;
+		while (s >>= 1)
+			r++;
+		covering_size = 1 << (r+1);
+	}
+
+	if (covering_size > spl_minalloc)  // may be noisy
+		printf("SPL: %s: attempting min_size = %llu covering_size = %llu\n",
+		    __func__, (uint64_t)min_size, covering_size);
+
+	void *p = spl_vmem_malloc_if_no_pressure(covering_size);
+	if (p == NULL) {
+		if (covering_size > spl_minalloc)
+			printf("SPL: %s: failed covering_size = %llu\n",
+			    __func__, covering_size);
+		return (NULL);
+	}
+	return(vmem_add_as_import(vmp, p, covering_size, vmflags));
+}
+
+static void *
+spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(size_t size)
+{
+	return(spl_fill_try_add_covering_span(spl_root_arena, size, VM_SLEEP));
+}
+
 void
 spl_root_refill(void *dummy)
 {
 
 	boolean_t wait = false;
-	const uint64_t onegig = 1024ULL*1024ULL*1024ULL;
 
-	// amount pulled in by previous refills + initial amount allocated in vmem_init +
-	// anything not recycled or released yet
-	uint64_t sys_mem_in_use = spl_root_arena->vm_kstat.vk_mem_import.value.ui64 +
-	    spl_large_reserve_arena->vm_kstat.vk_mem_total.value.ui64 +
-	    free_arena->vm_kstat.vk_mem_import.value.ui64;
+	if (spl_fill_thread_request > 0) {
+		wait = false;
+		if (spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(spl_minalloc)) {
+			atomic_swap_64(&spl_fill_thread_request, 0ULL);
+			wait = true;
+		} else {
+			if(spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(spl_minalloc))
+			wait = false;
+		}
+	}
 
-	uint64_t root_free = (uint64_t)vmem_size(spl_root_arena, VMEM_FREE);
+	if (spl_vmem_threads_waiting > 0) {
+		if (spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(spl_minalloc * spl_vmem_threads_waiting))
+			wait = true;
+		else
+			wait = false;
+	}
+
+
+	uint64_t root_free = vmem_size(spl_root_arena, VMEM_FREE);
+	uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
+
+	uint64_t arena_free = root_free + reserve_free;
 
 	extern uint64_t real_total_memory;
 
-	// grab memory if there are waiting threads
-	// or if we there is lots of free xnu memory and < 1 GiB free in spl_root_arena
-	// or if there is less than 1/8 of real_physmem in spl_root_arena
+	uint64_t target_free = real_total_memory/64;
 
-	const uint32_t high_threshold_pages = (onegig/PAGESIZE) * 95ULL / 100ULL;
-	const uint32_t low_threshold_pages = (onegig/PAGESIZE) * 5ULL / 100ULL;
+	// ensure we have at least SPA_MAXBLOCKSIZE (16 MiB) free
+	uint64_t spamax = 16ULL * 1024ULL * 1024ULL;
 
-	if (spl_vmem_threads_waiting > 0 ||
-	    root_free < onegig ||
-	    sys_mem_in_use < real_total_memory/8ULL) {
-		const uint32_t minalloc = (uint32_t)spl_minalloc;
-
-		uint64_t pages = vmem_add_a_gibibyte_to_spl_root_arena();
-
-		wait = false;
-
-		if (pages == 0) {
-			spl_free_set_emergency_pressure(32LL * (int64_t)minalloc);
-		} else if (pages < low_threshold_pages || spl_vmem_threads_waiting > 0) {
-			spl_free_set_emergency_pressure((int64_t)minalloc);
-		} else if (pages >= high_threshold_pages && spl_vmem_threads_waiting == 0) {
-			wait = true; // don't try again instantly
+	if (arena_free < spamax) {
+		if (vmem_add_memory_to_spl_root_arena(spamax) < spamax) {
+			wait = false;
+		} else {
+			target_free -= spamax;
 		}
 	}
+
+	// amount pulled in by previous refills + initial amount allocated in vmem_init +
+	// anything not recycled or released yet
+	uint64_t sys_mem_in_use = spl_root_arena->vm_kstat.vk_mem_total.value.ui64 +
+	    spl_large_reserve_arena->vm_kstat.vk_mem_total.value.ui64 +
+	    free_arena->vm_kstat.vk_mem_total.value.ui64;
+
+	// if we don't have 1/64 of real_total_memory free, add it
+	// as long as we aren't above 80% of real_total_memory.
+
+	uint64_t high_threshold = real_total_memory * 80ULL / 100ULL;
+
+	if (arena_free < target_free && sys_mem_in_use < high_threshold) {
+		if (vmem_add_memory_to_spl_root_arena(target_free) == target_free) {
+			wait = true;
+		}
+	}
+
 	if (wait)
 		bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval_long);
 	else
@@ -2381,20 +2415,16 @@ static uint64_t vmem_vacuum_spl_root_arena(void);
  * should minalloc be different? dynamic? run-time tunable?
  *
  */
-// RETURNS PAGES
+// RETURNS ***BYTES***
 static uint64_t
-vmem_add_a_gibibyte_to_spl_root_arena(void)
+vmem_add_memory_to_spl_root_arena(size_t size)
 {
-	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
-	const uint64_t pages = (gibibyte/PAGESIZE);
+	const uint64_t gibi = 1024ULL*1024ULL*1024ULL;
 	const uint64_t minalloc = spl_minalloc;
 	const uint64_t pages_per_alloc = minalloc/PAGESIZE;
-	uint64_t allocs = (gibibyte/minalloc);
 
-	extern void *osif_malloc(uint64_t);
-	extern volatile unsigned int vm_page_free_wanted;
-	extern volatile unsigned int vm_page_free_count;
-	extern volatile unsigned int vm_page_free_min;
+	uint64_t alloc_bytes = MIN(size, gibi);
+	uint64_t allocs = alloc_bytes / minalloc;
 
 	// vacuum root if we are fragmented (or have ample free in root)
 	// fragmentation metric: 25% free space
@@ -2410,18 +2440,17 @@ vmem_add_a_gibibyte_to_spl_root_arena(void)
 
 	// in critically low memory, just return anything in free_arena to XNU, as
 	// below we can fight for XNU memory with other non-spl allocators.
-	if (vm_page_free_wanted > 0 || vm_page_free_count <= vm_page_free_min) {
+	if (spl_vmem_critical_space()) {
 		vmem_vacuum_free_arena();
 	}
 
 	uint64_t recovered_bytes = vmem_flush_free_to_root();
-	uint64_t recovered_pages = recovered_bytes / PAGESIZE;
 	uint64_t recovered_minallocs = recovered_bytes / minalloc;
 
 	// if we recovered the full gibibyte, just return
 
-	if (recovered_bytes >= gibibyte) {
-		return (recovered_pages);
+	if (recovered_bytes >= alloc_bytes) {
+		return (recovered_bytes);
 	}
 
 	// if nothing is waiting on memory and we recovered
@@ -2429,7 +2458,7 @@ vmem_add_a_gibibyte_to_spl_root_arena(void)
 
 	if (recovered_minallocs > 0 &&
 	    spl_vmem_threads_waiting == 0) {
-		return(recovered_pages);
+		return(recovered_bytes);
 	}
 
 	rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
@@ -2438,51 +2467,43 @@ vmem_add_a_gibibyte_to_spl_root_arena(void)
 
 	// if we recovered enough space to have 1 GiB free, just return
 
-	if (recovered_minallocs > 0 && recovered_bytes + rfree > gibibyte)
-		return (recovered_pages);
+	if (recovered_minallocs > 0 && recovered_bytes + rfree > alloc_bytes)
+		return (recovered_bytes);
 
 	// if we recovered enough that we have 1/4 of spl_root_arena free, just return
 
 	if (recovered_minallocs > 0 && recovered_bytes + rfree > rtotal / 4)
-		return(recovered_pages);
+		return(recovered_bytes);
 
 	// otherwise, we just deflate the number of allocs we need
 
 	if (recovered_minallocs >= allocs)
-		return(recovered_pages);
+		return(recovered_bytes);
 
 	allocs -= recovered_minallocs;
 
 	// don't grab more memory if we recovered any and are in short supply
 
 	if (recovered_minallocs > 0 &&
-	    (vm_page_free_wanted > 0 || vm_page_free_count < vm_page_free_min + minalloc))
-			    return (recovered_pages);
+	    (!spl_vmem_critical_space() || spl_vmem_xnu_useful_bytes_free() < minalloc))
+		return (recovered_bytes);
 
 	for (uint64_t i = 1; i <= allocs; i++) {
-		void *a = osif_malloc(minalloc);
+		void *a = spl_vmem_malloc_if_no_pressure(minalloc);
 		if (a == NULL) {
-			printf("SPL: WOAH! %s bailing out after only %llu pages for %s.\n",
+			dprintf("SPL: WOAH! %s bailing out after only %llu pages for %s.\n",
 			    __func__, i * pages_per_alloc, spl_root_arena->vm_name);
 			spl_root_arena->vm_kstat.vk_fail.value.ui64++;
-			return ((recovered_minallocs + i)/pages_per_alloc);
+			return (recovered_bytes + i * minalloc);
 		} else {
 		        vmem_add_as_import(spl_root_arena, a, minalloc, VM_NOSLEEP);
 			spl_root_arena->vm_kstat.vk_parent_alloc.value.ui64++;
 		}
-		if (vm_page_free_wanted > 0 || vm_page_free_count < vm_page_free_min + minalloc) {
-			if (recovered_minallocs == 0 && i == 1) {
-				spl_root_arena->vm_kstat.vk_fail.value.ui64++;
-				dprintf("SPL: %s NO MEMORY, bailing out, %s.\n",
-				    __func__, spl_root_arena->vm_name);
-			}
-			return ((recovered_minallocs + i)/pages_per_alloc);
-		}
 		rfree = vmem_size(spl_root_arena, VMEM_FREE);
-		if (rfree > gibibyte + gibibyte/2)
-			return ((recovered_minallocs + i)/pages_per_alloc);
+		if (rfree > gibi)
+			return (recovered_bytes + i * minalloc);
 	}
-	return (pages);
+	return (alloc_bytes);
 }
 
 /*
