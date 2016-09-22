@@ -2256,7 +2256,6 @@ vmem_vacuum_thread(void *dummy)
 	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
 	size_t rused = vmem_size(spl_root_arena, VMEM_ALLOC);
-	extern vmem_t *spl_root_arena;
 	size_t rimported = spl_root_arena->vm_kstat.vk_mem_import.value.ui64;
 
 	if (rfree > rimported / 4)  	// if free > 25% of imported
@@ -2392,9 +2391,9 @@ static uint64_t vmem_vacuum_spl_root_arena(void);
  * should minalloc be different? dynamic? run-time tunable?
  *
  */
-
+// RETURNS PAGES
 static uint64_t
-vmem_add_a_gibibyte_to_spl_root_arena()
+vmem_add_a_gibibyte_to_spl_root_arena(void)
 {
 	const uint64_t gibibyte = 1024ULL*1024ULL*1024ULL;
 	const uint64_t pages = (gibibyte/PAGESIZE);
@@ -2412,8 +2411,9 @@ vmem_add_a_gibibyte_to_spl_root_arena()
 	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
 	size_t rused = vmem_size(spl_root_arena, VMEM_ALLOC);
+	extern uint64_t real_total_memory;
 
-	if (rtotal > (2 * gibibyte) && rfree > (rtotal / 4))
+	if (rtotal > (real_total_memory / 4) && rfree > (rtotal / 4))
 		vmem_vacuum_spl_root_arena();
 	else if (rtotal / 2 > rused)
 		vmem_vacuum_spl_root_arena();
@@ -2424,63 +2424,73 @@ vmem_add_a_gibibyte_to_spl_root_arena()
 		vmem_vacuum_free_arena();
 	}
 
-	uint64_t recovered = vmem_flush_free_to_root();
+	uint64_t recovered_bytes = vmem_flush_free_to_root();
+	uint64_t recovered_pages = recovered_bytes / PAGESIZE;
+	uint64_t recovered_minallocs = recovered_bytes / minalloc;
 
-	// if there is sufficient space, we can return
-	// waiters have been awakened by the cv_broadcast
-	// in vmem_freelist_insert<-vmem_span_create<-vmem_add_as_import
-	// if they have all stopped waiting, then we can return what
-	// was recovered by recycling free_arena memory
+	// if we recovered the full gibibyte, just return
 
-	if (recovered > minalloc &&
-	    spl_vmem_threads_waiting == 0) {
-		return(recovered/PAGESIZE);
+	if (recovered_bytes >= gibibyte) {
+		return (recovered_pages);
 	}
 
-	if (recovered >= gibibyte) {
-		return (recovered/PAGESIZE);
+	// if nothing is waiting on memory and we recovered
+	// anything (but less than the full gibibyte) then just return
+
+	if (recovered_minallocs > 0 &&
+	    spl_vmem_threads_waiting == 0) {
+		return(recovered_pages);
 	}
 
 	rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 	rfree = vmem_size(spl_root_arena, VMEM_FREE);
 	rused = vmem_size(spl_root_arena, VMEM_ALLOC);
 
-	if (recovered > minalloc && // recovered is also < 1GiB
-	    rtotal > (2ULL * gibibyte) &&
-	    (rfree * 100ULL / rtotal) >= 16ULL) {
-		// we will need less memory from XNU
-		uint64_t minallocs_recovered = recovered / minalloc;
-		if (allocs > minallocs_recovered)
-			allocs -= minallocs_recovered; // won't underflow because of previous if->return
-		else {
-			return (recovered / PAGESIZE);
-		}
-	}
+	// if we recovered enough space to have 1 GiB free, just return
 
-	if (recovered > minalloc) {
-		if (vm_page_free_wanted > 0 || vm_page_free_count < (4 * vm_page_free_min))
-			return (recovered/PAGESIZE);
-	}
+	if (recovered_minallocs > 0 && recovered_bytes + rfree > gibibyte)
+		return (recovered_pages);
 
-	for (uint64_t i = 0; i < allocs; i++) {
+	// if we recovered enough that we have 1/4 of spl_root_arena free, just return
+
+	if (recovered_minallocs > 0 && recovered_bytes + rfree > rtotal / 4)
+		return(recovered_pages);
+
+	// otherwise, we just deflate the number of allocs we need
+
+	if (recovered_minallocs >= allocs)
+		return(recovered_pages);
+
+	allocs -= recovered_minallocs;
+
+	// don't grab more memory if we recovered any and are in short supply
+
+	if (recovered_minallocs > 0 &&
+	    (vm_page_free_wanted > 0 || vm_page_free_count < vm_page_free_min + minalloc))
+			    return (recovered_pages);
+
+	for (uint64_t i = 1; i <= allocs; i++) {
 		void *a = osif_malloc(minalloc);
 		if (a == NULL) {
 			printf("SPL: WOAH! %s bailing out after only %llu pages for %s.\n",
 			    __func__, i * pages_per_alloc, spl_root_arena->vm_name);
 			spl_root_arena->vm_kstat.vk_fail.value.ui64++;
-			return (i/pages_per_alloc);
+			return ((recovered_minallocs + i)/pages_per_alloc);
 		} else {
 		        vmem_add_as_import(spl_root_arena, a, minalloc, VM_NOSLEEP);
 			spl_root_arena->vm_kstat.vk_parent_alloc.value.ui64++;
 		}
-		if (vm_page_free_wanted > 0 || vm_page_free_count < (2 * vm_page_free_min)) {
-			if (recovered == 0 && i == 0) {
+		if (vm_page_free_wanted > 0 || vm_page_free_count < vm_page_free_min + minalloc) {
+			if (recovered_minallocs == 0 && i == 1) {
 				spl_root_arena->vm_kstat.vk_fail.value.ui64++;
 				dprintf("SPL: %s NO MEMORY, bailing out, %s.\n",
 				    __func__, spl_root_arena->vm_name);
 			}
-			return (i/pages_per_alloc);
+			return ((recovered_minallocs + i)/pages_per_alloc);
 		}
+		rfree = vmem_size(spl_root_arena, VMEM_FREE);
+		if (rfree > gibibyte + gibibyte/2)
+			return ((recovered_minallocs + i)/pages_per_alloc);
 	}
 	return (pages);
 }
