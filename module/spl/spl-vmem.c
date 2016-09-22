@@ -2263,8 +2263,9 @@ vmem_vacuum_thread(void *dummy)
 	else if (rtotal / 2 > rused)    // if we've used less than half of imported+initial
 		vmem_vacuum_spl_root_arena();
 	else if (vm_page_free_wanted > 0 || vm_page_free_count <= vm_page_free_min) {
-		// if memory is tight
+		// if system memory is tight, also blow free arena away
 		vmem_vacuum_spl_root_arena();
+		vmem_vacuum_free_arena();
 	}
 
 	bsd_timeout(vmem_vacuum_thread, dummy, &vmem_vacuum_thread_interval);
@@ -2306,7 +2307,7 @@ spl_root_refill(void *dummy)
 	boolean_t wait = false;
 	const uint64_t onegig = 1024ULL*1024ULL*1024ULL;
 
-	// amount pulled in by refill + initial amount allocated in vmem_init +
+	// amount pulled in by previous refills + initial amount allocated in vmem_init +
 	// anything not recycled or released yet
 	uint64_t sys_mem_in_use = spl_root_arena->vm_kstat.vk_mem_import.value.ui64 +
 	    spl_large_reserve_arena->vm_kstat.vk_mem_total.value.ui64 +
@@ -2314,41 +2315,30 @@ spl_root_refill(void *dummy)
 
 	uint64_t root_free = (uint64_t)vmem_size(spl_root_arena, VMEM_FREE);
 
-	extern volatile unsigned int vm_page_free_wanted;
-	extern volatile unsigned int vm_page_free_count;
-	extern volatile unsigned int vm_page_speculative_count;
-	extern volatile unsigned int vm_page_free_min;
-
 	extern uint64_t real_total_memory;
 
 	// grab memory if there are waiting threads
 	// or if we there is lots of free xnu memory and < 1 GiB free in spl_root_arena
 	// or if there is less than 1/8 of real_physmem in spl_root_arena
 
-	uint32_t useful_free_pages = vm_page_free_count +
-	    (vm_page_speculative_count/2) - vm_page_free_min;
-
-	const uint32_t lots_free_pages = (onegig/PAGESIZE) + vm_page_free_min;
 	const uint32_t high_threshold_pages = (onegig/PAGESIZE) * 95ULL / 100ULL;
 	const uint32_t low_threshold_pages = (onegig/PAGESIZE) * 5ULL / 100ULL;
 
 	if (spl_vmem_threads_waiting > 0 ||
-	    (root_free < onegig && !vm_page_free_wanted &&
-		    useful_free_pages > lots_free_pages) ||
+	    root_free < onegig ||
 	    sys_mem_in_use < real_total_memory/8ULL) {
 		const uint32_t minalloc = (uint32_t)spl_minalloc;
 
 		uint64_t pages = vmem_add_a_gibibyte_to_spl_root_arena();
 
-		wait = true;
+		wait = false;
 
 		if (pages == 0) {
 			spl_free_set_emergency_pressure(32LL * (int64_t)minalloc);
-		} else if (pages < low_threshold_pages) {
+		} else if (pages < low_threshold_pages || spl_vmem_threads_waiting > 0) {
 			spl_free_set_emergency_pressure((int64_t)minalloc);
-		} else if (pages >= high_threshold_pages) {
-			// we can inflate rapidly
-			wait = false;
+		} else if (pages >= high_threshold_pages && spl_vmem_threads_waiting == 0) {
+			wait = true; // don't try again instantly
 		}
 	}
 	if (wait)
@@ -2406,7 +2396,7 @@ vmem_add_a_gibibyte_to_spl_root_arena(void)
 	extern volatile unsigned int vm_page_free_count;
 	extern volatile unsigned int vm_page_free_min;
 
-	// vacuum if we are fragmented (or have ample free in root)
+	// vacuum root if we are fragmented (or have ample free in root)
 	// fragmentation metric: 25% free space
 	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
@@ -2899,7 +2889,7 @@ vmem_vacuum_spl_root_arena()
 
 	mutex_enter(&spl_root_arena->vm_lock);
 
-	spl_root_arena->vm_source_free = spl_segkmem_free_if_not_big;
+	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
 
 	mutex_exit(&spl_root_arena->vm_lock);
 
