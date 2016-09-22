@@ -2239,12 +2239,35 @@ increment_arc_c_min(uint64_t howmuch)
 
 void vmem_vacuum_free_arena(void);
 
-static uint64_t vmem_add_a_gibibyte_to_spl_root_arena();
+static uint64_t vmem_add_a_gibibyte_to_spl_root_arena(void);
+static uint64_t vmem_vacuum_spl_root_arena(void);
 
 void
 vmem_vacuum_thread(void *dummy)
 {
 	vmem_vacuum_free_arena();
+
+	extern volatile unsigned int vm_page_free_wanted;
+	extern volatile unsigned int vm_page_free_count;
+	extern volatile unsigned int vm_page_free_min;
+
+	// vacuum if we are fragmented (or have ample free in root)
+	// fragmentation metric: 25% free space
+	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
+	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
+	size_t rused = vmem_size(spl_root_arena, VMEM_ALLOC);
+	extern vmem_t *spl_root_arena;
+	size_t rimported = spl_root_arena->vm_kstat.vk_mem_import.value.ui64;
+
+	if (rfree > rimported / 4)  	// if free > 25% of imported
+		vmem_vacuum_spl_root_arena();
+	else if (rtotal / 2 > rused)    // if we've used less than half of imported+initial
+		vmem_vacuum_spl_root_arena();
+	else if (vm_page_free_wanted > 0 || vm_page_free_count <= vm_page_free_min) {
+		// if memory is tight
+		vmem_vacuum_spl_root_arena();
+	}
+
 	bsd_timeout(vmem_vacuum_thread, dummy, &vmem_vacuum_thread_interval);
 }
 
@@ -2348,7 +2371,7 @@ vmem_qcache_reap(vmem_t *vmp)
 			kmem_cache_reap_now(vmp->vm_qcache[i]);
 }
 
-static uint64_t vmem_vacuum_spl_root_arena();
+static uint64_t vmem_vacuum_spl_root_arena(void);
 
 /*
  * vmem_add_a_gibibyte_to_spl_root_arena()
