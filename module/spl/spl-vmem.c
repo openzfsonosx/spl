@@ -1237,13 +1237,17 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		atomic_add_64(&spl_fill_thread_request, size); // async signal fill thread
 
 		uint64_t timenow = zfs_lbolt();
-		const uint64_t half_second =  (uint64_t)hz / 2ULL;
-		uint64_t expire_after = timenow + half_second;
+		const hrtime_t quarter_second =  MSEC2NSEC(250);
+		const hrtime_t resolution = MSEC2NSEC(1);
+		const uint64_t two_second = 2*hz;
+		uint64_t expire_after = timenow + two_second;
 
+		// sleep for 250 ms for up to 8 times
 		for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
 			mutex_enter(&vmp->vm_lock);
 			atomic_inc_64(&spl_root_allocator_cv_timedwaits);
-			(void) cv_timedwait(&vmp->vm_cv, &vmp->vm_lock, expire_after);
+			(void) cv_timedwait_hires(&vmp->vm_cv, &vmp->vm_lock,
+			    expire_after, resolution, 0);
 			// we hold the mutex after cv_timedwait
 			if (vmem_canalloc(vmp, size)) {
 				if (spl_vmem_threads_waiting > 0)
