@@ -4216,31 +4216,40 @@ spl_free_thread()
 		// start with actual pages free plus half of speculative pages
 		// but if we are paging, start with -number_of_pages
 
-		spl_free = (int64_t)PAGESIZE *
-		    (int64_t)(vm_page_free_count + (vm_page_speculative_count/2) - vm_page_free_min);
+		spl_free = 0;
 
 		if (vm_page_free_wanted > 0) {
-			spl_free = -(int64_t)(vm_page_free_wanted * PAGESIZE) * 10LL;
+			spl_free = -(int64_t)(vm_page_free_wanted * PAGESIZE);
 			lowmem = true;
-			if (vm_page_free_count <= vm_page_free_min)
+			emergency_lowmem = true;
+		}
+
+		if (!emergency_lowmem) {
+			int64_t above_min_free =
+			    (int64_t)PAGESIZE * (int64_t)(vm_page_free_count - vm_page_free_min);
+			if (above_min_free < 16LL*1024LL*1024LL)
+				lowmem = true;
+			if (above_min_free < 0LL)
 				emergency_lowmem = true;
+			spl_free = above_min_free;
+		}
+
+		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
+			spl_free += (int64_t)(vm_page_speculative_count * PAGESIZE)/2;
 		}
 
 		base = spl_free;
 
-		// adjustment in low-memory conditions
-		// (here are tunables)
-		// by default this is (8 * free_min) vs (free + spec)
-		if ((vm_page_free_count + vm_page_speculative_count) < VM_PAGE_FREE_MIN) {
-			spl_free -= (int64_t)PAGESIZE *
-			    (int64_t)(VM_PAGE_FREE_MIN -
-				(vm_page_free_count + vm_page_speculative_count));
-			spl_free += (int64_t)PAGESIZE * (int64_t)(vm_page_speculative_count/2);
+		// if there are vmem waiters, signal need for a little space (use spl_minalloc?)
+		extern volatile uint64_t spl_vmem_threads_waiting;
+		if (spl_vmem_threads_waiting > 0) {
+			spl_free = -1LL * MAX(spl_vmem_threads_waiting, 1LL) * (1024LL * 1024LL);
+			emergency_lowmem = true;
 			lowmem = true;
 		}
 
                 // adjust for available memory in free_arena
-		if (!emergency_lowmem) {
+		if (!emergency_lowmem && !lowmem) {
 			extern size_t spl_free_arena_size(void);
 			uint64_t f = spl_free_arena_size();
 			if (f > 0)
@@ -4249,13 +4258,15 @@ spl_free_thread()
 
 		// adjust for available memory in spl_root_arena
 		// cf arc_available_memory()
-		if (!emergency_lowmem) {
+		if (!emergency_lowmem && !lowmem) {
 			extern vmem_t *spl_root_arena;
-			size_t root_total = spl_vmem_size(spl_root_arena, VMEM_FREE | VMEM_ALLOC);
-			size_t root_sixteenth_total = root_total/16;
+			extern vmem_t *spl_large_reserve_arena;
+			int64_t root_total = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE | VMEM_ALLOC);
+			int64_t root_sixteenth_total = root_total/16;
 			extern size_t spl_free_arena_size(void);
-			size_t root_free = spl_vmem_size(spl_root_arena, VMEM_FREE) +
-			    spl_free_arena_size();
+			int64_t root_free = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE) +
+			    (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE) +
+			    (int64_t)spl_free_arena_size();
 
 			if (root_free > root_sixteenth_total) {
 				spl_free += root_free / 2;
@@ -4265,43 +4276,19 @@ spl_free_thread()
 			}
 		}
 
-		// if there are vmem waiters, signal need for a little space (use spl_minalloc?)
-		extern volatile uint64_t spl_vmem_threads_waiting;
-		if (spl_vmem_threads_waiting > 0) {
-			spl_free = -1LL * MAX(spl_vmem_threads_waiting, 1LL) * (1024LL * 1024LL);
-			emergency_lowmem = true;
-		}
-
 		// when in lowmem, limit growth (especially do not encourage arc_no_grow to go false)
-		if (lowmem && spl_free > 32ULL * 1024ULL * 1024ULL)
-			spl_free = 32ULL * 1024ULL * 1024ULL; // 2 * SPA_MAXBLOCKSIZE
+		if (!emergency_lowmem && lowmem && spl_free > 16LL * 1024LL * 1024LL)
+			spl_free = 16LL * 1024LL * 1024LL; // SPA_MAXBLOCKSIZE
 
-		// when in emergency lowmem, do not allow spl_free  to be more than 128k
-		// it does not have to be negative, because we vmem size to deflate
-		if (emergency_lowmem && spl_free > 128ULL * 1024ULL)
-			spl_free = 128ULL * 1024ULL;
+		// when in emergency lowmem, do not allow spl_free to be positive
+		if (emergency_lowmem && spl_free >= 0LL)
+			spl_free = -1LL;
 
 		double delta = spl_free - base;
 
 		mutex_exit(&spl_free_lock);
 
-		if (emergency_lowmem) {
-			// shove pressure into arc_reclaim_thread, rather than waiting for eventual
-			// reaction to a negative spl_free.
-
-			// here cf. arc_shrink_shift == 7
-			// but vmem_dynamic can be low (even 0) on very small memory machines
-			// and larger than 1/2^7 of the arc on very large memory machines
-			// so also cf. SPA_MAXSIZE (16 MiB)
-
-			extern vmem_t *spl_root_arena;
-			int64_t vmem_dynamic = (int64_t)spl_root_arena->vm_kstat.vk_mem_import.value.ui64;
-			int64_t minimum_pressure = 16LL * 1024LL * 1024LL;
-			int64_t actual_pressure = MAX(vmem_dynamic / 128LL, minimum_pressure);
-			spl_free_set_emergency_pressure(actual_pressure);
-		}
-
-		if (spl_free < 0)
+		if (spl_free < 0LL)
 			spl_stats.spl_spl_free_negative_count.value.ui64++;
 
 		// maintain an exponential moving average for the ema kstat
@@ -4309,7 +4296,7 @@ spl_free_thread()
 			alpha = 1.0;
 		else {
 			double td_tick  = zfs_lbolt() - last_update;
-			alpha = td_tick / (hz*100);
+			alpha = td_tick / (double)(hz*100.0); // roughly 0.1
 		}
 
 		ema_new = (alpha * (double)delta) + (1.0 - alpha)*ema_old;
@@ -4318,7 +4305,7 @@ spl_free_thread()
 
 		mutex_enter(&spl_free_thread_lock);
 		CALLB_CPR_SAFE_BEGIN(&cpr);
-		(void) cv_timedwait(&spl_free_thread_cv, &spl_free_thread_lock, ddi_get_lbolt() + (hz/100));
+		(void) cv_timedwait(&spl_free_thread_cv, &spl_free_thread_lock, ddi_get_lbolt() + (hz/10));
 		CALLB_CPR_SAFE_END(&cpr, &spl_free_thread_lock);
 	}
 	spl_free_thread_exit = FALSE;

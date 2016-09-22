@@ -334,7 +334,7 @@ vmem_t *spl_root_arena; // The bottom-most arena for SPL
 static vmem_t *spl_root_arena_parent;
 static void *spl_root_initial_reserve_import;
 static  uint64_t spl_root_initial_reserve_import_size;
-static vmem_t *spl_large_reserve_arena;
+vmem_t *spl_large_reserve_arena;
 static void *spl_large_reserve_initial_allocation;
 static size_t spl_large_reserve_initial_allocation_size;
 #define NUMBER_OF_ARENAS_IN_VMEM_INIT 10
