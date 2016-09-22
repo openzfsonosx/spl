@@ -1070,9 +1070,11 @@ static inline int
 vmem_canalloc_nomutex(vmem_t *vmp, size_t size)
 {
 	ASSERT(!MUTEX_HELD(&vmp->vm_lock));
+	mutex_enter(&vmem_flush_free_lock);
 	mutex_enter(&vmp->vm_lock);
 	int r = vmem_canalloc(vmp, size);
 	mutex_exit(&vmp->vm_lock);
+	mutex_exit(&vmem_flush_free_lock);
 	return (r);
 }
 
@@ -1242,12 +1244,12 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		const uint64_t two_second = 2*hz;
 		uint64_t expire_after = timenow + two_second;
 
-		// sleep for 250 ms for up to 8 times
+		// sleep for 250 ms for up to 8 times if no cv_{signal,broadcast}
 		for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
 			mutex_enter(&vmp->vm_lock);
 			atomic_inc_64(&spl_root_allocator_cv_timedwaits);
 			(void) cv_timedwait_hires(&vmp->vm_cv, &vmp->vm_lock,
-			    expire_after, resolution, 0);
+			    quarter_second, resolution, 0);
 			// we hold the mutex after cv_timedwait
 			if (vmem_canalloc(vmp, size)) {
 				if (spl_vmem_threads_waiting > 0)
@@ -2278,10 +2280,12 @@ vmem_update(void *dummy)
  * refill thread: regularly pull in memory, if needed and possible
  */
 static uint64_t vmem_add_memory_to_spl_root_arena(size_t);
+static void spl_root_arena_free_to_free_arena(vmem_t *, void *, size_t);
 
 static void *
 spl_fill_try_add_covering_span(vmem_t *vmp, size_t min_size, int vmflags)
 {
+
 	uint64_t covering_size;
 
 	if (min_size <= spl_minalloc)
@@ -2301,14 +2305,24 @@ spl_fill_try_add_covering_span(vmem_t *vmp, size_t min_size, int vmflags)
 		printf("SPL: %s: attempting min_size = %llu covering_size = %llu\n",
 		    __func__, (uint64_t)min_size, covering_size);
 
+	mutex_enter(&vmem_flush_free_lock);
+	if (vmp == spl_root_arena &&
+	    vmp->vm_source_free != spl_root_arena_free_to_free_arena) {
+		mutex_exit(&vmem_flush_free_lock);
+		return (NULL);
+	}
 	void *p = spl_vmem_malloc_if_no_pressure(covering_size);
 	if (p == NULL) {
 		if (covering_size > spl_minalloc)
 			printf("SPL: %s: failed covering_size = %llu\n",
 			    __func__, covering_size);
+		mutex_exit(&vmem_flush_free_lock);
 		return (NULL);
 	}
-	return(vmem_add_as_import(vmp, p, covering_size, vmflags));
+
+	void *vaddr = vmem_add_as_import(vmp, p, covering_size, vmflags);
+	mutex_exit(&vmem_flush_free_lock);
+	return(vaddr);
 }
 
 static void *
@@ -2500,7 +2514,9 @@ vmem_add_memory_to_spl_root_arena(size_t size)
 			spl_root_arena->vm_kstat.vk_fail.value.ui64++;
 			return (recovered_bytes + i * minalloc);
 		} else {
+			mutex_enter(&vmem_flush_free_lock);
 		        vmem_add_as_import(spl_root_arena, a, minalloc, VM_NOSLEEP);
+			mutex_exit(&vmem_flush_free_lock);
 			spl_root_arena->vm_kstat.vk_parent_alloc.value.ui64++;
 		}
 		rfree = vmem_size(spl_root_arena, VMEM_FREE);
@@ -2526,6 +2542,7 @@ spl_segkmem_free_if_not_big(vmem_t *vmp, void *inaddr, size_t size)
 	} else {
 		extern void segkmem_free(vmem_t *, void *, size_t);
 		segkmem_free(vmp, inaddr, size);
+		cv_broadcast(&vmp->vm_cv);
 	}
 }
 
@@ -2647,7 +2664,7 @@ vmem_init(const char *heap_name,
 	extern void segkmem_free(vmem_t *, void *, size_t);
 	free_arena = vmem_create("free_arena", // id 3
 	    NULL, 0,
-	    PAGESIZE, NULL, segkmem_free, NULL, 0, VM_SLEEP);
+	    PAGESIZE, NULL, spl_segkmem_free_if_not_big, NULL, 0, VM_SLEEP);
 
 #else
 	spl_large_reserve_arena = vmem_create("spl_large_reserve_arena", // id 1 (userland)
@@ -2814,11 +2831,9 @@ vmem_vacuum_free_arena(void)
 
 	mutex_enter(&vmem_flush_free_lock);
 
-	extern void segkmem_free(vmem_t *, void *, size_t);
-
-	if (free_arena->vm_source_free != segkmem_free) {
+	if (free_arena->vm_source_free != spl_segkmem_free_if_not_big) {
 		printf("SPL: %s ERROR: free_arena->vm_source_free should be %p, is %p\n",
-		    __func__, segkmem_free, free_arena->vm_source_free);
+		    __func__, spl_segkmem_free_if_not_big, free_arena->vm_source_free);
 		mutex_exit(&vmem_flush_free_lock);
 		return;
 	}
@@ -2874,8 +2889,7 @@ vmem_flush_free_to_root()
 	mutex_enter(&free_arena->vm_lock);
 	mutex_enter(&spl_root_arena->vm_lock);
 
-	extern void segkmem_free(vmem_t *, void *, size_t);
-	free_arena->vm_source_free = segkmem_free;
+	free_arena->vm_source_free = NULL;
 
 	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
 
