@@ -1216,7 +1216,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 			uint64_t timenow = zfs_lbolt();
 			const uint64_t five_seconds = 5ULL * (uint64_t)hz;
 			const uint64_t half_second = 5ULL * (uint64_t)hz;
-			const uint64_t sixty_seconds = 60ULL * (uint64_t)hz;
+			const uint64_t twenty_seconds = 20ULL * (uint64_t)hz;
 			uint64_t expire_after = timenow;
 
 			if (pass == 1 && size > minalloc)
@@ -1224,7 +1224,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 			else if (size > minalloc)
 				expire_after += five_seconds;
 			else
-				expire_after += sixty_seconds; // lots of time for the refill and vacuum threads
+				expire_after += twenty_seconds; // lots of time for the refill and vacuum threads
 
 			for (uint64_t t = timenow; t < expire_after; t = zfs_lbolt()) {
 				mutex_enter(&vmp->vm_lock);
