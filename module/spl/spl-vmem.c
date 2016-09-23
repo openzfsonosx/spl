@@ -2313,7 +2313,7 @@ spl_fill_try_add_covering_span(vmem_t *vmp, size_t min_size, int vmflags)
 	}
 
 	if (covering_size > spl_minalloc)  // may be noisy
-		printf("SPL: %s: attempting min_size = %llu covering_size = %llu\n",
+		dprintf("SPL: %s: attempting min_size = %llu covering_size = %llu\n",
 		    __func__, (uint64_t)min_size, covering_size);
 
 	void *p = spl_vmem_malloc_if_no_pressure(covering_size);
