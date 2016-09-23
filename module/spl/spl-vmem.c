@@ -1172,6 +1172,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 	atomic_inc_64(&spl_root_allocator_calls);
 
 	uint32_t pass = 0;
+	boolean_t success_with_covering = false;
 
 	if (size > spl_minalloc)
 		atomic_add_64(&spl_root_allocator_large_bytes_asked, size);
@@ -1193,7 +1194,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
 		else if (pass == 1 && size > 1024ULL*1024ULL)
 			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
-		else if (pass >= 2)
+		else if (pass >= 2 && !success_with_covering)
 			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT | VM_BESTFIT);
 
 		if (p != NULL) {
@@ -1275,6 +1276,8 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 			mutex_exit(&vmp->vm_lock);
 		}
 
+		success_with_covering = false;
+
 		atomic_inc_64(&spl_root_allocator_waited);
 
 		if (spl_vmem_threads_waiting > 0)
@@ -1286,6 +1289,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		void *q = spl_fill_try_add_covering_span(vmp, size, vmflags);
 
 		if (q != NULL) {
+			success_with_covering = true;
 			atomic_inc_64(&spl_root_allocator_wait_then_allocation);
 			atomic_add_64(&spl_root_allocator_wait_then_allocation_bytes, size);
 		}  else if (pass < 2 || spl_fill_thread_request == 0) {
