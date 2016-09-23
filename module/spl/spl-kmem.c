@@ -4222,6 +4222,8 @@ spl_free_thread()
 			spl_free = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -2LL;
 			lowmem = true;
 			emergency_lowmem = true;
+			spl_free_fast_pressure = TRUE;
+			spl_free_manual_pressure = -spl_free;
 		}
 
 		if (!emergency_lowmem) {
