@@ -1194,7 +1194,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		else if (pass == 1 && size > 1024ULL*1024ULL)
 			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
 		else if (pass >= 2)
-			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
+			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT | VM_BESTFIT);
 
 		if (p != NULL) {
 			if (size > spl_minalloc) { // minalloc
@@ -2355,13 +2355,18 @@ spl_root_refill(void *dummy)
 			ok_to_fill = true;
 		} else if (request_failures > 20) {
 			uint64_t s = spl_fill_thread_request;
-			printf("SPL: %s: desperate times, %u failures so force allocating %llu from xnu! WOAH!\n",
-			    __func__, request_failures, s);
-			extern void *osif_malloc(uint64_t);
-			void *p = osif_malloc(s);
+			void *p = vmem_alloc(spl_large_reserve_arena, s, VM_NOSLEEP | VM_ABORT | VM_BESTFIT);
 			if (p == NULL) {
-				printf("SPL: %s: AIEEEEEEEEEEEEEE, allocation of %llu failed\n",
+				printf("SPL: %s: desperate,  %u failures so force allocating %llu from xnu! WOAH!\n",
+				    __func__, request_failures, s);
+				p = spl_vmem_malloc_unconditionally(s);
+			} else {
+				printf("SPL: %s: took %llu from large reserve arena\n",
 				    __func__, s);
+			}
+			if (p == NULL) {
+				printf("SPL: %s: AIEEEEEEEEEEEEEE, allocation of %llu failed, req %u\n",
+				    __func__, s, request_failures);
 				wait = true;
 				ok_to_fill = false;
 				attempt++;
