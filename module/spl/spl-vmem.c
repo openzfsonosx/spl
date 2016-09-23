@@ -1206,7 +1206,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 			} else {
 				atomic_inc_64(&spl_root_allocator_minalloc_reserve);
 			}
-			if (pass == 0)
+			if (pass == 1)
 				atomic_inc_64(&spl_root_allocator_short_circuit);
 			atomic_add_64(&spl_root_allocator_reserve_bytes, size);
 			return(p);
@@ -2358,26 +2358,55 @@ spl_root_refill(void *dummy)
 			previous = 0;
 			wait = true;
 			ok_to_fill = true;
-		} else if (request_failures > 20) {
+		} else if (request_failures > 20 ||
+		    (request_failures > 5 && spl_fill_thread_request > spl_minalloc)) {
+			// We've waited approximately 0.5 seconds for a large block to be
+			// available by activity elsewhere (e.g. frees), or 2 seconds
+			// for a small block (since those are more likely to be freed).
+			// Try more aggressively to use the large reserve arena for large
+			// blocks.
 			uint64_t s = spl_fill_thread_request;
 			void *p = vmem_alloc(spl_large_reserve_arena, s, VM_NOSLEEP | VM_ABORT | VM_BESTFIT);
-			if (p == NULL) {
-				printf("SPL: %s: desperate,  %u failures so force allocating %llu from xnu! WOAH!\n",
+			if (p == NULL && request_failures > 20) {
+				// This is not a lovely situation; we really need the memory,
+				// but have to trust that XNU can give it to us without OOM
+				// or panic, otherwise we can hang our whole zfs subsystem.
+				// We ask XNU for the exact amount and add it as a span;
+				// hopefully it is either short-lived, but as it is ALWAYS
+				// a multiple of PAGESIZE, it should segment well onto freelists.
+				// Moreover, it's rare, and so far has always been a multiple
+				// of 524288, which means the span size is actually useful, even if
+				// it hangs around for a long time.
+				// Finally, the WOAH messages have so far always been a multiple of
+				// 131072, so again, it's a useful span size, even if it's larger
+				// than what we really want.
+				// "Useful" here means in particular that it is ultimately
+				// work-reducing for the XNU allocator, provided it is not immediately
+				// flushed out (freed into free_arena and then vacuumed out rather
+				// than recycled).
+				printf("SPL: %s: "
+				    "desperate, %u failures so force allocating %llu from xnu! WOAH!\n",
 				    __func__, request_failures, s);
 				p = spl_vmem_malloc_unconditionally(s);
+				// should kstat this
 			} else {
-				printf("SPL: %s: took %llu from large reserve arena\n",
-				    __func__, s);
+				printf("SPL: %s: took %llu from large reserve arena after %u tries\n",
+				    __func__, s, request_failures);
+				// should kstat this
+				// This is perfectly reasonable, it's what the large reserve arena is for!
 			}
 			if (p == NULL) {
-				printf("SPL: %s: AIEEEEEEEEEEEEEE, allocation of %llu failed, req %u\n",
+				if (request_failures > 20)
+					printf("SPL: %s: AIEEEEEEEEEE, allocation of %llu failed, req %u\n",
 				    __func__, s, request_failures);
+				// should kstat this
 				wait = true;
 				ok_to_fill = false;
 				attempt++;
 				request_failures++;
 				previous = s;
 			} else {
+				// should kstat this
 				vmem_add_as_import(spl_root_arena, p, s, VM_NOSLEEP);
 				atomic_swap_64(&spl_fill_thread_request, 0ULL);
 				attempt = 0;
@@ -2386,15 +2415,19 @@ spl_root_refill(void *dummy)
 				ok_to_fill = false;
 				request_failures = 0;
 			}
-		} else { // request_failures <= 20
+		} else { // request_failures <= 20 (or <= 5 for a large block)
 		        ok_to_fill = false; // let memory drain a little
 			wait = false;
 			attempt++;
 			request_failures++;
 			if (previous != 0 && previous == spl_fill_thread_request) {
-				if (attempt > 5) {
-					printf("SPL: %s: WOAH! %u requests for %llu without success!\n",
+				if (attempt > 18 ||
+				    (previous > spl_minalloc && attempt > 3)) {
+					// do a printf if we are about to try allocating
+					// rather than continuing to wait
+					printf("SPL: %s: %u requests for %llu without success\n",
 					    __func__, attempt, previous);
+					// also attempt to shrink arc
 					spl_free_set_emergency_pressure(previous);
 				}
 			} else {
