@@ -2636,8 +2636,16 @@ vmem_init(const char *heap_name,
 
 	const uint64_t half_gibibyte = 512LL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
-	spl_large_reserve_initial_allocation_size =
-	    MAX(real_total_memory / 64, half_gibibyte);
+	if (real_total_memory <= 15ULL*1024LL*1024ULL*1024ULL) {
+		spl_large_reserve_initial_allocation_size =
+		    MAX(real_total_memory / 16, half_gibibyte);
+	} else {
+		spl_large_reserve_initial_allocation_size =
+		    MAX(real_total_memory / 64, 2ULL * half_gibibyte);
+		// nb: xnu forbids single allocations > 2 GiB in vm_kern.c.
+		if (spl_large_reserve_initial_allocation_size > 4ULL * half_gibibyte)
+			spl_large_reserve_initial_allocation_size = 4ULL * half_gibibyte;
+	}
 
 	printf("SPL: %s: doing initial large allocation of %llu bytes\n",
 	    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
