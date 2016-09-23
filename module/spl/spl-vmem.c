@@ -337,8 +337,7 @@ static  uint64_t spl_root_initial_reserve_import_size;
 vmem_t *spl_large_reserve_arena;
 static void *spl_large_reserve_initial_allocation;
 static size_t spl_large_reserve_initial_allocation_size;
-#define NUMBER_OF_ARENAS_IN_VMEM_INIT 10
-static vmem_t *heap_parent;
+#define NUMBER_OF_ARENAS_IN_VMEM_INIT 9
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
 static struct timespec  spl_root_refill_interval_long = {0, MSEC2NSEC(100)};
@@ -2654,22 +2653,44 @@ vmem_init(const char *heap_name,
 	while (--nseg >= 0)
 		vmem_putseg_global(&vmem_seg0[nseg]);
 	
-	//	printf("SPL: vmem_init-a: npop=%u\n", vmem_populators);
-	
 	/*
 	 * On OSX we ultimately have to use the OS allocator
-	 * as the source and sink of memory as it is allocated
+	 * as the ource and sink of memory as it is allocated
 	 * and freed.
 	 *
-	 * By adding the heap_parent arena that acts as a source
-	 * for the actual heap, the heap accumulates allocations
-	 * and statistics just as it would on Illumos, while
-	 * using the heap_parent as a "source". The heap parent
-	 * arena never internally allocates memory as
-	 * heap_alloc (segkmem_alloc) and heap_free (segkmem_free)
-	 * go direct to the OS.
+	 * The spl_root_arena_parent is needed in order to provide a
+	 * base arena with an always-NULL afunc and ffunc in order to
+	 * end the searches done by vmem_[x]alloc and vm_xfree; it
+	 * serves no other purpose; its stats will always be zero.
+	 *
+	 * The spl_large_reserve_arena takes an initial large allocation
+	 * from xnu's allocator at create time; it's scaled to the
+	 * system's physical memory, and provides a source for
+	 * allocations in the face of system memory pressure so as to
+	 * avoid waiting for xnu's allocator to gather up enough memory,
+	 * and to avoid contributing to memory pressure.  The initial
+	 * allocation from xnu's perspective remains as-is until module
+	 * unload.
+	 *
+	 * spl_root_arena serves as the vmem source for all other
+	 * arenas; it will be populated by memory in four ways: [1] an
+	 * initial small allocation for initializing its internal data
+	 * structures, since it cannot import from anywhere directly --
+	 * this memory is manually acquired from the reserve arena by a
+	 * vmem_alloc; [2] population by the spl_root_refill thread that
+	 * adds segments as imports; those segments come from [2a] XNU's
+	 * allocator proactively or in response to a shortfall in
+	 * already-added memory, or [2b] from the reserve arena; or [3]
+	 * from "recycling" memory previously freed.
+	 *
+	 * When frees from spl_root_arena's child arenas empty a span,
+	 * the span will be released to free_arena.  free_arena is
+	 * periodically either "recycled" back into spl_root_arena, so
+	 * that the latter can avoid going to XNU's allocator.  If there
+	 * is no demand or if there is pressure, free_arena is
+	 * "vacuumed", and gives back its accumulated spans to XNU.
+	 *
 	 */
-
 
 	spl_root_arena_parent = vmem_create("spl_root_arena_parent",  // id 0
 	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP);
@@ -2744,41 +2765,35 @@ vmem_init(const char *heap_name,
 	    NULL, 0, heap_quantum, NULL, NULL, 0, VM_SLEEP);
 #endif
 
-	heap_parent = vmem_create("heap_parent",  // id 4
-							  NULL, 0, heap_quantum,
-							  vmem_alloc, vmem_free, spl_root_arena, 0,
-							  VM_SLEEP);
-	
-	heap = vmem_create(heap_name,  // id 5
+	heap = vmem_create(heap_name,  // id 4
 					   NULL, 0, heap_quantum,
-					   vmem_alloc, vmem_free, heap_parent, 0,
+					   vmem_alloc, vmem_free, spl_root_arena, 0,
 					   VM_SLEEP);
 	
+	// Root all the low bandwidth metadata arenas off the reserve arena.
+	// The allocations will all be 32 kiB or larger, and are only on the
+	// order of 24 MiB.
+
+	vmem_metadata_arena = vmem_create("vmem_metadata", // id 5
+	    NULL, 0, heap_quantum, vmem_alloc, vmem_free, spl_large_reserve_arena,
+	    8 * PAGESIZE, VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
 	
-	// Root all the low bandwidth metadata arenas off heap_parent,
-	// which is essentially the OS heap. This may give us some
-	// chance of cleaning up in an orderly manner.
-	vmem_metadata_arena = vmem_create("vmem_metadata", // id 6
-									  NULL, 0, heap_quantum,
-									  vmem_alloc, vmem_free, heap_parent, 8 * PAGESIZE,
-									  VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
-	
-	vmem_seg_arena = vmem_create("vmem_seg", // id 7
+	vmem_seg_arena = vmem_create("vmem_seg", // id 6
 								 NULL, 0, heap_quantum,
 								 vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								 VM_SLEEP | VMC_POPULATOR);
 	
-	vmem_hash_arena = vmem_create("vmem_hash", // id 8
+	vmem_hash_arena = vmem_create("vmem_hash", // id 7
 								  NULL, 0, 8,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 	
-	vmem_vmem_arena = vmem_create("vmem_vmem", // id 9
+	vmem_vmem_arena = vmem_create("vmem_vmem", // id 8
 								  vmem0, sizeof (vmem0), 1,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
 	
-	// 10 (0-based) vmem_create before this line. - macroized NUMBER_OF_ARENAS_IN_VMEM_INIT
+	// 9 (0-based) vmem_create before this line. - macroized NUMBER_OF_ARENAS_IN_VMEM_INIT
 	for (id = 0; id < vmem_id; id++) {
 		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
 										   1, 0, 0, &vmem0[id], &vmem0[id + 1],
@@ -2838,9 +2853,6 @@ vmem_fini(vmem_t *heap)
 	vmem_walk(heap, VMEM_ALLOC,
 			  vmem_fini_freelist, heap);
 	
-	vmem_walk(heap_parent, VMEM_ALLOC,
-			  vmem_fini_freelist, heap_parent);
-
 	vmem_walk(spl_root_arena, VMEM_ALLOC,
 	    vmem_fini_freelist, spl_root_arena);
 
