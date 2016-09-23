@@ -2305,23 +2305,15 @@ spl_fill_try_add_covering_span(vmem_t *vmp, size_t min_size, int vmflags)
 		printf("SPL: %s: attempting min_size = %llu covering_size = %llu\n",
 		    __func__, (uint64_t)min_size, covering_size);
 
-	mutex_enter(&vmem_flush_free_lock);
-	if (vmp == spl_root_arena &&
-	    vmp->vm_source_free != spl_root_arena_free_to_free_arena) {
-		mutex_exit(&vmem_flush_free_lock);
-		return (NULL);
-	}
 	void *p = spl_vmem_malloc_if_no_pressure(covering_size);
 	if (p == NULL) {
 		if (covering_size > spl_minalloc)
 			printf("SPL: %s: failed covering_size = %llu\n",
 			    __func__, covering_size);
-		mutex_exit(&vmem_flush_free_lock);
 		return (NULL);
 	}
 
 	void *vaddr = vmem_add_as_import(vmp, p, covering_size, vmflags);
-	mutex_exit(&vmem_flush_free_lock);
 	return(vaddr);
 }
 
