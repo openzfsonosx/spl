@@ -2661,10 +2661,9 @@ vmem_init(const char *heap_name,
 
 	printf("SPL: %s created spl_root_arena.\n", __func__);
 
-	extern void segkmem_free(vmem_t *, void *, size_t);
 	free_arena = vmem_create("free_arena", // id 3
 	    NULL, 0,
-	    PAGESIZE, NULL, spl_segkmem_free_if_not_big, NULL, 0, VM_SLEEP);
+	    PAGESIZE, NULL, NULL, NULL, 0, VM_SLEEP);
 
 #else
 	spl_large_reserve_arena = vmem_create("spl_large_reserve_arena", // id 1 (userland)
@@ -2830,15 +2829,21 @@ vmem_vacuum_free_arena(void)
 		return;
 
 	mutex_enter(&vmem_flush_free_lock);
+	mutex_enter(&free_arena->vm_lock);
 
-	if (free_arena->vm_source_free != spl_segkmem_free_if_not_big) {
-		printf("SPL: %s ERROR: free_arena->vm_source_free should be %p, is %p\n",
-		    __func__, spl_segkmem_free_if_not_big, free_arena->vm_source_free);
+	if (free_arena->vm_source_free != NULL) {
+		printf("SPL: %s ERROR: free_arena->vm_source_free should be NULL, is %p\n",
+		    __func__, free_arena->vm_source_free);
+		mutex_exit(&free_arena->vm_lock);
 		mutex_exit(&vmem_flush_free_lock);
 		return;
 	}
 
+	free_arena->vm_source_free = spl_segkmem_free_if_not_big;
+
+	mutex_exit(&free_arena->vm_lock);
 	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, free_arena);
+	mutex_enter(&free_arena->vm_lock);
 
 	uint64_t end_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
 	uint64_t difference;
@@ -2852,6 +2857,10 @@ vmem_vacuum_free_arena(void)
 		    __func__, difference);
 		vmem_free_memory_released += difference;
 	}
+
+	free_arena->vm_source_free = NULL;
+
+	mutex_exit(&free_arena->vm_lock);
 	mutex_exit(&vmem_flush_free_lock);
 }
 
@@ -2944,7 +2953,7 @@ vmem_vacuum_spl_root_arena()
 	mutex_enter(&spl_root_arena->vm_lock);
 
 	extern void segkmem_free(vmem_t *, void *, size_t);
-	free_arena->vm_source_free = segkmem_free;
+	free_arena->vm_source_free = NULL;
 
 	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
 

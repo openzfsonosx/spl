@@ -4216,17 +4216,17 @@ spl_free_thread()
 		// start with actual pages free plus half of speculative pages
 		// but if we are paging, start with -number_of_pages
 
-		spl_free = 0;
+		spl_free = 0LL;
 
 		if (vm_page_free_wanted > 0) {
-			spl_free = -(int64_t)(vm_page_free_wanted * PAGESIZE);
+			spl_free = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -2LL;
 			lowmem = true;
 			emergency_lowmem = true;
 		}
 
 		if (!emergency_lowmem) {
 			int64_t above_min_free =
-			    (int64_t)PAGESIZE * (int64_t)(vm_page_free_count - vm_page_free_min);
+			    (int64_t)PAGESIZE * (int64_t)vm_page_free_count - (int64_t)vm_page_free_min;
 			if (above_min_free < 16LL*1024LL*1024LL)
 				lowmem = true;
 			if (above_min_free < 0LL)
@@ -4235,7 +4235,7 @@ spl_free_thread()
 		}
 
 		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
-			spl_free += (int64_t)(vm_page_speculative_count * PAGESIZE)/2;
+			spl_free += (int64_t)vm_page_speculative_count * (int64_t)PAGESIZE/2LL;
 		}
 
 		base = spl_free;
@@ -4243,7 +4243,7 @@ spl_free_thread()
 		// if there are vmem waiters, signal need for a little space (use spl_minalloc?)
 		extern volatile uint64_t spl_vmem_threads_waiting;
 		if (spl_vmem_threads_waiting > 0) {
-			spl_free = -1LL * MAX(spl_vmem_threads_waiting, 1LL) * (1024LL * 1024LL);
+			spl_free -= MAX(spl_vmem_threads_waiting, 1LL) * (1024LL * 1024LL);
 			emergency_lowmem = true;
 			lowmem = true;
 		}
@@ -4283,6 +4283,14 @@ spl_free_thread()
 		// when in emergency lowmem, do not allow spl_free to be positive
 		if (emergency_lowmem && spl_free >= 0LL)
 			spl_free = -1LL;
+
+		if (spl_free < 0LL) {
+			int64_t old_pressure = spl_free_manual_pressure;
+			int64_t minus_spl_free = -spl_free;
+
+			if (minus_spl_free > old_pressure)
+				spl_free_set_emergency_pressure(minus_spl_free);
+		}
 
 		double delta = spl_free - base;
 
