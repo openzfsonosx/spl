@@ -1278,8 +1278,9 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		if (q != NULL) {
 			atomic_inc_64(&spl_root_allocator_wait_then_allocation);
 			atomic_add_64(&spl_root_allocator_wait_then_allocation_bytes, size);
-			return (NULL); // the span will be available in the vmem_xalloc search loop
-		} 
+		}  else if (pass < 2 || spl_fill_thread_request == 0) {
+			atomic_add_64(&spl_fill_thread_request, size);
+		}
 
 		atomic_inc_64(&spl_root_allocator_outer_loop);
 	}
@@ -2328,25 +2329,42 @@ spl_root_refill(void *dummy)
 {
 
 	boolean_t wait = false;
+	boolean_t ok_to_fill = true;
 
 	if (spl_fill_thread_request > 0) {
-		wait = false;
-		if (spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(spl_minalloc)) {
+		static uint32_t attempt = 0;
+		static uint64_t previous = 0;
+		if (spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(spl_fill_thread_request)) {
+			// success!
 			atomic_swap_64(&spl_fill_thread_request, 0ULL);
+			attempt = 0;
+			previous = 0;
 			wait = true;
+			ok_to_fill = true;
 		} else {
-			if(spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(spl_minalloc))
+		        ok_to_fill = false; // let memory drain a little
 			wait = false;
+			attempt++;
+			if (previous != 0 && previous == spl_fill_thread_request) {
+				if (attempt > 5) {
+					printf("SPL: %s: WOAH! %u requests for %llu without success!\n",
+					    __func__, attempt, previous);
+					spl_free_set_emergency_pressure(previous);
+				}
+			} else {
+				previous = spl_fill_thread_request;
+				printf("SPL: %s: tried %u times for %llu...\n",
+				    __func__, attempt, previous);
+			}
 		}
 	}
 
-	if (spl_vmem_threads_waiting > 0) {
+	if (spl_vmem_threads_waiting > 0 && ok_to_fill) {
 		if (spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(spl_minalloc * spl_vmem_threads_waiting))
 			wait = true;
 		else
 			wait = false;
 	}
-
 
 	uint64_t root_free = vmem_size(spl_root_arena, VMEM_FREE);
 	uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
@@ -2379,7 +2397,7 @@ spl_root_refill(void *dummy)
 
 	uint64_t high_threshold = real_total_memory * 80ULL / 100ULL;
 
-	if (arena_free < target_free && sys_mem_in_use < high_threshold) {
+	if (ok_to_fill && arena_free < target_free && sys_mem_in_use < high_threshold) {
 		if (vmem_add_memory_to_spl_root_arena(target_free) == target_free) {
 			wait = true;
 		}
