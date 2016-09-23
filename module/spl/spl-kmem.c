@@ -4225,13 +4225,13 @@ spl_free_thread()
 		}
 
 		if (!emergency_lowmem) {
-			int64_t above_min_free =
-			    (int64_t)PAGESIZE * (int64_t)vm_page_free_count - (int64_t)vm_page_free_min;
-			if (above_min_free < 16LL*1024LL*1024LL)
+			int64_t above_min_free_pages = vm_page_free_count - vm_page_free_min;
+			int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
+			if (above_min_free_bytes < 16LL*1024LL*1024LL)
 				lowmem = true;
-			if (above_min_free < 0LL)
+			if (above_min_free_bytes < 0LL)
 				emergency_lowmem = true;
-			spl_free = above_min_free;
+			spl_free = above_min_free_bytes;
 		}
 
 		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
@@ -4298,10 +4298,10 @@ spl_free_thread()
 
 		double delta = spl_free - base;
 
-		mutex_exit(&spl_free_lock);
-
 		if (spl_free < 0LL)
 			spl_stats.spl_spl_free_negative_count.value.ui64++;
+
+		mutex_exit(&spl_free_lock);
 
 		// maintain an exponential moving average for the ema kstat
 		if (last_update > hz)
