@@ -4203,8 +4203,8 @@ spl_free_thread()
 
 	while (!spl_free_thread_exit) {
 		mutex_exit(&spl_free_thread_lock);
-		bool lowmem = false;
-		bool emergency_lowmem = false;
+		boolean_t lowmem = false;
+		boolean_t emergency_lowmem = false;
 		int64_t base;
 
 		spl_stats.spl_free_wake_count.value.ui64++;
@@ -4242,8 +4242,9 @@ spl_free_thread()
 
 		// if there are vmem waiters, signal need for a little space (use spl_minalloc?)
 		extern volatile uint64_t spl_vmem_threads_waiting;
-		if (spl_vmem_threads_waiting > 0) {
-			spl_free -= MAX(spl_vmem_threads_waiting, 1LL) * (1024LL * 1024LL);
+		int64_t w = (int64_t)spl_vmem_threads_waiting;
+		if (w > 0LL) {
+			spl_free -= (w * 1024LL * 1024LL);
 			emergency_lowmem = true;
 			lowmem = true;
 		}
@@ -4282,14 +4283,17 @@ spl_free_thread()
 
 		// when in emergency lowmem, do not allow spl_free to be positive
 		if (emergency_lowmem && spl_free >= 0LL)
-			spl_free = -1LL;
+			spl_free = -1024LL;
 
 		if (spl_free < 0LL) {
 			int64_t old_pressure = spl_free_manual_pressure;
 			int64_t minus_spl_free = -spl_free;
 
-			if (minus_spl_free > old_pressure)
-				spl_free_set_emergency_pressure(minus_spl_free);
+			// can't mutex here
+			if (minus_spl_free > old_pressure) {
+				__sync_lock_test_and_set(&spl_free_manual_pressure, minus_spl_free);
+				__sync_lock_test_and_set(&spl_free_fast_pressure, true);
+			}
 		}
 
 		double delta = spl_free - base;

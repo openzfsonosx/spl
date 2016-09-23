@@ -2952,7 +2952,6 @@ vmem_vacuum_spl_root_arena()
 	mutex_enter(&free_arena->vm_lock);
 	mutex_enter(&spl_root_arena->vm_lock);
 
-	extern void segkmem_free(vmem_t *, void *, size_t);
 	free_arena->vm_source_free = NULL;
 
 	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
