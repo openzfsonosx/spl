@@ -4285,6 +4285,7 @@ spl_free_thread()
 		if (emergency_lowmem && spl_free >= 0LL)
 			spl_free = -1024LL;
 
+#if 0
 		if (spl_free < 0LL) {
 			int64_t old_pressure = spl_free_manual_pressure;
 			int64_t minus_spl_free = -spl_free;
@@ -4295,6 +4296,7 @@ spl_free_thread()
 				__sync_lock_test_and_set(&spl_free_fast_pressure, true);
 			}
 		}
+#endif
 
 		double delta = spl_free - base;
 
