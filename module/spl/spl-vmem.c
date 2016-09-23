@@ -1184,12 +1184,22 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 
 		pass++;
 
-		void *p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
+		void *p = NULL;
+		uint64_t rfree = vmem_size(spl_large_reserve_arena, VMEM_FREE);
+		uint64_t rtotal = vmem_size(spl_large_reserve_arena, VMEM_FREE | VMEM_ALLOC);
+		uint64_t half_rtotal = rtotal / 2ULL;
+
+		if (pass == 1 && size < 128ULL * 1024ULL && rfree >= half_rtotal)
+			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
+		else if (pass == 1 && size > 1024ULL*1024ULL)
+			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
+		else if (pass >= 2)
+			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
 
 		if (p != NULL) {
 			if (size > spl_minalloc) { // minalloc
 				atomic_inc_64(&spl_root_allocator_large_reserve);
-			} else if (size < spl_minalloc) {
+			} else if (size < 128ULL*1024ULL) {
 				atomic_inc_64(&spl_root_allocator_small_reserve);
 			} else {
 				atomic_inc_64(&spl_root_allocator_minalloc_reserve);
