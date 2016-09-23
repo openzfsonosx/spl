@@ -1066,7 +1066,7 @@ spl_vmem_critical_space(void)
 		return (true);
 }
 
-static inline int
+static int
 vmem_canalloc_nomutex(vmem_t *vmp, size_t size)
 {
 	ASSERT(!MUTEX_HELD(&vmp->vm_lock));
@@ -2846,6 +2846,12 @@ vmem_vacuum_free_arena(void)
 	mutex_enter(&free_arena->vm_lock);
 
 	uint64_t end_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
+
+	free_arena->vm_source_free = NULL;
+
+	mutex_exit(&free_arena->vm_lock);
+	mutex_exit(&vmem_flush_free_lock);
+
 	uint64_t difference;
 	if (end_total > start_total) {
 		difference = end_total - start_total;
@@ -2857,11 +2863,6 @@ vmem_vacuum_free_arena(void)
 		    __func__, difference);
 		vmem_free_memory_released += difference;
 	}
-
-	free_arena->vm_source_free = NULL;
-
-	mutex_exit(&free_arena->vm_lock);
-	mutex_exit(&vmem_flush_free_lock);
 }
 
 static uint64_t
@@ -2886,24 +2887,19 @@ vmem_flush_free_to_root()
 
 	mutex_exit(&free_arena->vm_lock);
 	mutex_exit(&spl_root_arena->vm_lock);
-
-	dprintf("SPL: %s walking\n", __func__);
 	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, free_arena);
+	mutex_enter(&spl_root_arena->vm_lock);
+	mutex_enter(&free_arena->vm_lock);
 
 	uint64_t end_total = free_arena->vm_kstat.vk_mem_total.value.ui64;
 
-	dprintf("SPL: %s walked, current free arena == %llu\n",
-	    __func__, end_total);
-
-	mutex_enter(&free_arena->vm_lock);
-	mutex_enter(&spl_root_arena->vm_lock);
-
 	free_arena->vm_source_free = NULL;
-
 	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
 
 	mutex_exit(&spl_root_arena->vm_lock);
 	mutex_exit(&free_arena->vm_lock);
+
+	mutex_exit(&vmem_flush_free_lock);
 
 	uint64_t difference;
 	if (end_total > start_total) {
@@ -2915,10 +2911,8 @@ vmem_flush_free_to_root()
 		dprintf("SPL: %s flushed  %llu bytes from free_arena back into spl_root_arena.\n",
 		    __func__, difference);
 		vmem_free_memory_recycled += difference;
-		mutex_exit(&vmem_flush_free_lock);
 		return (difference);
 	}
-	mutex_exit(&vmem_flush_free_lock);
 	return (0);
 }
 
@@ -2931,33 +2925,19 @@ vmem_vacuum_spl_root_arena()
 		return(0);
 
 	mutex_enter(&vmem_flush_free_lock);
-
-	dprintf("SPL: %s starting, current spl_root_arena == %llu\n",
-	    __func__, start_total);
-
 	mutex_enter(&spl_root_arena->vm_lock);
 
-	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
+	spl_root_arena->vm_source_free = spl_segkmem_free_if_not_big;
 
 	mutex_exit(&spl_root_arena->vm_lock);
-
-	dprintf("SPL: %s walking\n", __func__);
-	vmem_walk(free_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, spl_root_arena);
-
+	vmem_walk(spl_root_arena, VMEM_FREE | VMEM_REENTRANT, vmem_vacuum_freelist, spl_root_arena);
 	uint64_t end_total = spl_root_arena->vm_kstat.vk_mem_total.value.ui64;
-
-	dprintf("SPL: %s walked, current free arena == %llu\n",
-	    __func__, end_total);
-
-	mutex_enter(&free_arena->vm_lock);
 	mutex_enter(&spl_root_arena->vm_lock);
-
-	free_arena->vm_source_free = NULL;
 
 	spl_root_arena->vm_source_free = spl_root_arena_free_to_free_arena;
 
 	mutex_exit(&spl_root_arena->vm_lock);
-	mutex_exit(&free_arena->vm_lock);
+	mutex_exit(&vmem_flush_free_lock);
 
 	uint64_t difference;
 	if (end_total > start_total) {
@@ -2966,12 +2946,10 @@ vmem_vacuum_spl_root_arena()
 		    __func__, difference);
 	} else if (start_total > end_total) {
 		difference = start_total - end_total;
-		dprintf("SPL: %s released  %llu bytes from spl_root_arena.\n",
+		printf("SPL: %s released  %llu bytes from spl_root_arena.\n",
 		    __func__, difference);
 		vmem_free_memory_released += difference;
-		mutex_exit(&vmem_flush_free_lock);
 		return (difference);
 	}
-	mutex_exit(&vmem_flush_free_lock);
 	return (0);
 }
