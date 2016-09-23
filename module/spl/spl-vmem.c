@@ -1278,7 +1278,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		if (q != NULL) {
 			atomic_inc_64(&spl_root_allocator_wait_then_allocation);
 			atomic_add_64(&spl_root_allocator_wait_then_allocation_bytes, size);
-			return (q);
+			return (NULL); // the span will be available in the vmem_xalloc search loop
 		} 
 
 		atomic_inc_64(&spl_root_allocator_outer_loop);
