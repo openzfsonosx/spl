@@ -1190,9 +1190,11 @@ spl_root_allocator(vmem_t *vmp, size_t size, int vmflags)
 		uint64_t rtotal = vmem_size(spl_large_reserve_arena, VMEM_FREE | VMEM_ALLOC);
 		uint64_t half_rtotal = rtotal / 2ULL;
 
-		if (pass == 1 && size < 128ULL * 1024ULL && rfree >= half_rtotal)
+		if (pass == 1 && size < 128ULL * 1024ULL)
 			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
 		else if (pass == 1 && size > 1024ULL*1024ULL)
+			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
+		else if (pass == 1 && rfree > half_rtotal)
 			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT);
 		else if (pass >= 2 && !success_with_covering)
 			p = spl_try_large_reserve_alloc(size, vmflags | VM_ABORT | VM_BESTFIT);
