@@ -2331,6 +2331,8 @@ spl_root_refill(void *dummy)
 	boolean_t wait = false;
 	boolean_t ok_to_fill = true;
 
+	static uint32_t request_failures = 0;
+
 	if (spl_fill_thread_request > 0) {
 		static uint32_t attempt = 0;
 		static uint64_t previous = 0;
@@ -2341,10 +2343,34 @@ spl_root_refill(void *dummy)
 			previous = 0;
 			wait = true;
 			ok_to_fill = true;
-		} else {
+		} else if (request_failures > 20) {
+			uint64_t s = spl_fill_thread_request;
+			printf("SPL: %s: desperate times, %u failures so force allocating %llu from xnu! WOAH!\n",
+			    __func__, request_failures, s);
+			extern void *osif_malloc(uint64_t);
+			void *p = osif_malloc(s);
+			if (p == NULL) {
+				printf("SPL: %s: AIEEEEEEEEEEEEEE, allocation of %llu failed\n",
+				    __func__, s);
+				wait = true;
+				ok_to_fill = false;
+				attempt++;
+				request_failures++;
+				previous = s;
+			} else {
+				vmem_add_as_import(spl_root_arena, p, s, VM_NOSLEEP);
+				atomic_swap_64(&spl_fill_thread_request, 0ULL);
+				attempt = 0;
+				previous = 0;
+				wait = false;
+				ok_to_fill = false;
+				request_failures = 0;
+			}
+		} else { // request_failures <= 20
 		        ok_to_fill = false; // let memory drain a little
 			wait = false;
 			attempt++;
+			request_failures++;
 			if (previous != 0 && previous == spl_fill_thread_request) {
 				if (attempt > 5) {
 					printf("SPL: %s: WOAH! %u requests for %llu without success!\n",
@@ -2357,6 +2383,8 @@ spl_root_refill(void *dummy)
 				    __func__, attempt, previous);
 			}
 		}
+	} else { // spl_fill_thread_request == 0
+		request_failures = 0;
 	}
 
 	if (spl_vmem_threads_waiting > 0 && ok_to_fill) {
