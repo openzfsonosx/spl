@@ -4247,8 +4247,6 @@ spl_free_thread()
 		int64_t w = (int64_t)spl_vmem_threads_waiting;
 		if (w > 0LL) {
 			spl_free -= (w * 1024LL * 1024LL);
-			emergency_lowmem = true;
-			lowmem = true;
 		}
 
                 // adjust for available memory in free_arena
@@ -4265,16 +4263,16 @@ spl_free_thread()
 			extern vmem_t *spl_root_arena;
 			extern vmem_t *spl_large_reserve_arena;
 			int64_t root_total = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE | VMEM_ALLOC);
-			int64_t root_sixteenth_total = root_total/16;
+			int64_t root_fraction_total = root_total/64;
 			extern size_t spl_free_arena_size(void);
 			int64_t root_free = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE) +
 			    (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE) +
 			    (int64_t)spl_free_arena_size();
 
-			if (root_free > root_sixteenth_total) {
+			if (root_free > root_fraction_total) {
 				spl_free += root_free / 2;
 			} else if (!lowmem && spl_free_arena_size() == 0) {
-				spl_free -= root_sixteenth_total;
+				spl_free -= root_fraction_total;
 				lowmem = true;
 			}
 		}

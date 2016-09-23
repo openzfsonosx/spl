@@ -2422,7 +2422,7 @@ spl_root_refill(void *dummy)
 
 	extern uint64_t real_total_memory;
 
-	uint64_t target_free = real_total_memory/64;
+	uint64_t target_free = real_total_memory/32;
 
 	// ensure we have at least SPA_MAXBLOCKSIZE (16 MiB) free
 	uint64_t spamax = 16ULL * 1024ULL * 1024ULL;
