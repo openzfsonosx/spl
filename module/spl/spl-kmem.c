@@ -526,29 +526,23 @@ extern uint64_t spl_root_allocator_calls;
 extern uint64_t spl_root_allocator_large_bytes_asked;
 extern uint64_t spl_root_allocator_small_bytes_asked;
 extern uint64_t spl_root_allocator_minalloc_bytes_asked;
-extern uint64_t spl_root_allocator_large_reserve;
-extern uint64_t spl_root_allocator_small_reserve;
-extern uint64_t spl_root_allocator_minalloc_reserve;
-extern uint64_t spl_root_allocator_short_circuit;
-extern uint64_t spl_root_allocator_reserve_bytes;
-extern uint64_t spl_root_allocator_panic_allocs;
-extern uint64_t spl_root_allocator_panic_bytes;
-extern uint64_t spl_root_allocator_panic_fail;
-extern uint64_t spl_root_allocator_panic_fail_bytes;
-extern uint64_t spl_root_allocator_nosleep_allocs;
-extern uint64_t spl_root_allocator_nosleep_bytes;
-extern uint64_t spl_root_allocator_nosleep_fail;
-extern uint64_t spl_root_allocator_nosleep_fail_bytes;
-extern uint64_t spl_root_allocator_recover_success;
-extern uint64_t spl_root_allocator_recover_success_bytes;
-extern uint64_t spl_root_allocator_cv_timedwaits;
-extern uint64_t spl_root_allocator_wait_without_allocation;
-extern uint64_t spl_root_allocator_wait_without_allocation_bytes;
-extern uint64_t spl_root_allocator_waited;
-extern uint64_t spl_root_allocator_wait_then_allocation;
-extern uint64_t spl_root_allocator_wait_then_allocation_bytes;
-extern uint64_t spl_root_allocator_outer_loop;
-extern uint64_t stat_cur_bytes_above_total_memory;
+extern uint64_t spl_root_allocator_extra_pass;
+extern uint64_t spl_root_allocator_recovered;
+extern uint64_t spl_root_allocator_recovered_bytes;
+extern uint64_t ta_reserve_success;
+extern uint64_t ta_reserve_success_bytes;
+extern uint64_t ta_reserve_fail;
+extern uint64_t ta_xnu_vmem_alloc;
+extern uint64_t ta_xnu_first_alloc;
+extern uint64_t ta_xnu_second_alloc;
+extern uint64_t ta_xnu_smaller_alloc;
+extern uint64_t ta_xnu_skip_smaller;
+extern uint64_t ta_xnu_unconditional_alloc;
+extern uint64_t ta_xnu_unconditional_alloc_bytes;
+extern uint64_t ta_xnu_success;
+extern uint64_t ta_xnu_success_bytes;
+extern uint64_t ta_xnu_unconditional_fail;
+extern uint64_t ta_xnu_fail;
 
 extern uint64_t spl_vmem_unconditional_allocs;
 extern uint64_t spl_vmem_unconditional_alloc_bytes;
@@ -586,32 +580,29 @@ typedef struct spl_stats {
 	kstat_named_t spl_vmem_free_memory_recycled;
 	kstat_named_t spl_vmem_free_memory_released;
 	kstat_named_t spl_vmem_large_allocs;
+
 	kstat_named_t spl_root_allocator_calls;
 	kstat_named_t spl_root_allocator_large_bytes_asked;
 	kstat_named_t spl_root_allocator_small_bytes_asked;
 	kstat_named_t spl_root_allocator_minalloc_bytes_asked;
-	kstat_named_t spl_root_allocator_large_reserve;
-	kstat_named_t spl_root_allocator_small_reserve;
-	kstat_named_t spl_root_allocator_minalloc_reserve;
-	kstat_named_t spl_root_allocator_short_circuit;
-	kstat_named_t spl_root_allocator_reserve_bytes;
-	kstat_named_t spl_root_allocator_panic_allocs;
-	kstat_named_t spl_root_allocator_panic_bytes;
-	kstat_named_t spl_root_allocator_panic_fail;
-	kstat_named_t spl_root_allocator_panic_fail_bytes;
-	kstat_named_t spl_root_allocator_nosleep_allocs;
-	kstat_named_t spl_root_allocator_nosleep_bytes;
-	kstat_named_t spl_root_allocator_nosleep_fail;
-	kstat_named_t spl_root_allocator_nosleep_fail_bytes;
-	kstat_named_t spl_root_allocator_recover_success;
-	kstat_named_t spl_root_allocator_recover_success_bytes;
-	kstat_named_t spl_root_allocator_cv_timedwaits;
-	kstat_named_t spl_root_allocator_wait_without_allocation;
-	kstat_named_t spl_root_allocator_wait_without_allocation_bytes;
-	kstat_named_t spl_root_allocator_waited;
-	kstat_named_t spl_root_allocator_wait_then_allocation;
-	kstat_named_t spl_root_allocator_wait_then_allocation_bytes;
-	kstat_named_t spl_root_allocator_outer_loop;
+	kstat_named_t spl_root_allocator_extra_pass;
+	kstat_named_t spl_root_allocator_recovered;
+	kstat_named_t spl_root_allocator_recovered_bytes;
+	kstat_named_t ta_reserve_success;
+	kstat_named_t ta_reserve_success_bytes;
+	kstat_named_t ta_reserve_fail;
+	kstat_named_t ta_xnu_vmem_alloc;
+	kstat_named_t ta_xnu_first_alloc;
+	kstat_named_t ta_xnu_second_alloc;
+	kstat_named_t ta_xnu_smaller_alloc;
+	kstat_named_t ta_xnu_skip_smaller;
+	kstat_named_t ta_xnu_unconditional_alloc;
+	kstat_named_t ta_xnu_unconditional_alloc_bytes;
+	kstat_named_t ta_xnu_success;
+	kstat_named_t ta_xnu_success_bytes;
+	kstat_named_t ta_xnu_unconditional_fail;
+	kstat_named_t ta_xnu_fail;
+
 	kstat_named_t spl_vmem_unconditional_allocs;
 	kstat_named_t spl_vmem_unconditional_alloc_bytes;
 	kstat_named_t spl_vmem_conditional_allocs;
@@ -649,32 +640,29 @@ static spl_stats_t spl_stats = {
 	{"spl_vmem_free_memory_recycled", KSTAT_DATA_UINT64},
 	{"spl_vmem_free_memory_released", KSTAT_DATA_UINT64},
 	{"spl_vmem_large_allocs", KSTAT_DATA_UINT64},
+
 	{"sra_calls", KSTAT_DATA_UINT64},
 	{"sra_large_bytes_asked", KSTAT_DATA_UINT64},
 	{"sra_small_bytes_asked", KSTAT_DATA_UINT64},
 	{"sra_minalloc_bytes_asked", KSTAT_DATA_UINT64},
-	{"sra_large_reserve_success", KSTAT_DATA_UINT64},
-	{"sra_small_reserve_success", KSTAT_DATA_UINT64},
-	{"sra_minalloc_reserve_success", KSTAT_DATA_UINT64},
-	{"sra_short_circuits", KSTAT_DATA_UINT64},
-	{"sra_reserve_bytes", KSTAT_DATA_UINT64},
-	{"sra_panic_allocs", KSTAT_DATA_UINT64},
-	{"sra_panic_bytes", KSTAT_DATA_UINT64},
-	{"sra_panic_fails", KSTAT_DATA_UINT64},
-	{"sra_panic_fail_bytes", KSTAT_DATA_UINT64},
-	{"sra_nosleep_allocs", KSTAT_DATA_UINT64},
-	{"sra_nosleep_alloc_bytes", KSTAT_DATA_UINT64},
-	{"sra_nosleep_fails", KSTAT_DATA_UINT64},
-	{"spl_nosleep_fail_bytes", KSTAT_DATA_UINT64},
-	{"sra_recover_success", KSTAT_DATA_UINT64},
-	{"sra_recover_success_bytes", KSTAT_DATA_UINT64},
-	{"sra_cv_timedwaits", KSTAT_DATA_UINT64},
-	{"sra_wait_without_allocation", KSTAT_DATA_UINT64},
-	{"sra_wait_without_allocation_bytes", KSTAT_DATA_UINT64},
-	{"sra_waited", KSTAT_DATA_UINT64},
-	{"sra_wait_then_allocation", KSTAT_DATA_UINT64},
-	{"sra_wait_then_allocation_bytes", KSTAT_DATA_UINT64},
-	{"sra_outer_loop", KSTAT_DATA_UINT64},
+	{"sra_extra_pass", KSTAT_DATA_UINT64},
+	{"sra_recovered", KSTAT_DATA_UINT64},
+	{"sra_recovered_bytes", KSTAT_DATA_UINT64},
+	{"ta_reserve_success", KSTAT_DATA_UINT64},
+	{"ta_reserve_alloc_bytes", KSTAT_DATA_UINT64},
+	{"ta_reserve_fail", KSTAT_DATA_UINT64},
+	{"ta_xnu_vmem_alloc", KSTAT_DATA_UINT64},
+	{"ta_xnu_first_alloc", KSTAT_DATA_UINT64},
+	{"ta_xnu_second_alloc", KSTAT_DATA_UINT64},
+	{"ta_xnu_smaller_alloc", KSTAT_DATA_UINT64},
+	{"ta_xnu_skip_smaller", KSTAT_DATA_UINT64},
+	{"ta_xnu_unconditional_alloc", KSTAT_DATA_UINT64},
+	{"ta_xnu_unconditional_bytes", KSTAT_DATA_UINT64},
+	{"ta_xnu_success", KSTAT_DATA_UINT64},
+	{"ta_xnu_success_bytes", KSTAT_DATA_UINT64},
+	{"ta_xnu_unconditional_fail", KSTAT_DATA_UINT64},
+	{"ta_xnu_fail", KSTAT_DATA_UINT64},
+
 	{"vmem_unconditoinal_allocs", KSTAT_DATA_UINT64},
 	{"vmem_unconditoinal_alloc_bytes", KSTAT_DATA_UINT64},
 	{"vmem_conditional_allocs", KSTAT_DATA_UINT64},
@@ -4567,32 +4555,29 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_vmem_free_memory_recycled.value.ui64 = vmem_free_memory_recycled;
 		ks->spl_vmem_free_memory_released.value.ui64 = vmem_free_memory_released;
 		ks->spl_vmem_large_allocs.value.ui64 = spl_vmem_large_allocs;
+
 		ks->spl_root_allocator_calls.value.ui64 = spl_root_allocator_calls;
 		ks->spl_root_allocator_large_bytes_asked.value.ui64 = spl_root_allocator_large_bytes_asked;
 		ks->spl_root_allocator_small_bytes_asked.value.ui64 = spl_root_allocator_small_bytes_asked;
 		ks->spl_root_allocator_minalloc_bytes_asked.value.ui64 = spl_root_allocator_minalloc_bytes_asked;
-		ks->spl_root_allocator_large_reserve.value.ui64 = spl_root_allocator_large_reserve;
-		ks->spl_root_allocator_small_reserve.value.ui64 = spl_root_allocator_small_reserve;
-		ks->spl_root_allocator_minalloc_reserve.value.ui64 = spl_root_allocator_minalloc_reserve;
-		ks->spl_root_allocator_short_circuit.value.ui64 = spl_root_allocator_short_circuit;
-		ks->spl_root_allocator_reserve_bytes.value.ui64 = spl_root_allocator_reserve_bytes;
-		ks->spl_root_allocator_panic_allocs.value.ui64 = spl_root_allocator_panic_allocs;
-		ks->spl_root_allocator_panic_bytes.value.ui64 = spl_root_allocator_panic_bytes;
-		ks->spl_root_allocator_panic_fail.value.ui64 = spl_root_allocator_panic_fail;
-		ks->spl_root_allocator_panic_fail_bytes.value.ui64 = spl_root_allocator_panic_fail_bytes;
-		ks->spl_root_allocator_nosleep_allocs.value.ui64 = spl_root_allocator_nosleep_allocs;
-		ks->spl_root_allocator_nosleep_bytes.value.ui64 = spl_root_allocator_nosleep_bytes;
-		ks->spl_root_allocator_nosleep_fail.value.ui64 = spl_root_allocator_nosleep_fail;
-		ks->spl_root_allocator_nosleep_fail_bytes.value.ui64 = spl_root_allocator_nosleep_fail_bytes;
-		ks->spl_root_allocator_recover_success.value.ui64 = spl_root_allocator_recover_success;
-		ks->spl_root_allocator_recover_success_bytes.value.ui64 = spl_root_allocator_recover_success_bytes;
-		ks->spl_root_allocator_cv_timedwaits.value.ui64 = spl_root_allocator_cv_timedwaits;
-		ks->spl_root_allocator_wait_without_allocation.value.ui64 = spl_root_allocator_wait_without_allocation;
-		ks->spl_root_allocator_wait_without_allocation_bytes.value.ui64 = spl_root_allocator_wait_without_allocation_bytes;
-		ks->spl_root_allocator_waited.value.ui64 = spl_root_allocator_waited;
-		ks->spl_root_allocator_wait_then_allocation.value.ui64 = spl_root_allocator_wait_then_allocation;
-		ks->spl_root_allocator_wait_then_allocation_bytes.value.ui64 = spl_root_allocator_wait_then_allocation_bytes;
-		ks->spl_root_allocator_outer_loop.value.ui64 = spl_root_allocator_outer_loop;
+		ks->spl_root_allocator_extra_pass.value.ui64 = spl_root_allocator_extra_pass;
+		ks->spl_root_allocator_recovered.value.ui64 = spl_root_allocator_recovered;
+		ks->spl_root_allocator_recovered_bytes.value.ui64 = spl_root_allocator_recovered_bytes;
+		ks->ta_reserve_success.value.ui64 = ta_reserve_success;
+		ks->ta_reserve_success_bytes.value.ui64 = ta_reserve_success_bytes;
+		ks->ta_reserve_fail.value.ui64 = ta_reserve_fail;
+		ks->ta_xnu_first_alloc.value.ui64 = ta_xnu_vmem_alloc;
+		ks->ta_xnu_first_alloc.value.ui64 = ta_xnu_first_alloc;
+		ks->ta_xnu_second_alloc.value.ui64 = ta_xnu_second_alloc;
+		ks->ta_xnu_smaller_alloc.value.ui64 = ta_xnu_smaller_alloc;
+		ks->ta_xnu_skip_smaller.value.ui64 = ta_xnu_skip_smaller;
+		ks->ta_xnu_unconditional_alloc.value.ui64 = ta_xnu_unconditional_alloc;
+		ks->ta_xnu_unconditional_alloc_bytes.value.ui64 = ta_xnu_unconditional_alloc_bytes;
+		ks->ta_xnu_success.value.ui64 = ta_xnu_success;
+		ks->ta_xnu_success_bytes.value.ui64 = ta_xnu_success_bytes;
+		ks->ta_xnu_unconditional_fail.value.ui64 = ta_xnu_unconditional_fail;
+		ks->ta_xnu_fail.value.ui64 = ta_xnu_fail;
+
 		ks->spl_vmem_unconditional_allocs.value.ui64 = spl_vmem_unconditional_allocs;
 		ks->spl_vmem_unconditional_alloc_bytes.value.ui64 = spl_vmem_unconditional_alloc_bytes;
 		ks->spl_vmem_conditional_allocs.value.ui64 = spl_vmem_conditional_allocs;
