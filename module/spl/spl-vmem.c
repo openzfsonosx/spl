@@ -415,6 +415,7 @@ uint64_t ta_reserve_success = 0;
 uint64_t ta_reserve_success_bytes = 0;
 uint64_t ta_reserve_fail = 0;
 uint64_t ta_xnu_vmem_alloc = 0;
+uint64_t ta_xnu_vmem_bytes = 0;
 uint64_t ta_xnu_first_alloc = 0;
 uint64_t ta_xnu_second_alloc = 0;
 uint64_t ta_xnu_smaller_alloc = 0;
@@ -1195,9 +1196,10 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 
 	static volatile uint64_t last_alloc = 0;
 
-	void *m = vmem_alloc(vmp, size, VM_NOSLEEP | VM_ABORT);
+	void *m = vmem_alloc(vmp, size, VM_NOSLEEP | VM_ABORT | VM_BESTFIT);
 	if (m) {
 		atomic_inc_64(&ta_xnu_vmem_alloc);
+		atomic_add_64(&ta_xnu_vmem_bytes, size);
 		return (m);
 	}
 
@@ -1409,7 +1411,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			maxtime = SEC2NSEC(1);
 			if (size > spl_minalloc)
 				even_if_pressure = tried_xnu_alloc;
-			printf("SPL: %s - WOAH! - pass %u, time elapsed %llu ticks, forcing allocation of %llu\n",
+			dprintf("SPL: %s - WOAH! - pass %u, time elapsed %llu ticks, forcing allocation of %llu\n",
 			    __func__, pass, zfs_lbolt() - loopstart, (uint64_t)size);
 			atomic_add_64(&spl_root_refill_request, size);
 			spl_free_set_emergency_pressure(2 * size);
