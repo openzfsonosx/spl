@@ -4263,6 +4263,19 @@ spl_free_thread()
 				spl_free -= root_fraction_total;
 				lowmem = true;
 			}
+			// adjust for population of xnu_import arena
+			extern vmem_t *xnu_import_arena;
+			uint64_t xi_used = vmem_size(xnu_import_arena, VMEM_ALLOC);
+			uint64_t xi_size = vmem_size(xnu_import_arena, VMEM_ALLOC | VMEM_FREE);
+			uint64_t root_size = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
+			if ((xi_used * 100ULL / root_size) > 10) {
+				lowmem = true;
+				spl_free -= xi_used / 64;
+			}
+			if (lowmem && (xi_used * 100 / xi_size) > 98) {
+				emergency_lowmem = true;
+				spl_free -= xi_used / 4;
+			}
 		}
 
 		// when in lowmem, limit growth (especially do not encourage arc_no_grow to go false)

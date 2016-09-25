@@ -337,12 +337,13 @@ static  uint64_t spl_root_initial_reserve_import_size;
 vmem_t *spl_large_reserve_arena;
 static void *spl_large_reserve_initial_allocation;
 static size_t spl_large_reserve_initial_allocation_size;
-static vmem_t *xnu_import_arena;
+vmem_t *xnu_import_arena;
 #define NUMBER_OF_ARENAS_IN_VMEM_INIT 10
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
 static struct timespec  spl_root_refill_interval_long = {0, MSEC2NSEC(100)};
 static struct timespec  vmem_vacuum_thread_interval = {30, 0};
+static uint64_t spl_root_refill_request = 0;
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
@@ -1406,9 +1407,12 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			even_if_pressure = false;
 		} else {
 			maxtime = SEC2NSEC(1);
-			even_if_pressure = tried_xnu_alloc;
+			if (size > spl_minalloc)
+				even_if_pressure = tried_xnu_alloc;
 			printf("SPL: %s - WOAH! - pass %u, time elapsed %llu ticks, forcing allocation of %llu\n",
 			    __func__, pass, zfs_lbolt() - loopstart, (uint64_t)size);
+			atomic_add_64(&spl_root_refill_request, size);
+			spl_free_set_emergency_pressure(2 * size);
 		}
 
 		p = timed_alloc_root_xnu(size, maxtime, resolution, even_if_pressure);
@@ -2508,9 +2512,18 @@ spl_root_refill(void *dummy)
 
 	uint64_t high_threshold = real_total_memory * 80ULL / 100ULL;
 
-	if (arena_free < target_free && sys_mem_in_use < high_threshold) {
-		if (vmem_add_memory_to_spl_root_arena(target_free) == target_free) {
+	if ((spl_root_refill_request > 0 || arena_free < target_free) &&
+	    (spl_root_refill_request == 0 && sys_mem_in_use < high_threshold)) {
+		uint64_t r = vmem_add_memory_to_spl_root_arena(target_free+spl_root_refill_request);
+		if (r >= target_free) {
 			wait = true;
+			target_free = 0;
+			atomic_swap_64(&spl_root_refill_request, 0ULL);
+		} else if (r == 0) {
+			wait = false;
+		} else {
+			target_free -= r;
+			atomic_swap_64(&spl_root_refill_request, 0ULL);
 		}
 	}
 
