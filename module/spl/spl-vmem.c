@@ -1192,6 +1192,8 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 {
 	vmem_t *vmp = xnu_import_arena;
 
+	static volatile uint64_t last_alloc = 0;
+
 	void *m = vmem_alloc(vmp, size, VM_NOSLEEP | VM_ABORT);
 	if (m) {
 		atomic_inc_64(&ta_xnu_vmem_alloc);
@@ -1213,6 +1215,13 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 			covering_size = adjusted_size;
 		else
 			covering_size = 1ULL << (hb+1);
+	}
+
+	uint64_t timenow = zfs_lbolt();
+
+	if (timenow < last_alloc + 10*hz) {
+		if (covering_size < 16ULL*1024ULL*1024ULL)
+			covering_size = 16ULL*1024ULL*1024ULL;
 	}
 
         void *p = spl_vmem_malloc_if_no_pressure(covering_size);
