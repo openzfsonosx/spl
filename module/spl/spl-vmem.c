@@ -1318,6 +1318,8 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 	uint64_t loopstart = zfs_lbolt();
 	uint64_t one_second = loopstart + hz;
 
+	bool tried_xnu_alloc = false;
+
 	while (1) {
 
 		pass++;
@@ -1395,7 +1397,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			even_if_pressure = false;
 		} else {
 			maxtime = SEC2NSEC(1);
-			even_if_pressure = true;
+			even_if_pressure = tried_xnu_alloc;
 			printf("SPL: %s - WOAH! - pass %u, time elapsed %llu ticks, forcing allocation of %llu\n",
 			    __func__, pass, zfs_lbolt() - loopstart, (uint64_t)size);
 		}
@@ -1406,9 +1408,10 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			return (p);
 		} else if (flags & (VM_NOSLEEP | VM_ABORT)) {
 			return (NULL);
-		} else if (zfs_lbolt() > one_second || pass >= 10) {
+		} else if (tried_xnu_alloc && (zfs_lbolt() > one_second || pass >= 10)) {
 			return (NULL);
 		}
+		tried_xnu_alloc = true;
 	}
 }
 
