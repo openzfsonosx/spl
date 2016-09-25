@@ -4240,25 +4240,19 @@ spl_free_thread()
 			spl_free -= (w * 1024LL * 1024LL);
 		}
 
-                // adjust for available memory in free_arena
-		if (!emergency_lowmem && !lowmem) {
-			extern size_t spl_free_arena_size(void);
-			uint64_t f = spl_free_arena_size();
-			if (f > 0)
-				spl_free += f / 2;
-		}
-
 		// adjust for available memory in spl_root_arena
 		// cf arc_available_memory()
 		if (!emergency_lowmem && !lowmem) {
 			extern vmem_t *spl_root_arena;
 			extern vmem_t *spl_large_reserve_arena;
+			extern vmem_t *xnu_import_arena;
 			int64_t root_total = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE | VMEM_ALLOC);
 			int64_t root_fraction_total = root_total/64;
 			extern size_t spl_free_arena_size(void);
 			int64_t root_free = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE) +
 			    (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE) +
-			    (int64_t)spl_free_arena_size();
+			    (int64_t)spl_free_arena_size() +
+			    (int64_t)spl_vmem_size(xnu_import_arena, VMEM_FREE);
 
 			// if there's free space in spl_root_arena, inflate
 			if (root_free > root_fraction_total) {
@@ -4273,31 +4267,30 @@ spl_free_thread()
 			}
 			// adjust for population of xnu_import arena
 			// beware of division by zero with unpopulated arenas (xi, mainly)
-			extern vmem_t *xnu_import_arena;
 			uint64_t xi_used = vmem_size(xnu_import_arena, VMEM_ALLOC);
 			uint64_t xi_size = vmem_size(xnu_import_arena, VMEM_ALLOC | VMEM_FREE);
 			uint64_t root_size = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 			// xi is too big, shrink
 			if (xi_used > 0 && xi_size > 0) {
-				if ((xi_used * 100ULL / real_total_memory) > 5) {
+				if ((xi_used * 100ULL / real_total_memory) > 20) {
 					lowmem = true;
 					spl_free -= xi_size / 64;
 				}
-				if ((xi_used * 100ULL / real_total_memory) > 10) {
+				if ((xi_used * 100ULL / real_total_memory) > 40) {
 					lowmem = true;
 					spl_free -= xi_size / 16;
 				}
-				if ((xi_used * 100ULL / root_size) > 10) {
+				if ((xi_used * 100ULL / root_size) > 40) {
 					spl_free -= xi_size / 64;
 				}
 			}
 			uint64_t zio_size = vmem_size(zio_arena, VMEM_ALLOC | VMEM_FREE);
 			if (xi_used > 0 && xi_size > 0 && zio_size > 0) {
 				// xi is half+ the size of zio, shrink
-				if ((xi_size * 100ULL / zio_size) >= 50) {
+				if ((xi_size * 100ULL / zio_size) >= 60) {
 					spl_free -= xi_used / 32;
 				}
-				if ((xi_used * 100ULL / zio_size) >= 50) {
+				if ((xi_used * 100ULL / zio_size) >= 70) {
 					spl_free -= xi_used / 32;
 				}
 			}

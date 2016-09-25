@@ -1378,7 +1378,8 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 
 		// try a wait to see if we can recover some space
 		if (!(flags & (VM_NOSLEEP | VM_ABORT)) &&
-		    vmem_size(free_arena, VMEM_FREE)  >= size) {
+		    vmem_size(free_arena, VMEM_FREE)  >= size &&
+		    pass == 1) {
 			uint64_t recovered_bytes = vmem_flush_free_to_root();
 			mutex_enter(&vmp->vm_lock);
 			(void) cv_timedwait_hires(&vmp->vm_cv, &vmp->vm_lock, maxtime, resolution, 0);
