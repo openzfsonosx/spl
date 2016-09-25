@@ -1259,11 +1259,11 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 
 	mutex_enter(&vmp->vm_lock);
 	vmem_seg_t *whole_span_seg_vsp;
-	if (vmem_populate(vmp, VM_NOSLEEP)) {
+	if (vmem_populate(vmp, VM_SLEEP)) {
 		whole_span_seg_vsp = vmem_span_create(vmp, p, allocated_size, 1);
 		vmem_seg_alloc(vmp, whole_span_seg_vsp, (uintptr_t)p, size);
 	} else {
-		printf("SPL: %s  WOAH! WTF! vmem_populate(%s, VM_NOSLEEP) returned NULL\n",
+		printf("SPL: %s  WOAH! WTF! vmem_populate(%s, VM_SLEEP) returned NULL\n",
 		    __func__, vmp->vm_name);
 		extern void osif_free(void *, uint64_t);
 		osif_free(p, allocated_size);
@@ -1316,7 +1316,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		atomic_add_64(&spl_root_allocator_minalloc_bytes_asked, size);
 
 	uint64_t loopstart = zfs_lbolt();
-	uint64_t five_seconds = loopstart + (5*hz);
+	uint64_t one_second = loopstart + hz;
 
 	while (1) {
 
@@ -1331,11 +1331,11 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		hrtime_t maxtime;
 
 		if (flags & (VM_NOSLEEP | VM_ABORT))
-			maxtime = MSEC2NSEC(1);
+			maxtime = MSEC2NSEC(2);
 		else if (pass < 2) 
 			maxtime = MSEC2NSEC(100);
 		else
-			maxtime = SEC2NSEC(1);
+			maxtime = MSEC2NSEC(500);
 
 		bool reserve_best = false;
 		if (pass > 1)
@@ -1349,10 +1349,16 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			p = timed_alloc_reserve(size, maxtime, resolution, reserve_best);
 			if (p != NULL)
 				return (p);
+		} else if (pass > 3 && !(flags & (VM_NOSLEEP|VM_ABORT))) {
+			// actually try to delay here
+			mutex_enter(&spl_large_reserve_arena->vm_lock);
+			(void) cv_timedwait_hires(&spl_large_reserve_arena->vm_cv,
+			    &spl_large_reserve_arena->vm_lock, MSEC2NSEC(500), resolution, 0);
+			mutex_exit(&spl_large_reserve_arena->vm_lock);
 		}
 
 		if (flags & (VM_NOSLEEP | VM_ABORT))
-			maxtime = MSEC2NSEC(1);
+			maxtime = MSEC2NSEC(5);
 		else
 			maxtime = SEC2NSEC(2);
 
@@ -1379,19 +1385,19 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		} else if (flags & VM_ABORT) {
 			maxtime = MSEC2NSEC(1);
 			even_if_pressure = false;
-		} else if ((zfs_lbolt() < five_seconds || pass < 5) &&
+		} else if ((zfs_lbolt() < one_second || pass < 5) &&
 		    !(flags & (VM_NOSLEEP | VM_ABORT))) {
 			// we don't try to do an allocation right away if we
 			// are permitted to wait
 			continue;
-		} else if (zfs_lbolt() < five_seconds) {
-			maxtime = SEC2NSEC(5);
+		} else if (zfs_lbolt() < one_second) {
+			maxtime = SEC2NSEC(1);
 			even_if_pressure = false;
 		} else {
-			maxtime = SEC2NSEC(5);
+			maxtime = SEC2NSEC(1);
 			even_if_pressure = true;
-			printf("SPL: %s - WOAH! - pass %u, time elapsed %llu, forcing allocation of %llu\n",
-			    __func__, pass, zfs_lbolt() - loopstart, size);
+			printf("SPL: %s - WOAH! - pass %u, time elapsed %llu ticks, forcing allocation of %llu\n",
+			    __func__, pass, zfs_lbolt() - loopstart, (uint64_t)size);
 		}
 
 		p = timed_alloc_root_xnu(size, maxtime, resolution, even_if_pressure);
@@ -1399,6 +1405,8 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		if (p != NULL) {
 			return (p);
 		} else if (flags & (VM_NOSLEEP | VM_ABORT)) {
+			return (NULL);
+		} else if (zfs_lbolt() > one_second || pass >= 10) {
 			return (NULL);
 		}
 	}
@@ -2812,7 +2820,7 @@ vmem_init(const char *heap_name,
 
 	extern void segkmem_free(vmem_t *, void *, size_t);
 	xnu_import_arena = vmem_create("xnu_import", // id 4
-	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_NOSLEEP | VMC_POPULATOR);
+	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP | VMC_POPULATOR);
 
 	heap = vmem_create(heap_name,  // id 5
 					   NULL, 0, heap_quantum,
