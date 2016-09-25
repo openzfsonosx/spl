@@ -3232,7 +3232,7 @@ spl_minimal_physmem_p(void)
 	// a little with the xnu buffer cache
 
 	if (spl_minimal_uses_spl_free) {
-		return (spl_free > 0);
+		return (spl_free > -1024LL);
 	}
 
 	if (spl_minimal_physmem_p_logic()) {
@@ -4260,24 +4260,52 @@ spl_free_thread()
 			    (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE) +
 			    (int64_t)spl_free_arena_size();
 
+			// if there's free space in spl_root_arena, inflate
 			if (root_free > root_fraction_total) {
-				spl_free += root_free / 2;
-			} else if (!lowmem && spl_free_arena_size() == 0) {
+				spl_free += root_free / 4;
+			}
+			// spl_root_arena has gotten really big, shrink hard
+			if ((root_total * 100ULL / real_total_memory) > 70) {
+				spl_free -= root_fraction_total;
+			} else if ((root_total * 100ULL / real_total_memory) > 75) {
 				spl_free -= root_fraction_total;
 				lowmem = true;
 			}
 			// adjust for population of xnu_import arena
+			// beware of division by zero with unpopulated arenas (xi, mainly)
 			extern vmem_t *xnu_import_arena;
 			uint64_t xi_used = vmem_size(xnu_import_arena, VMEM_ALLOC);
 			uint64_t xi_size = vmem_size(xnu_import_arena, VMEM_ALLOC | VMEM_FREE);
 			uint64_t root_size = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
-			if ((xi_used * 100ULL / root_size) > 10) {
-				lowmem = true;
-				spl_free -= xi_used / 64;
+			// xi is too big, shrink
+			if (xi_used > 0 && xi_size > 0) {
+				if ((xi_used * 100ULL / real_total_memory) > 5) {
+					lowmem = true;
+					spl_free -= xi_size / 64;
+				}
+				if ((xi_used * 100ULL / real_total_memory) > 10) {
+					lowmem = true;
+					spl_free -= xi_size / 16;
+				}
+				if ((xi_used * 100ULL / root_size) > 10) {
+					spl_free -= xi_size / 64;
+				}
 			}
-			if (lowmem && (xi_used * 100 / xi_size) > 98) {
-				emergency_lowmem = true;
-				spl_free -= xi_used / 4;
+			uint64_t zio_size = vmem_size(zio_arena, VMEM_ALLOC | VMEM_FREE);
+			if (xi_used > 0 && xi_size > 0 && zio_size > 0) {
+				// xi is half+ the size of zio, shrink
+				if ((xi_size * 100ULL / zio_size) >= 50) {
+					spl_free -= xi_used / 32;
+				}
+				if ((xi_used * 100ULL / zio_size) >= 50) {
+					spl_free -= xi_used / 32;
+				}
+			}
+			if (zio_size > 0) {
+				// zio_arena is a quarter of physmem, shrink
+				if ((zio_size * 100ULL / real_total_memory) > 25) {
+					spl_free -= zio_size / 32;
+				}
 			}
 		}
 
@@ -4288,6 +4316,18 @@ spl_free_thread()
 		// when in emergency lowmem, do not allow spl_free to be positive
 		if (emergency_lowmem && spl_free >= 0LL)
 			spl_free = -1024LL;
+
+		if (emergency_lowmem || lowmem) {
+			static uint64_t last_reap = 0;
+			uint64_t now = zfs_lbolt();
+			uint64_t elapsed = 60*hz;
+			if (emergency_lowmem)
+				elapsed = 10*hz;
+			if (now - last_reap > elapsed) {
+				vmem_qcache_reap(kmem_default_arena);
+				last_reap = now;
+			}
+		}
 
 #if 0
 		if (spl_free < 0LL) {
