@@ -1088,18 +1088,6 @@ vmem_canalloc_nomutex(vmem_t *vmp, size_t size)
 static uint64_t vmem_flush_free_to_root();
 
 static void *
-spl_try_large_reserve_alloc(size_t size, int vmflags)
-{
-	// MUTEX_NOT_HELD !
-	ASSERT(!MUTEX_HELD(&spl_large_reserve_arena->vm_lock));
-
-	if (vmem_canalloc_nomutex(spl_large_reserve_arena, size))
-		return (vmem_alloc(spl_large_reserve_arena, size, vmflags));
-	else
-		return (NULL);
-}
-
-static void *
 spl_vmem_malloc_unconditionally(size_t size)
 {
 	extern void *osif_malloc(uint64_t);
