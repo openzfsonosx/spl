@@ -105,7 +105,7 @@ static boolean_t spl_free_fast_pressure = FALSE;
 
 static int64_t spl_minimal_uses_spl_free = TRUE;
 
-static uint64_t spl_reap_timeout_seconds = 15;
+static uint64_t spl_reap_timeout_seconds = 600;
 
 // Start and end address of kernel memory
 extern vm_offset_t virtual_space_start;
@@ -666,8 +666,8 @@ static spl_stats_t spl_stats = {
 	{"ta_xnu_unconditional_fail", KSTAT_DATA_UINT64},
 	{"ta_xnu_fail", KSTAT_DATA_UINT64},
 
-	{"vmem_unconditoinal_allocs", KSTAT_DATA_UINT64},
-	{"vmem_unconditoinal_alloc_bytes", KSTAT_DATA_UINT64},
+	{"vmem_unconditional_allocs", KSTAT_DATA_UINT64},
+	{"vmem_unconditional_alloc_bytes", KSTAT_DATA_UINT64},
 	{"vmem_conditional_allocs", KSTAT_DATA_UINT64},
 	{"vmem_conditional_alloc_fail", KSTAT_DATA_UINT64},
 	{"vmem_conditional_alloc_bytes", KSTAT_DATA_UINT64},
@@ -4210,7 +4210,7 @@ spl_free_thread()
 		spl_free = 0LL;
 
 		if (vm_page_free_wanted > 0) {
-			spl_free = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -2LL;
+			spl_free = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -8LL;
 			lowmem = true;
 			emergency_lowmem = true;
 			spl_free_fast_pressure = TRUE;
@@ -4222,13 +4222,17 @@ spl_free_thread()
 			int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
 			if (above_min_free_bytes < 16LL*1024LL*1024LL)
 				lowmem = true;
-			if (above_min_free_bytes < 0LL)
+			if (above_min_free_bytes <= 0LL)
 				emergency_lowmem = true;
 			spl_free = above_min_free_bytes;
 		}
 
 		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
-			spl_free += (int64_t)vm_page_speculative_count * (int64_t)PAGESIZE/2LL;
+			int64_t speculative_bytes = (int64_t)PAGESIZE * vm_page_speculative_count;
+			if (speculative_bytes > real_total_memory / 16)
+				spl_free += speculative_bytes;
+			else if (speculative_bytes > 0)
+				spl_free += speculative_bytes / 2;
 		}
 
 		base = spl_free;
@@ -4254,9 +4258,10 @@ spl_free_thread()
 			    (int64_t)spl_free_arena_size() +
 			    (int64_t)spl_vmem_size(xnu_import_arena, VMEM_FREE);
 
-			// if there's free space in spl_root_arena, inflate
+			// if there's free space for spl_root_arena to grow into without
+			// allocating, then inflate
 			if (root_free > root_fraction_total) {
-				spl_free += root_free / 4;
+				spl_free += root_free / 2;
 			}
 			// spl_root_arena has gotten really big, shrink hard
 			if ((root_total * 100ULL / real_total_memory) > 70) {
@@ -4313,7 +4318,7 @@ spl_free_thread()
 		if (emergency_lowmem || lowmem) {
 			static uint64_t last_reap = 0;
 			uint64_t now = zfs_lbolt();
-			uint64_t elapsed = 60*hz;
+			uint64_t elapsed = 300*hz;
 			if (emergency_lowmem)
 				elapsed = 10*hz;
 			if (now - last_reap > elapsed) {

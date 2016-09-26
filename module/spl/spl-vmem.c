@@ -1220,6 +1220,10 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 			covering_size = 1ULL << (hb+1);
 	}
 
+	// if we've recently done an allocation and used it, be greedy
+	// 16MiB is not going to tip xnu over the edge, and will allow
+	// for several other allocations to avoid pestering it during
+	// its page scan, eviction, compression and/or swapout.
 	uint64_t timenow = zfs_lbolt();
 
 	if (timenow < last_alloc + 10*hz) {
@@ -1274,6 +1278,7 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 	if (vmem_populate(vmp, VM_SLEEP)) {
 		whole_span_seg_vsp = vmem_span_create(vmp, p, allocated_size, 1);
 		vmem_seg_alloc(vmp, whole_span_seg_vsp, (uintptr_t)p, size);
+		vmp->vm_kstat.vk_parent_alloc.value.ui64++;
 	} else {
 		printf("SPL: %s  WOAH! WTF! vmem_populate(%s, VM_SLEEP) returned NULL\n",
 		    __func__, vmp->vm_name);
@@ -1415,7 +1420,6 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			dprintf("SPL: %s - WOAH! - pass %u, time elapsed %llu ticks, forcing allocation of %llu\n",
 			    __func__, pass, zfs_lbolt() - loopstart, (uint64_t)size);
 			atomic_add_64(&spl_root_refill_request, size);
-			spl_free_set_emergency_pressure(2 * size);
 		}
 
 		p = timed_alloc_root_xnu(size, maxtime, resolution, even_if_pressure);
@@ -1423,8 +1427,10 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		if (p != NULL) {
 			return (p);
 		} else if (flags & (VM_NOSLEEP | VM_ABORT)) {
+			spl_free_set_emergency_pressure(size);
 			return (NULL);
 		} else if (tried_xnu_alloc && (zfs_lbolt() > one_second || pass >= 10)) {
+			spl_free_set_emergency_pressure(2*size);
 			return (NULL);
 		}
 		tried_xnu_alloc = true;
