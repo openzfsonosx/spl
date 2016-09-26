@@ -2770,18 +2770,9 @@ vmem_init(const char *heap_name,
 	spl_root_arena_parent = vmem_create("spl_root_arena_parent",  // id 0
 	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP);
 
-#ifdef _KERNEL
-	// first add 1/4 of real_total_memory in one alloc
-	// TUNE ME!
-	// this needs to be small enough not to be annoying, since
-	// it will never be released back to the operating system,
-	// but where it's large it will reduce freelist and tlb work
-	// significantly, AND it will also offer enough space that
-	// the (> minalloc) large path in vmem_xalloc will not be taken
-
-	const uint64_t half_gibibyte = 512LL*1024ULL*1024ULL;
+	const uint64_t half_gibibyte = 512ULL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
-	if (real_total_memory <= 15ULL*1024LL*1024ULL*1024ULL) {
+	if (real_total_memory <= 15ULL*1024ULL*1024ULL*1024ULL) {
 		spl_large_reserve_initial_allocation_size =
 		    MAX(real_total_memory / 16, half_gibibyte);
 	} else {
@@ -2843,18 +2834,6 @@ vmem_init(const char *heap_name,
 	free_arena = vmem_create("free_arena", // id 3
 	    NULL, 0,
 	    PAGESIZE, NULL, NULL, NULL, 0, VM_SLEEP);
-
-#else
-	spl_large_reserve_arena = vmem_create("spl_large_reserve_arena", // id 1 (userland)
-	    NULL, 0, heap_quantum, NULL, NULL, 0, VM_SLEEP);
-
-	spl_root_arena = vmem_create("spl_root_arena", // id 2 (userland)
-	    NULL, 0, heap_quantum,
-	    segkmem_alloc, segkmem_free, spl_root_arena_parent, 0, VM_SLEEP | VMC_POPULATOR);
-
-	free_arena = vmem_create("spl_free_arena",  // id 3 (userland)
-	    NULL, 0, heap_quantum, NULL, NULL, NULL, 0, VM_SLEEP);
-#endif
 
 	extern void segkmem_free(vmem_t *, void *, size_t);
 	xnu_import_arena = vmem_create("xnu_import", // id 4
