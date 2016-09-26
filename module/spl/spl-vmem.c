@@ -1182,7 +1182,7 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 
 	static volatile uint64_t last_alloc = 0;
 
-	void *m = vmem_alloc(vmp, size, VM_NOSLEEP | VM_ABORT | VM_BESTFIT);
+	void *m = vmem_alloc(vmp, size, VM_NOSLEEP | VM_ABORT);
 	if (m) {
 		atomic_inc_64(&ta_xnu_vmem_alloc);
 		atomic_add_64(&ta_xnu_vmem_bytes, size);
