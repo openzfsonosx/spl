@@ -1016,8 +1016,6 @@ vmem_canalloc(vmem_t *vmp, size_t size)
 	return (flist);
 }
 
-static void *vmem_add_as_import(vmem_t *, void *, size_t, int);
-
 /*
  * allocate the next largest power-of-two above size, if there is space to do so
  *    and return(NULL)
@@ -2718,6 +2716,8 @@ free_arena_free_to_spl_root(vmem_t *vmp, void *inaddr, size_t size)
 	vmem_free_transfer(vmp, inaddr, size, spl_root_arena);
 }
 
+static void *vmem_add_as_import(vmem_t *, void *, size_t, int);
+
 vmem_t *
 vmem_init(const char *heap_name,
 		  void *heap_start, size_t heap_size, size_t heap_quantum,
@@ -2834,7 +2834,23 @@ vmem_init(const char *heap_name,
 	    spl_root_allocator, spl_root_arena_free_to_free_arena, spl_root_arena_parent, 0,
 	    VM_SLEEP | VMC_POPULATOR);
 
-	printf("SPL: %s created spl_root_arena.\n", __func__);
+	uint64_t init_pop_size = spl_large_reserve_initial_allocation_size / 2;
+
+	printf("SPL: %s created spl_root_arena.   Trying to add %llu from reserve arena.\n",
+	    __func__, init_pop_size);
+
+	void *init_pop = vmem_alloc(spl_large_reserve_arena, init_pop_size, VM_NOSLEEP | VM_ABORT);
+
+	if (init_pop == NULL) {
+		printf("SPL: %s: WOAH! couldn't vmem_alloc %llu from %s !\n",
+		    __func__, init_pop_size, spl_large_reserve_arena->vm_name);
+	} else {
+		void *vaddr = vmem_add_as_import(spl_root_arena, init_pop, init_pop_size, VM_SLEEP);
+		if (vaddr == NULL) {
+			printf("SPL: %s: WOAH! vmem_add_as_import returned NULL!\n", __func__);
+			vmem_free(spl_large_reserve_arena, init_pop, init_pop_size);
+		}
+	}
 
 	free_arena = vmem_create("free_arena", // id 3
 	    NULL, 0,
