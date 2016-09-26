@@ -4289,21 +4289,43 @@ spl_free_thread()
 					spl_free -= xi_size / 64;
 				}
 			}
-			uint64_t zio_size = vmem_size(zio_arena, VMEM_ALLOC | VMEM_FREE);
-			if (xi_used > 0 && xi_size > 0 && zio_size > 0) {
-				// xi is half+ the size of zio, shrink
-				if ((xi_size * 100ULL / zio_size) >= 60) {
-					spl_free -= xi_used / 32;
+		}
+
+		uint64_t zio_size = vmem_size(zio_arena, VMEM_ALLOC | VMEM_FREE);
+		if (zio_size > 0) {
+			static uint64_t zio_last_too_big = 0;
+			static int64_t imposed_cap = 75;
+			const uint64_t seconds_of_lower_cap = 10*hz;
+			uint64_t now = zfs_lbolt();
+			uint32_t zio_pct = (uint32_t)(zio_size * 100ULL / real_total_memory);
+			// if not hungry for memory, shrink towards a
+			// 75% total memory cap on zfs_file_data
+			if (!lowmem && !emergency_lowmem && zio_pct > 75 &&
+			    (now > zio_last_too_big + seconds_of_lower_cap)) {
+				spl_free -= zio_size / 64;
+				zio_last_too_big = now;
+				imposed_cap = 75;
+			} else if (lowmem || emergency_lowmem) {
+				// shrink towards stricter caps if we are hungry for memory
+				const uint32_t lowmem_cap = 25;
+				const uint32_t emergency_lowmem_cap = 5;
+				// we don't want the lowest cap to be so low that
+				// we will not make any use of the fixed size reserve
+				if (lowmem && zio_pct > lowmem_cap) {
+					spl_free -= zio_size / 64;
+					zio_last_too_big = now;
+					imposed_cap = lowmem_cap;
 				}
-				if ((xi_used * 100ULL / zio_size) >= 70) {
-					spl_free -= xi_used / 32;
+				if (emergency_lowmem && zio_pct > emergency_lowmem_cap) {
+					spl_free -= zio_size / 16;
+					zio_last_too_big = now;
+					imposed_cap = emergency_lowmem_cap;
 				}
 			}
-			if (zio_size > 0) {
-				// zio_arena is a quarter of physmem, shrink
-				if ((zio_size * 100ULL / real_total_memory) > 25) {
-					spl_free -= zio_size / 32;
-				}
+			if (zio_last_too_big != now &&
+			    now < zio_last_too_big + seconds_of_lower_cap &&
+			    zio_pct > imposed_cap) {
+				spl_free -= zio_size / 64;
 			}
 		}
 
@@ -4322,11 +4344,11 @@ spl_free_thread()
 			if (emergency_lowmem)
 				elapsed = 10*hz;
 			if (now - last_reap > elapsed) {
+				kmem_reap();
 				vmem_qcache_reap(kmem_default_arena);
 				last_reap = now;
 			}
 		}
-
 #if 0
 		if (spl_free < 0LL) {
 			int64_t old_pressure = spl_free_manual_pressure;
