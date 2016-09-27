@@ -1343,7 +1343,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			maxtime = MSEC2NSEC(500);
 
 		bool reserve_best = false;
-		if (pass > 1)
+		if (pass > 3)
 			reserve_best = true;
 
 		// if we have headroom in the reserve, allocate there if we can
@@ -2967,10 +2967,48 @@ vmem_fini(vmem_t *heap)
 #endif
 }
 
+
 static void
 vmem_vacuum_freelist(void *vmp, void *start, size_t size)
 {
-	//vmem_xfree(vmp, start, size);
+	static int32_t vacuum_segments_since_preempt = 1;
+	static uint64_t *last_vmp = NULL;
+	static uint64_t highest_total_os_memory_since_preempt = 0;
+
+	// ARENA mutex is not held, but we are under the vacuum mutex
+
+	// a different vacuum function has been started either by the vacuum thread
+	// or by the fill thread
+	if (vmp != last_vmp) {
+		last_vmp = vmp;
+		highest_total_os_memory_since_preempt = segkmem_total_mem_allocated;
+		vacuum_segments_since_preempt = 1;
+	}
+
+	// as large number of frees all at once can slow down the system, we
+	// preempt if xnu has been freeing, but not if another thread is allocating
+	if (segkmem_total_mem_allocated < highest_total_os_memory_since_preempt) {
+		if (highest_total_os_memory_since_preempt -
+		    segkmem_total_mem_allocated > 128ULL*1024ULL*1024ULL) {
+			kpreempt(KPREEMPT_SYNC);
+			highest_total_os_memory_since_preempt = segkmem_total_mem_allocated;
+			vacuum_segments_since_preempt = 1;
+		}
+	} else if (segkmem_total_mem_allocated > highest_total_os_memory_since_preempt) {
+		highest_total_os_memory_since_preempt = segkmem_total_mem_allocated;
+	}
+
+	// as vmem_walk is not especially cpu friendly and does lots of mutex activity,
+	// preempt when every 1024 free segments (note coalesced segments, not spans;
+	// free spans are given away in vmem_walk() itself)
+	vacuum_segments_since_preempt++;
+
+	if (vacuum_segments_since_preempt > 1024) {
+		kpreempt(KPREEMPT_SYNC);
+		vacuum_segments_since_preempt = 1;
+	} else {
+		vacuum_segments_since_preempt++;
+	}
 }
 
 void
