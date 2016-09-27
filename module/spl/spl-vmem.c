@@ -1189,13 +1189,13 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 		return (m);
 	}
 
-	uint64_t covering_size;
-	uint64_t adjusted_size;
-	uint64_t allocated_size;
+	uint64_t covering_size; // ask xnu for a big block
+	uint64_t adjusted_size; // ask xnu for at least this much
+	uint64_t allocated_size; // what we succeeded in getting from xnu
 
 	// highbit64 returns bit number + 1; bit number < 63.
 	if (size <  spl_minalloc) {
-		covering_size = spl_minalloc;
+		covering_size = spl_minalloc * 4;
 		adjusted_size = spl_minalloc;
 	} else {
 		int hb = highbit(size);
