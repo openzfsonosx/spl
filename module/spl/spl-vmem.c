@@ -1016,6 +1016,20 @@ vmem_canalloc(vmem_t *vmp, size_t size)
 	return (flist);
 }
 
+// wrap vmem_canalloc with the mutex its ASSERT requires,
+// and also with the vacuuming mutex
+static int
+vmem_canalloc_nomutex(vmem_t *vmp, size_t size)
+{
+	ASSERT(!MUTEX_HELD(&vmp->vm_lock));
+	mutex_enter(&vmem_flush_free_lock);
+	mutex_enter(&vmp->vm_lock);
+	int r = vmem_canalloc(vmp, size);
+	mutex_exit(&vmp->vm_lock);
+	mutex_exit(&vmem_flush_free_lock);
+	return (r);
+}
+
 /*
  * allocate the next largest power-of-two above size, if there is space to do so
  *    and return(NULL)
@@ -1057,18 +1071,6 @@ spl_vmem_critical_space(void)
 		return (false);
 	else
 		return (true);
-}
-
-static int
-vmem_canalloc_nomutex(vmem_t *vmp, size_t size)
-{
-	ASSERT(!MUTEX_HELD(&vmp->vm_lock));
-	mutex_enter(&vmem_flush_free_lock);
-	mutex_enter(&vmp->vm_lock);
-	int r = vmem_canalloc(vmp, size);
-	mutex_exit(&vmp->vm_lock);
-	mutex_exit(&vmem_flush_free_lock);
-	return (r);
 }
 
 /*
@@ -2419,7 +2421,7 @@ vmem_update(void *dummy)
 /*
  * refill thread: regularly pull in memory, if needed and possible
  */
-static uint64_t vmem_add_memory_to_spl_root_arena(size_t);
+static uint64_t vmem_add_memory_to_spl_root_arena(size_t, size_t);
 static void spl_root_arena_free_to_free_arena(vmem_t *, void *, size_t);
 
 static void *
@@ -2457,70 +2459,67 @@ spl_fill_try_add_covering_span(vmem_t *vmp, size_t min_size, int vmflags)
 	return(vaddr);
 }
 
-static void *
-spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(size_t size)
-{
-	return(spl_fill_try_add_covering_span(spl_root_arena, size, VM_SLEEP));
-}
-
 void
 spl_root_refill(void *dummy)
 {
-
 	boolean_t wait = false;
-
-	if (spl_vmem_threads_waiting > 0) {
-		if (spl_fill_try_add_covering_span_to_spl_root_arena_vmsleep(spl_minalloc * spl_vmem_threads_waiting))
-			wait = true;
-		else
-			wait = false;
-	}
 
 	uint64_t root_free = vmem_size(spl_root_arena, VMEM_FREE);
 	uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
+	uint64_t xi_free = vmem_size(xnu_import_arena, VMEM_FREE);
 
-	uint64_t arena_free = root_free + reserve_free;
+	// we still want to opportunistically grab spl_minalloc sized blocks
+	// if vmem_alloc(..., spl_minalloc, VM_NOSLEEP) calls would fail.
+	if (!vmem_canalloc_nomutex(spl_root_arena, spl_minalloc))
+		root_free = 0;
+	if (!vmem_canalloc_nomutex(spl_large_reserve_arena, spl_minalloc))
+		reserve_free = 0;
+	if (!vmem_canalloc_nomutex(xnu_import_arena, spl_minalloc))
+		xi_free = 0;
+
+	uint64_t arena_free = root_free + reserve_free + xi_free;
 
 	extern uint64_t real_total_memory;
 
 	uint64_t target_free = real_total_memory/64;
 
-	// ensure we have at least SPA_MAXBLOCKSIZE (16 MiB) free
 	uint64_t spamax = 16ULL * 1024ULL * 1024ULL;
 
-	if (arena_free < spamax) {
-		if (vmem_add_memory_to_spl_root_arena(spamax) < spamax) {
-			wait = false;
-		} else {
-			target_free -= spamax;
+	if (!vmem_canalloc_nomutex(spl_root_arena, spamax) &&
+	    !vmem_canalloc_nomutex(spl_large_reserve_arena, spamax) &&
+	    !vmem_canalloc_nomutex(xnu_import_arena, spamax)) {
+		if(vmem_add_memory_to_spl_root_arena(spamax, spamax) == spamax) {
+			arena_free += spamax;
+			wait = true;
 		}
 	}
 
 	// amount pulled in by previous refills + initial amount allocated in vmem_init +
 	// anything not recycled or released yet
-	uint64_t sys_mem_in_use = spl_root_arena->vm_kstat.vk_mem_total.value.ui64 +
-	    spl_large_reserve_arena->vm_kstat.vk_mem_total.value.ui64 +
-	    free_arena->vm_kstat.vk_mem_total.value.ui64;
+	uint64_t sys_mem_in_use = segkmem_total_mem_allocated;
 
 	// if we don't have target_free in spl_root_arena, try to add spans
 	// as long as total vmem isn't above 80% of real_total_memory.
 
 	uint64_t high_threshold = real_total_memory * 80ULL / 100ULL;
 
-	if ((spl_root_refill_request > 0 || arena_free < target_free) &&
-	    (spl_root_refill_request == 0 && sys_mem_in_use < high_threshold)) {
-		uint64_t r = vmem_add_memory_to_spl_root_arena(target_free+spl_root_refill_request);
-		if (r >= target_free) {
-			wait = true;
-			target_free = 0;
-			atomic_swap_64(&spl_root_refill_request, 0ULL);
-		} else if (r == 0) {
+	if (spl_root_refill_request > 0 ||
+	    (arena_free < target_free  && sys_mem_in_use < high_threshold)) {
+		uint64_t r =
+		    vmem_add_memory_to_spl_root_arena(target_free+spl_root_refill_request, spl_minalloc);
+		if (r == 0) {
 			wait = false;
-		} else {
-			target_free -= r;
+		} else if (r >= spl_root_refill_request) {
 			atomic_swap_64(&spl_root_refill_request, 0ULL);
+			wait = true;
+		} else { // 0 < r < spl_root_refill_request
+			atomic_sub_64(&spl_root_refill_request, r);
+			wait = false;
 		}
 	}
+
+	if (spl_root_refill_request > real_total_memory / 64)
+		atomic_swap_64(&spl_root_refill_request, real_total_memory / 64);
 
 	if (wait)
 		bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval_long);
@@ -2564,10 +2563,10 @@ static uint64_t vmem_vacuum_spl_root_arena(void);
  */
 // RETURNS ***BYTES***
 static uint64_t
-vmem_add_memory_to_spl_root_arena(size_t size)
+vmem_add_memory_to_spl_root_arena(size_t size, size_t span_size)
 {
 	const uint64_t gibi = 1024ULL*1024ULL*1024ULL;
-	const uint64_t minalloc = spl_minalloc;
+	const uint64_t minalloc = MAX(span_size, spl_minalloc);
 	const uint64_t pages_per_alloc = minalloc/PAGESIZE;
 
 	uint64_t alloc_bytes = MIN(size, gibi);
