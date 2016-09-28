@@ -1371,17 +1371,24 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 
 		// try a wait to see if we can recover some space
 		if (!(flags & (VM_NOSLEEP | VM_ABORT)) &&
-		    vmem_size(free_arena, VMEM_FREE)  >= size &&
-		    pass == 1) {
-			uint64_t recovered_bytes = vmem_flush_free_to_root();
+		    vmem_canalloc_nomutex(free_arena, size)) {
+			(void) vmem_flush_free_to_root();
 			mutex_enter(&vmp->vm_lock);
 			(void) cv_timedwait_hires(&vmp->vm_cv, &vmp->vm_lock, maxtime, resolution, 0);
 			mutex_exit(&vmp->vm_lock);
-			if (recovered_bytes >= size &&
-			    vmem_canalloc_nomutex(vmp, size)) {
+			if (vmem_canalloc_nomutex(vmp, size)) {
 				atomic_inc_64(&spl_root_allocator_recovered);
 				atomic_add_64(&spl_root_allocator_recovered_bytes, size);
 				return (NULL);
+			}
+		}
+
+		// if we're hunting for memory and free_arena has some,
+		// flush it, if we're allowed to wait for the flush
+		if (pass > 2 && vmem_size(free_arena, VMEM_FREE)) {
+			if (!(flags & (VM_NOSLEEP | VM_ABORT))) {
+				void vmem_vacuum_free_arena(void);
+				vmem_vacuum_free_arena();
 			}
 		}
 
