@@ -4220,8 +4220,11 @@ spl_free_thread()
 		if (!emergency_lowmem) {
 			int64_t above_min_free_pages = vm_page_free_count - vm_page_free_min;
 			int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
-			if (above_min_free_bytes < 16LL*1024LL*1024LL)
-				lowmem = true;
+			if (above_min_free_bytes < 16LL*1024LL*1024LL) {
+				extern vmem_t *spl_large_reserve_arena;
+				if (vmem_size(spl_large_reserve_arena, VMEM_FREE) < 64ULL*1024ULL*1024ULL)
+					lowmem = true;
+			}
 			if (above_min_free_bytes <= 0LL)
 				emergency_lowmem = true;
 			spl_free = above_min_free_bytes;
