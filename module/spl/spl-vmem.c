@@ -1344,7 +1344,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			maxtime = MSEC2NSEC(500);
 
 		bool reserve_best = false;
-		if (pass > 3)
+		if (pass > 4)
 			reserve_best = true;
 
 		// if we have headroom in the reserve, allocate there if we can
@@ -1355,12 +1355,6 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			p = timed_alloc_reserve(size, maxtime, resolution, reserve_best);
 			if (p != NULL)
 				return (p);
-		} else if (pass > 3 && !(flags & (VM_NOSLEEP|VM_ABORT))) {
-			// actually try to delay here
-			mutex_enter(&spl_large_reserve_arena->vm_lock);
-			(void) cv_timedwait_hires(&spl_large_reserve_arena->vm_cv,
-			    &spl_large_reserve_arena->vm_lock, MSEC2NSEC(500), resolution, 0);
-			mutex_exit(&spl_large_reserve_arena->vm_lock);
 		}
 
 		if (flags & (VM_NOSLEEP | VM_ABORT))
@@ -2432,7 +2426,22 @@ static void spl_root_arena_free_to_free_arena(vmem_t *, void *, size_t);
 void
 spl_root_refill(void *dummy)
 {
-	boolean_t wait = false;
+	boolean_t wait = true;
+
+	extern uint64_t real_total_memory;
+
+	uint64_t target_free = real_total_memory/64;
+
+	const uint64_t spamax = 16ULL * 1024ULL * 1024ULL;
+
+	if (!vmem_canalloc_nomutex(spl_root_arena, spamax) &&
+	    !vmem_canalloc_nomutex(spl_large_reserve_arena, spamax) &&
+	    !vmem_canalloc_nomutex(xnu_import_arena, spamax)) {
+		if(vmem_add_memory_to_spl_root_arena(spamax, spamax) == spamax) {
+			target_free -= MIN(target_free, spamax);
+			wait = false;
+		}
+	}
 
 	uint64_t root_free = vmem_size(spl_root_arena, VMEM_FREE);
 	uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
@@ -2448,22 +2457,6 @@ spl_root_refill(void *dummy)
 		xi_free = 0;
 
 	uint64_t arena_free = root_free + reserve_free + xi_free;
-
-	extern uint64_t real_total_memory;
-
-	uint64_t target_free = real_total_memory/64;
-
-	uint64_t spamax = 16ULL * 1024ULL * 1024ULL;
-
-	if (!vmem_canalloc_nomutex(spl_root_arena, spamax) &&
-	    !vmem_canalloc_nomutex(spl_large_reserve_arena, spamax) &&
-	    !vmem_canalloc_nomutex(xnu_import_arena, spamax)) {
-		if(vmem_add_memory_to_spl_root_arena(spamax, spamax) == spamax) {
-			arena_free += spamax;
-			target_free -= MIN(target_free, spamax);
-			wait = true;
-		}
-	}
 
 	// amount pulled in by previous refills + initial amount allocated in vmem_init +
 	// anything not recycled or released yet
@@ -2484,6 +2477,9 @@ spl_root_refill(void *dummy)
 			wait = true;
 		}
 	}
+
+	if (wait && vmem_canalloc_nomutex(spl_large_reserve_arena, target_free))
+		wait = false;
 
 	if (wait)
 		bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval_long);
