@@ -4246,7 +4246,7 @@ spl_free_thread()
 
 		// adjust for available memory in spl_root_arena
 		// cf arc_available_memory()
-		if (!emergency_lowmem && !lowmem) {
+		if (!emergency_lowmem) {
 			extern vmem_t *spl_root_arena;
 			extern vmem_t *spl_large_reserve_arena;
 			extern vmem_t *xnu_import_arena;
@@ -4257,6 +4257,9 @@ spl_free_thread()
 			    (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE) +
 			    (int64_t)spl_free_arena_size() +
 			    (int64_t)spl_vmem_size(xnu_import_arena, VMEM_FREE);
+
+			if (lowmem && root_free > 0)
+				root_free /= 4;
 
 			// if there's free space for spl_root_arena to grow into without
 			// allocating, then inflate
@@ -4328,10 +4331,6 @@ spl_free_thread()
 				spl_free -= zio_size / 64;
 			}
 		}
-
-		// when in lowmem, limit growth (especially do not encourage arc_no_grow to go false)
-		if (!emergency_lowmem && lowmem && spl_free > 16LL * 1024LL * 1024LL)
-			spl_free = 16LL * 1024LL * 1024LL; // SPA_MAXBLOCKSIZE
 
 		// when in emergency lowmem, do not allow spl_free to be positive
 		if (emergency_lowmem && spl_free >= 0LL)
