@@ -343,7 +343,6 @@ static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
 static struct timespec  spl_root_refill_interval_long = {0, MSEC2NSEC(100)};
 static struct timespec  vmem_vacuum_thread_interval = {30, 0};
-static uint64_t spl_root_refill_request = 0;
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
@@ -1414,7 +1413,6 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 				even_if_pressure = tried_xnu_alloc;
 			dprintf("SPL: %s - WOAH! - pass %u, time elapsed %llu ticks, forcing allocation of %llu\n",
 			    __func__, pass, zfs_lbolt() - loopstart, (uint64_t)size);
-			atomic_add_64(&spl_root_refill_request, size);
 		}
 
 		p = timed_alloc_root_xnu(size, maxtime, resolution, even_if_pressure);
@@ -2431,41 +2429,6 @@ vmem_update(void *dummy)
 static uint64_t vmem_add_memory_to_spl_root_arena(size_t, size_t);
 static void spl_root_arena_free_to_free_arena(vmem_t *, void *, size_t);
 
-static void *
-spl_fill_try_add_covering_span(vmem_t *vmp, size_t min_size, int vmflags)
-{
-
-	uint64_t covering_size;
-
-	if (min_size <= spl_minalloc)
-		covering_size = spl_minalloc;
-	else if ((min_size & (min_size - 1)) == 0) // is a power-of-two
-		covering_size = min_size;
-	else {
-		// get next largest power-of-two
-		uint64_t r = 0;
-		uint64_t s = min_size;
-		while (s >>= 1)
-			r++;
-		covering_size = 1 << (r+1);
-	}
-
-	if (covering_size > spl_minalloc)  // may be noisy
-		dprintf("SPL: %s: attempting min_size = %llu covering_size = %llu\n",
-		    __func__, (uint64_t)min_size, covering_size);
-
-	void *p = spl_vmem_malloc_if_no_pressure(covering_size);
-	if (p == NULL) {
-		if (covering_size > spl_minalloc)
-			printf("SPL: %s: failed covering_size = %llu\n",
-			    __func__, covering_size);
-		return (NULL);
-	}
-
-	void *vaddr = vmem_add_as_import(vmp, p, covering_size, vmflags);
-	return(vaddr);
-}
-
 void
 spl_root_refill(void *dummy)
 {
@@ -2497,6 +2460,7 @@ spl_root_refill(void *dummy)
 	    !vmem_canalloc_nomutex(xnu_import_arena, spamax)) {
 		if(vmem_add_memory_to_spl_root_arena(spamax, spamax) == spamax) {
 			arena_free += spamax;
+			target_free -= MIN(target_free, spamax);
 			wait = true;
 		}
 	}
@@ -2510,23 +2474,16 @@ spl_root_refill(void *dummy)
 
 	uint64_t high_threshold = real_total_memory * 80ULL / 100ULL;
 
-	if (spl_root_refill_request > 0 ||
-	    (arena_free < target_free  && sys_mem_in_use < high_threshold)) {
-		uint64_t r =
-		    vmem_add_memory_to_spl_root_arena(target_free+spl_root_refill_request, spl_minalloc);
+	if (arena_free < target_free  &&
+	    sys_mem_in_use < high_threshold &&
+	    spl_vmem_xnu_useful_bytes_free() > spl_minalloc * 32) {
+		uint64_t r = vmem_add_memory_to_spl_root_arena(target_free, spl_minalloc);
 		if (r == 0) {
 			wait = false;
-		} else if (r >= spl_root_refill_request) {
-			atomic_swap_64(&spl_root_refill_request, 0ULL);
+		} else {
 			wait = true;
-		} else { // 0 < r < spl_root_refill_request
-			atomic_sub_64(&spl_root_refill_request, r);
-			wait = false;
 		}
 	}
-
-	if (spl_root_refill_request > real_total_memory / 64)
-		atomic_swap_64(&spl_root_refill_request, real_total_memory / 64);
 
 	if (wait)
 		bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval_long);
