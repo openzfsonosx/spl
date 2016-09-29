@@ -629,7 +629,7 @@ static spl_stats_t spl_stats = {
 	{"vm_page_free_multiplier", KSTAT_DATA_UINT64},
 	{"vm_page_free_min_min", KSTAT_DATA_UINT64},
 	{"spl_free_wake_count", KSTAT_DATA_UINT64},
-	{"spl_spl_free", KSTAT_DATA_UINT64},
+	{"spl_spl_free", KSTAT_DATA_INT64},
 	{"spl_spl_free_manual_pressure", KSTAT_DATA_UINT64},
 	{"spl_spl_free_fast_pressure", KSTAT_DATA_UINT64},
 	{"spl_spl_free_delta_ema", KSTAT_DATA_UINT64},
@@ -4210,7 +4210,10 @@ spl_free_thread()
 		spl_free = 0LL;
 
 		if (vm_page_free_wanted > 0) {
-			spl_free = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -8LL;
+			int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -8LL;
+			if (bminus > -16LL*1024LL*1024LL)
+				bminus = -16LL*1024LL*1024LL;
+			spl_free = bminus;
 			lowmem = true;
 			emergency_lowmem = true;
 			spl_free_fast_pressure = TRUE;
@@ -4255,14 +4258,17 @@ spl_free_thread()
 			extern vmem_t *xnu_import_arena;
 			int64_t root_total = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE | VMEM_ALLOC);
 			int64_t root_fraction_total = root_total/64;
-			extern size_t spl_free_arena_size(void);
-			int64_t root_free = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE) +
-			    (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE) +
-			    (int64_t)spl_free_arena_size() +
-			    (int64_t)spl_vmem_size(xnu_import_arena, VMEM_FREE);
+			int64_t ra_free = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE);
+			int64_t la_free = (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE);
+			int64_t xa_free = (int64_t)spl_vmem_size(xnu_import_arena, VMEM_FREE);
+			int64_t root_free = ra_free + la_free + xa_free;
 
-			if (lowmem && root_free > 0)
-				root_free /= 4;
+			if (lowmem) {
+				if (la_free < 32LL * 1024LL * 1024LL)
+					root_free = 16LL * 1024LL * 1024LL;
+				else
+					root_free = la_free / 2;
+			}
 
 			// if there's free space for spl_root_arena to grow into without
 			// allocating, then inflate
@@ -4336,15 +4342,23 @@ spl_free_thread()
 		}
 
 		// when in emergency lowmem, do not allow spl_free to be positive
-		if (emergency_lowmem && spl_free >= 0LL)
+		if (emergency_lowmem && spl_free >= 0LL) {
 			spl_free = -1024LL;
+			extern vmem_t *spl_root_arena;
+			uint64_t root_size = spl_vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
+			uint64_t root_free = spl_vmem_size(spl_root_arena, VMEM_FREE);
+			int64_t difference = root_size - root_free;
+			if (difference > 16384LL) {
+				spl_free -= difference / 16;
+			}
+		}
 
 		if (emergency_lowmem || lowmem) {
 			static uint64_t last_reap = 0;
 			uint64_t now = zfs_lbolt();
 			uint64_t elapsed = 300*hz;
 			if (emergency_lowmem)
-				elapsed = 10*hz;
+				elapsed = 5*hz;
 			if (now - last_reap > elapsed) {
 				kmem_reap();
 				vmem_qcache_reap(kmem_default_arena);
