@@ -2465,7 +2465,7 @@ spl_root_refill(void *dummy)
 	// if we don't have target_free in spl_root_arena, try to add spans
 	// as long as total vmem isn't above 80% of real_total_memory.
 
-	uint64_t high_threshold = real_total_memory * 80ULL / 100ULL;
+	uint64_t high_threshold = real_total_memory * 75ULL / 100ULL;
 
 	if (arena_free < target_free  &&
 	    sys_mem_in_use < high_threshold &&
