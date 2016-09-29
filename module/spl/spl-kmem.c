@@ -4118,7 +4118,7 @@ void
 spl_free_wrapper_reset(void)
 {
 	mutex_enter(&spl_free_lock);
-	spl_free = 0;
+	__sync_lock_test_and_set(&spl_free, 0LL);
 	mutex_exit(&spl_free_lock);
 }
 
@@ -4126,7 +4126,7 @@ void
 spl_free_wrapper_set(int64_t new)
 {
 	mutex_enter(&spl_free_lock);
-	spl_free = new;
+	__sync_lock_test_and_set(&spl_free, new);
 	mutex_exit(&spl_free_lock);
 }
 
@@ -4199,6 +4199,7 @@ spl_free_thread()
 		boolean_t lowmem = false;
 		boolean_t emergency_lowmem = false;
 		int64_t base;
+		int64_t new_spl_free = 0LL;
 
 		spl_stats.spl_free_wake_count.value.ui64++;
 
@@ -4209,17 +4210,18 @@ spl_free_thread()
 		// start with actual pages free plus half of speculative pages
 		// but if we are paging, start with -number_of_pages
 
-		spl_free = 0LL;
+		new_spl_free = 0LL;
 
 		if (vm_page_free_wanted > 0) {
 			int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -8LL;
 			if (bminus > -16LL*1024LL*1024LL)
 				bminus = -16LL*1024LL*1024LL;
-			spl_free = bminus;
+			new_spl_free = bminus;
 			lowmem = true;
 			emergency_lowmem = true;
-			spl_free_fast_pressure = TRUE;
-			spl_free_manual_pressure = -spl_free;
+			// atomic swaps to set these variables used in .../zfs/arc.c
+			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
+			__sync_lock_test_and_set(&spl_free_manual_pressure, -new_spl_free);
 		}
 
 		if (!emergency_lowmem) {
@@ -4232,7 +4234,7 @@ spl_free_thread()
 			}
 			if (above_min_free_bytes <= 0LL)
 				emergency_lowmem = true;
-			spl_free = above_min_free_bytes;
+			new_spl_free = above_min_free_bytes;
 		}
 
 		if (!lowmem && recent_lowmem > 0) {
@@ -4245,18 +4247,18 @@ spl_free_thread()
 		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
 			int64_t speculative_bytes = (int64_t)PAGESIZE * vm_page_speculative_count;
 			if (speculative_bytes > real_total_memory / 16)
-				spl_free += speculative_bytes;
+				new_spl_free += speculative_bytes;
 			else if (speculative_bytes > 0)
-				spl_free += speculative_bytes / 2;
+				new_spl_free += speculative_bytes / 2;
 		}
 
-		base = spl_free;
+		base = new_spl_free;
 
 		// if there are vmem waiters, signal need for a little space (use spl_minalloc?)
 		extern volatile uint64_t spl_vmem_threads_waiting;
 		int64_t w = (int64_t)spl_vmem_threads_waiting;
 		if (w > 0LL) {
-			spl_free -= (w * 1024LL * 1024LL);
+			new_spl_free -= (w * 1024LL * 1024LL);
 		}
 
 		// adjust for available memory in spl_root_arena
@@ -4282,13 +4284,13 @@ spl_free_thread()
 			// if there's free space for spl_root_arena to grow into without
 			// allocating, then inflate
 			if (root_free > root_fraction_total) {
-				spl_free += root_free / 2;
+				new_spl_free += root_free / 2;
 			}
 			// spl_root_arena has gotten really big, shrink hard
 			if ((root_total * 100ULL / real_total_memory) > 70) {
-				spl_free -= root_fraction_total;
+				new_spl_free -= root_fraction_total;
 			} else if ((root_total * 100ULL / real_total_memory) > 75) {
-				spl_free -= root_fraction_total;
+				new_spl_free -= root_fraction_total;
 				lowmem = true;
 			}
 			// adjust for population of xnu_import arena
@@ -4300,14 +4302,14 @@ spl_free_thread()
 			if (xi_used > 0 && xi_size > 0) {
 				if ((xi_used * 100ULL / real_total_memory) > 20) {
 					lowmem = true;
-					spl_free -= xi_size / 64;
+					new_spl_free -= xi_size / 64;
 				}
 				if ((xi_used * 100ULL / real_total_memory) > 40) {
 					lowmem = true;
-					spl_free -= xi_size / 16;
+					new_spl_free -= xi_size / 16;
 				}
 				if ((xi_used * 100ULL / root_size) > 40) {
-					spl_free -= xi_size / 64;
+					new_spl_free -= xi_size / 64;
 				}
 			}
 		}
@@ -4323,7 +4325,7 @@ spl_free_thread()
 			// 75% total memory cap on zfs_file_data
 			if (!lowmem && !emergency_lowmem && zio_pct > 75 &&
 			    (now > zio_last_too_big + seconds_of_lower_cap)) {
-				spl_free -= zio_size / 64;
+				new_spl_free -= zio_size / 64;
 				zio_last_too_big = now;
 				imposed_cap = 75;
 			} else if (lowmem || emergency_lowmem) {
@@ -4333,12 +4335,12 @@ spl_free_thread()
 				// we don't want the lowest cap to be so low that
 				// we will not make any use of the fixed size reserve
 				if (lowmem && zio_pct > lowmem_cap) {
-					spl_free -= zio_size / 64;
+					new_spl_free -= zio_size / 64;
 					zio_last_too_big = now;
 					imposed_cap = lowmem_cap;
 				}
 				if (emergency_lowmem && zio_pct > emergency_lowmem_cap) {
-					spl_free -= zio_size / 16;
+					new_spl_free -= zio_size / 16;
 					zio_last_too_big = now;
 					imposed_cap = emergency_lowmem_cap;
 				}
@@ -4346,19 +4348,19 @@ spl_free_thread()
 			if (zio_last_too_big != now &&
 			    now < zio_last_too_big + seconds_of_lower_cap &&
 			    zio_pct > imposed_cap) {
-				spl_free -= zio_size / 64;
+				new_spl_free -= zio_size / 64;
 			}
 		}
 
-		// when in emergency lowmem, do not allow spl_free to be positive
-		if (emergency_lowmem && spl_free >= 0LL) {
-			spl_free = -1024LL;
+		// when in emergency lowmem, do not allow new_spl_free to be positive
+		if (emergency_lowmem && new_spl_free >= 0LL) {
+			new_spl_free = -1024LL;
 			extern vmem_t *spl_root_arena;
 			uint64_t root_size = spl_vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 			uint64_t root_free = spl_vmem_size(spl_root_arena, VMEM_FREE);
 			int64_t difference = root_size - root_free;
 			if (difference > 16384LL) {
-				spl_free -= difference / 16;
+				new_spl_free -= difference / 16;
 			}
 		}
 
@@ -4374,23 +4376,14 @@ spl_free_thread()
 				last_reap = now;
 			}
 		}
-#if 0
-		if (spl_free < 0LL) {
-			int64_t old_pressure = spl_free_manual_pressure;
-			int64_t minus_spl_free = -spl_free;
 
-			// can't mutex here
-			if (minus_spl_free > old_pressure) {
-				__sync_lock_test_and_set(&spl_free_manual_pressure, minus_spl_free);
-				__sync_lock_test_and_set(&spl_free_fast_pressure, true);
-			}
-		}
-#endif
+		double delta = new_spl_free - base;
 
-		double delta = spl_free - base;
-
-		if (spl_free < 0LL)
+		if (new_spl_free < 0LL)
 			spl_stats.spl_spl_free_negative_count.value.ui64++;
+
+		// NOW atomically set spl_free from calculated new_spl_free
+		__sync_lock_test_and_set(&spl_free, new_spl_free);
 
 		mutex_exit(&spl_free_lock);
 
