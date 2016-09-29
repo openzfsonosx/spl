@@ -4221,7 +4221,7 @@ spl_free_thread()
 			emergency_lowmem = true;
 			// atomic swaps to set these variables used in .../zfs/arc.c
 			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
-			__sync_lock_test_and_set(&spl_free_manual_pressure, -new_spl_free);
+			__sync_lock_test_and_set(&spl_free_manual_pressure, -8LL * new_spl_free);
 		}
 
 		if (!emergency_lowmem) {
@@ -4272,13 +4272,16 @@ spl_free_thread()
 			int64_t ra_free = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE);
 			int64_t la_free = (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE);
 			int64_t xa_free = (int64_t)spl_vmem_size(xnu_import_arena, VMEM_FREE);
-			int64_t root_free = ra_free + la_free + xa_free;
+
+			int64_t root_free = la_free;
+			if ((ra_free + xa_free) > 0)
+				root_free += (ra_free + xa_free) / 4;
 
 			if (lowmem) {
-				if (la_free < 32LL * 1024LL * 1024LL)
+				if (la_free < 64LL * 1024LL * 1024LL)
 					root_free = 16LL * 1024LL * 1024LL;
 				else
-					root_free = la_free / 2;
+					root_free = la_free / 4;
 			}
 
 			// if there's free space for spl_root_arena to grow into without
@@ -4335,12 +4338,12 @@ spl_free_thread()
 				// we don't want the lowest cap to be so low that
 				// we will not make any use of the fixed size reserve
 				if (lowmem && zio_pct > lowmem_cap) {
-					new_spl_free -= zio_size / 64;
+					new_spl_free -= zio_size / 32;
 					zio_last_too_big = now;
 					imposed_cap = lowmem_cap;
 				}
 				if (emergency_lowmem && zio_pct > emergency_lowmem_cap) {
-					new_spl_free -= zio_size / 16;
+					new_spl_free -= zio_size / 8;
 					zio_last_too_big = now;
 					imposed_cap = emergency_lowmem_cap;
 				}
