@@ -4192,6 +4192,8 @@ spl_free_thread()
 	printf("SPL: beginning spl_free_thread() loop, spl_free == %lld\n",
 		   spl_free);
 
+	uint64_t recent_lowmem = 0;
+
 	while (!spl_free_thread_exit) {
 		mutex_exit(&spl_free_thread_lock);
 		boolean_t lowmem = false;
@@ -4231,6 +4233,13 @@ spl_free_thread()
 			if (above_min_free_bytes <= 0LL)
 				emergency_lowmem = true;
 			spl_free = above_min_free_bytes;
+		}
+
+		if (!lowmem && recent_lowmem > 0) {
+			if (recent_lowmem + 4*hz < zfs_lbolt())
+				lowmem = true;
+			else
+				recent_lowmem = 0;
 		}
 
 		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
@@ -4384,6 +4393,9 @@ spl_free_thread()
 			spl_stats.spl_spl_free_negative_count.value.ui64++;
 
 		mutex_exit(&spl_free_lock);
+
+		if (lowmem)
+			recent_lowmem = zfs_lbolt();
 
 		// maintain an exponential moving average for the ema kstat
 		if (last_update > hz)
