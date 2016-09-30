@@ -343,6 +343,7 @@ static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(100)};   // spl_root_refill() every 100 ms
 static struct timespec  spl_root_refill_interval_long = {1, 0}; // every one second otherwise
 static struct timespec  vmem_vacuum_thread_interval = {30, 0};
+static boolean_t spl_root_refill_enabled = true;
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
@@ -1336,12 +1337,21 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		hrtime_t resolution = MSEC2NSEC(1);
 		hrtime_t maxtime;
 
+		const hrtime_t tinymaxtime = MSEC2NSEC(1);
+		const hrtime_t shortmaxtime = MSEC2NSEC(5);
+		const hrtime_t longmaxtime = MSEC2NSEC(100);
+		const hrtime_t verylongmaxtime = MSEC2NSEC(500);
+
 		if (flags & (VM_NOSLEEP | VM_ABORT))
-			maxtime = MSEC2NSEC(2);
-		else if (pass < 2) 
-			maxtime = MSEC2NSEC(100);
+			maxtime = tinymaxtime;
+		else if (pass < 2 && spl_root_refill_enabled)
+			maxtime = longmaxtime;
+		else if (pass < 2)
+			maxtime = shortmaxtime;
+		else if (spl_root_refill_enabled)
+			maxtime = verylongmaxtime;
 		else
-			maxtime = MSEC2NSEC(500);
+			maxtime = shortmaxtime;
 
 		bool reserve_best = false;
 		if (pass > 4)
@@ -1358,9 +1368,11 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		}
 
 		if (flags & (VM_NOSLEEP | VM_ABORT))
-			maxtime = MSEC2NSEC(5);
+			maxtime = tinymaxtime;
+		else if (spl_root_refill_enabled)
+			maxtime = verylongmaxtime;
 		else
-			maxtime = MSEC2NSEC(500);
+			maxtime = shortmaxtime;
 
 		// try a wait to see if we can recover some space
 		if (!(flags & (VM_NOSLEEP | VM_ABORT)) &&
@@ -1387,11 +1399,11 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 
 		bool even_if_pressure = false;
 		if (flags & VM_NOSLEEP) {
-			maxtime = MSEC2NSEC(1);
+			maxtime = tinymaxtime;
 			if (size > spl_minalloc || (flags & VM_PANIC))
 				even_if_pressure = true;
 		} else if (flags & VM_ABORT) {
-			maxtime = MSEC2NSEC(1);
+			maxtime = tinymaxtime;
 			even_if_pressure = false;
 		} else if ((zfs_lbolt() < one_second || pass < 5) &&
 		    !(flags & (VM_NOSLEEP | VM_ABORT))) {
@@ -1399,10 +1411,16 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			// are permitted to wait
 			continue;
 		} else if (zfs_lbolt() < one_second) {
-			maxtime = MSEC2NSEC(500);
+			if (spl_root_refill_enabled)
+				maxtime = verylongmaxtime;
+			else
+				maxtime = shortmaxtime;
 			even_if_pressure = false;
 		} else {
-  		        maxtime = MSEC2NSEC(500);
+			if (spl_root_refill_enabled)
+				maxtime = verylongmaxtime;
+			else
+				maxtime = shortmaxtime;
 			if (size > spl_minalloc)
 				even_if_pressure = tried_xnu_alloc;
 			dprintf("SPL: %s - WOAH! - pass %u, time elapsed %llu ticks, forcing allocation of %llu\n",
@@ -2425,8 +2443,6 @@ static void spl_root_arena_free_to_free_arena(vmem_t *, void *, size_t);
 
 static boolean_t refill_thread_disabled = true;
 
-static boolean_t spl_root_refill_enabled = true;
-
 void
 spl_root_refill(void *dummy)
 {
@@ -2508,7 +2524,7 @@ spl_root_refill(void *dummy)
 	        wait = true;
 	}
 
-	spl_root_refill_enabled = hit_highwater_and_waiting;
+	spl_root_refill_enabled = !hit_highwater_and_waiting;
 
 	// if we could allocate a large chunk of memory from the reserve, wait longer
 	if (!wait && vmem_canalloc_nomutex(spl_large_reserve_arena, target_free / 2))
@@ -2600,28 +2616,26 @@ vmem_add_memory_to_spl_root_arena(size_t size, size_t span_size)
 		return(recovered_bytes);
 	}
 
-	rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 	rfree = vmem_size(spl_root_arena, VMEM_FREE);
 	rused = vmem_size(spl_root_arena, VMEM_ALLOC);
+	rtotal = rfree + rused;
 
 	// bail out early if there is ample space in any of the arenas
-	uint64_t resv_free = vmem_size(spl_root_arena, VMEM_FREE);
-	uint64_t resv_size = vmem_size(spl_root_arena, VMEM_FREE | VMEM_ALLOC);
 	uint64_t xi_free = vmem_size(xnu_import_arena, VMEM_FREE);
 	uint64_t xi_size = vmem_size(xnu_import_arena, VMEM_FREE | VMEM_ALLOC);
+	uint64_t resv_alloc = vmem_size(spl_large_reserve_arena, VMEM_ALLOC);
 
-	if (resv_size > 0) {
-		if (resv_free < (resv_size / 8) && resv_free < 128ULL*1024ULL*1024ULL)
+	if (rtotal > resv_alloc) {
+		// we've pulled more than the reserve into spl_root_arena
+		// and we have 12.5% or more unallocated space in spl_root_arena
+		if (rfree > (rtotal / 8))
 			return (recovered_bytes);
 	}
 
-	if (xi_free > 0) {
-		if (xi_free < (xi_size / 8) && xi_free < 16ULL*1024ULL*1024ULL)
-			return (recovered_bytes);
-	}
-
-	if (rfree > 0) {
-		if (rfree < rtotal / 16)
+	if (xi_free > 0 && xi_size > 64ULL*1024ULL*1024ULL) {
+		// we have gone to xnu for more than a small amount memory
+		// and 50% of what we have from xnu is free
+		if (xi_free > (xi_size / 2))
 			return (recovered_bytes);
 	}
 
