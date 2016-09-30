@@ -341,7 +341,7 @@ vmem_t *xnu_import_arena;
 #define NUMBER_OF_ARENAS_IN_VMEM_INIT 10
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(100)};   // spl_root_refill() every 100 ms
-static struct timespec  spl_root_refill_interval_long = {SEC2NSEC(1), 0};
+static struct timespec  spl_root_refill_interval_long = {1, 0}; // every one second otherwise
 static struct timespec  vmem_vacuum_thread_interval = {30, 0};
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
