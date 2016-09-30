@@ -4613,7 +4613,8 @@ spl_kstat_update(kstat_t *ksp, int rw)
 			spl_free_set_pressure(ks->spl_spl_free_manual_pressure.value.i64 * 1024 *1024);
 			if (ks->spl_spl_free_manual_pressure.value.i64 > 0) {
 				mutex_enter(&reap_now_lock);
-				reap_now = TRUE;
+				kmem_reap();
+				vmem_qcache_reap(kmem_default_arena);
 				mutex_exit(&reap_now_lock);
 			}
 		}

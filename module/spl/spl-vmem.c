@@ -340,8 +340,8 @@ static size_t spl_large_reserve_initial_allocation_size;
 vmem_t *xnu_import_arena;
 #define NUMBER_OF_ARENAS_IN_VMEM_INIT 10
 static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15 seconds */
-static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(10)};   // spl_root_refill() every 10 ms
-static struct timespec  spl_root_refill_interval_long = {0, MSEC2NSEC(100)};
+static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(100)};   // spl_root_refill() every 100 ms
+static struct timespec  spl_root_refill_interval_long = {SEC2NSEC(1), 0};
 static struct timespec  vmem_vacuum_thread_interval = {30, 0};
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
@@ -2434,12 +2434,15 @@ spl_root_refill(void *dummy)
 
 	const uint64_t spamax = 16ULL * 1024ULL * 1024ULL;
 
+	// if we can't satisfy an allocation for spamax, try now (pressure permitting)
+	// (pressure is dealt with in vmem_add_memory_to_spl_root_arena())
+
 	if (!vmem_canalloc_nomutex(spl_root_arena, spamax) &&
 	    !vmem_canalloc_nomutex(spl_large_reserve_arena, spamax) &&
 	    !vmem_canalloc_nomutex(xnu_import_arena, spamax)) {
 		if(vmem_add_memory_to_spl_root_arena(spamax, spamax) == spamax) {
 			target_free -= MIN(target_free, spamax);
-			wait = false;
+			wait = true; // we can satisfy spamax now, so no need to rusn
 		}
 	}
 
@@ -2463,23 +2466,26 @@ spl_root_refill(void *dummy)
 	uint64_t sys_mem_in_use = segkmem_total_mem_allocated;
 
 	// if we don't have target_free in spl_root_arena, try to add spans
-	// as long as total vmem isn't above 80% of real_total_memory.
+	// as long as total vmem isn't above 60% of real_total_memory.
 
-	uint64_t high_threshold = real_total_memory * 75ULL / 100ULL;
+	uint64_t high_threshold = real_total_memory * 60ULL / 100ULL;
 
 	if (arena_free < target_free  &&
 	    sys_mem_in_use < high_threshold &&
 	    spl_vmem_xnu_useful_bytes_free() > spl_minalloc * 32) {
 		uint64_t r = vmem_add_memory_to_spl_root_arena(target_free, spl_minalloc);
 		if (r == 0) {
-			wait = false;
+			wait = true; // didn'g grab any, sleep longer
+		} else if (r < target_free){
+			wait = true; // couldn't grab everything, so wait a while before retrying
 		} else {
-			wait = true;
+			wait = false; // grabbed everything, so wait a while for it to be used
 		}
 	}
 
-	if (wait && vmem_canalloc_nomutex(spl_large_reserve_arena, target_free))
-		wait = false;
+	// if we could allocate a large chunk of memory from the reserve, wait longer
+	if (!wait && vmem_canalloc_nomutex(spl_large_reserve_arena, target_free / 2))
+		wait = true;
 
 	if (wait)
 		bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval_long);
@@ -2533,13 +2539,13 @@ vmem_add_memory_to_spl_root_arena(size_t size, size_t span_size)
 	uint64_t allocs = alloc_bytes / minalloc;
 
 	// vacuum root if we are fragmented (or have ample free in root)
-	// fragmentation metric: 25% free space
+	// fragmentation metric: 12.5% free space
 	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
 	size_t rused = vmem_size(spl_root_arena, VMEM_ALLOC);
 	extern uint64_t real_total_memory;
 
-	if (rtotal > (real_total_memory / 4) && rfree > (rtotal / 4))
+	if (rtotal > (real_total_memory / 4) && rfree > (rtotal / 8))
 		vmem_vacuum_spl_root_arena();
 	else if (rtotal / 2 > rused)
 		vmem_vacuum_spl_root_arena();
@@ -2571,14 +2577,35 @@ vmem_add_memory_to_spl_root_arena(size_t size, size_t span_size)
 	rfree = vmem_size(spl_root_arena, VMEM_FREE);
 	rused = vmem_size(spl_root_arena, VMEM_ALLOC);
 
+	// bail out early if there is ample space in any of the arenas
+	uint64_t resv_free = vmem_size(spl_root_arena, VMEM_FREE);
+	uint64_t resv_size = vmem_size(spl_root_arena, VMEM_FREE | VMEM_ALLOC);
+	uint64_t xi_free = vmem_size(xnu_import_arena, VMEM_FREE);
+	uint64_t xi_size = vmem_size(xnu_import_arena, VMEM_FREE | VMEM_ALLOC);
+
+	if (resv_size > 0) {
+		if (resv_free < (resv_size / 8) && resv_free < 128ULL*1024ULL*1024ULL)
+			return (recovered_bytes);
+	}
+
+	if (xi_free > 0) {
+		if (xi_free < (xi_size / 8) && xi_free < 16ULL*1024ULL*1024ULL)
+			return (recovered_bytes);
+	}
+
+	if (rfree > 0) {
+		if (rfree < rtotal / 16)
+			return (recovered_bytes);
+	}
+
 	// if we recovered enough space to have 1 GiB free, just return
 
 	if (recovered_minallocs > 0 && recovered_bytes + rfree > alloc_bytes)
 		return (recovered_bytes);
 
-	// if we recovered enough that we have 1/4 of spl_root_arena free, just return
+	// if we recovered enough that we have 1/8 of spl_root_arena free, just return
 
-	if (recovered_minallocs > 0 && recovered_bytes + rfree > rtotal / 4)
+	if (recovered_minallocs > 0 && recovered_bytes + rfree > rtotal / 8)
 		return(recovered_bytes);
 
 	// otherwise, we just deflate the number of allocs we need
