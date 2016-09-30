@@ -2427,6 +2427,8 @@ void
 spl_root_refill(void *dummy)
 {
 	boolean_t wait = true;
+	static boolean_t hit_highwater_and_waiting = false;
+	static uint64_t hit_highwater_waiting_since = 0;
 
 	extern uint64_t real_total_memory;
 
@@ -2437,7 +2439,8 @@ spl_root_refill(void *dummy)
 	// if we can't satisfy an allocation for spamax, try now (pressure permitting)
 	// (pressure is dealt with in vmem_add_memory_to_spl_root_arena())
 
-	if (!vmem_canalloc_nomutex(spl_root_arena, spamax) &&
+	if (!hit_highwater_and_waiting &&
+	    !vmem_canalloc_nomutex(spl_root_arena, spamax) &&
 	    !vmem_canalloc_nomutex(spl_large_reserve_arena, spamax) &&
 	    !vmem_canalloc_nomutex(xnu_import_arena, spamax)) {
 		if(vmem_add_memory_to_spl_root_arena(spamax, spamax) == spamax) {
@@ -2469,8 +2472,10 @@ spl_root_refill(void *dummy)
 	// as long as total vmem isn't above 60% of real_total_memory.
 
 	uint64_t high_threshold = real_total_memory * 60ULL / 100ULL;
+	uint64_t low_threshold = real_total_memory * 50ULL / 100ULL;
 
-	if (arena_free < target_free  &&
+	if (!hit_highwater_and_waiting &&
+	    arena_free < target_free  &&
 	    sys_mem_in_use < high_threshold &&
 	    spl_vmem_xnu_useful_bytes_free() > spl_minalloc * 32) {
 		uint64_t r = vmem_add_memory_to_spl_root_arena(target_free, spl_minalloc);
@@ -2481,6 +2486,22 @@ spl_root_refill(void *dummy)
 		} else {
 			wait = false; // grabbed everything, so wait a while for it to be used
 		}
+	}
+
+	if (!hit_highwater_and_waiting && sys_mem_in_use > high_threshold) {
+		hit_highwater_and_waiting = true;
+		hit_highwater_waiting_since = zfs_lbolt();
+		wait = true;
+	} else if (hit_highwater_and_waiting &&
+		   sys_mem_in_use < low_threshold &&
+		   (zfs_lbolt() > (hit_highwater_waiting_since + 1800*hz))) {
+		printf("SPL: %s: below threshold after %llu seconds, filling again.\n",
+		 __func__, zfs_lbolt()-hit_highwater_waiting_since);
+		hit_highwater_and_waiting = false;
+		hit_highwater_waiting_since = 0;
+		wait = false;
+	} else if (hit_highwater_and_waiting) {
+	        wait = true;
 	}
 
 	// if we could allocate a large chunk of memory from the reserve, wait longer
