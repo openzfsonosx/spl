@@ -1360,7 +1360,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		if (flags & (VM_NOSLEEP | VM_ABORT))
 			maxtime = MSEC2NSEC(5);
 		else
-			maxtime = SEC2NSEC(2);
+			maxtime = MSEC2NSEC(500);
 
 		// try a wait to see if we can recover some space
 		if (!(flags & (VM_NOSLEEP | VM_ABORT)) &&
@@ -1399,10 +1399,10 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			// are permitted to wait
 			continue;
 		} else if (zfs_lbolt() < one_second) {
-			maxtime = SEC2NSEC(1);
+			maxtime = MSEC2NSEC(500);
 			even_if_pressure = false;
 		} else {
-			maxtime = SEC2NSEC(1);
+  		        maxtime = MSEC2NSEC(500);
 			if (size > spl_minalloc)
 				even_if_pressure = tried_xnu_alloc;
 			dprintf("SPL: %s - WOAH! - pass %u, time elapsed %llu ticks, forcing allocation of %llu\n",
@@ -2423,6 +2423,10 @@ vmem_update(void *dummy)
 static uint64_t vmem_add_memory_to_spl_root_arena(size_t, size_t);
 static void spl_root_arena_free_to_free_arena(vmem_t *, void *, size_t);
 
+static boolean_t refill_thread_disabled = true;
+
+static boolean_t spl_root_refill_enabled = true;
+
 void
 spl_root_refill(void *dummy)
 {
@@ -2503,6 +2507,8 @@ spl_root_refill(void *dummy)
 	} else if (hit_highwater_and_waiting) {
 	        wait = true;
 	}
+
+	spl_root_refill_enabled = hit_highwater_and_waiting;
 
 	// if we could allocate a large chunk of memory from the reserve, wait longer
 	if (!wait && vmem_canalloc_nomutex(spl_large_reserve_arena, target_free / 2))
