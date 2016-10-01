@@ -1167,12 +1167,11 @@ timed_alloc_reserve(size_t size, hrtime_t timeout, hrtime_t resolution, bool bes
 	    timeout, resolution, 0);
 	int can = vmem_canalloc(vmp, size);
 	int canbig = vmem_canalloc(vmp, waitsize);
+	uint64_t f = vmem_size(vmp, VMEM_FREE);
 	mutex_exit(&vmp->vm_lock);
 
 	if (!can)
 		return (NULL);
-
-	uint64_t f = vmem_size(vmp, VMEM_FREE);
 
 	if (f <= minfree * 2ULL)
 		return (NULL);
@@ -1388,8 +1387,8 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			reserve_best = true;
 
 		// if we have headroom in the reserve, allocate there if we can
-		uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
-		uint64_t vmem_metadata_size = vmem_size(vmem_metadata_arena, VMEM_ALLOC | VMEM_FREE);
+		uint64_t reserve_free = vmem_size_locked(spl_large_reserve_arena, VMEM_FREE);
+		uint64_t vmem_metadata_size = vmem_size_locked(vmem_metadata_arena, VMEM_ALLOC | VMEM_FREE);
 
 		if (reserve_free > 2ULL * vmem_metadata_size) {
 			p = timed_alloc_reserve(size, maxtime, resolution, reserve_best);
@@ -1420,7 +1419,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 
 		// if we're hunting for memory and free_arena has some,
 		// flush it, if we're allowed to wait for the flush
-		if (pass > 2 && vmem_size(free_arena, VMEM_FREE)) {
+		if (pass > 2 && vmem_size_locked(free_arena, VMEM_FREE)) {
 			if (!(flags & (VM_NOSLEEP | VM_ABORT))) {
 				void vmem_vacuum_free_arena(void);
 				vmem_vacuum_free_arena();
@@ -2019,15 +2018,22 @@ vmem_size(vmem_t *vmp, int typemask)
 }
 
 size_t
-spl_vmem_size(vmem_t *vmp, int typemask)
+vmem_size_locked(vmem_t *vmp, int typemask)
 {
-	return(vmem_size(vmp, typemask));
+	boolean_t m = (mutex_owner(&vmp->vm_lock) == curthread);
+
+	if (!m)
+		mutex_enter(&vmp->vm_lock);
+	size_t s = vmem_size(vmp, typemask);
+	if (!m)
+		mutex_exit(&vmp->vm_lock);
+	return (s);
 }
 
 size_t
-spl_free_arena_size(void)
+spl_vmem_size(vmem_t *vmp, int typemask)
 {
-	return(vmem_size(free_arena, VMEM_ALLOC | VMEM_FREE));
+	return(vmem_size_locked(vmp, typemask));
 }
 
 /*
@@ -2421,10 +2427,12 @@ vmem_vacuum_thread(void *dummy)
 
 	// vacuum if we are fragmented (or have ample free in root)
 	// fragmentation metric: 25% free space
+	mutex_enter(&spl_root_arena->vm_lock);
 	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
 	size_t rused = vmem_size(spl_root_arena, VMEM_ALLOC);
 	size_t rimported = spl_root_arena->vm_kstat.vk_mem_import.value.ui64;
+	mutex_exit(&spl_root_arena->vm_lock);
 
 	if (rfree > rimported / 4)  	// if free > 25% of imported
 		vmem_vacuum_spl_root_arena();
@@ -2502,8 +2510,10 @@ spl_root_refill(void *dummy)
 	// we will only do this if we can leave behind at least a whole 64MiB segment
 	// and more than half of the reserve is free
 
+	mutex_enter(&spl_large_reserve_arena->vm_lock);
 	uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
 	uint64_t reserve_size = vmem_size(spl_large_reserve_arena, VMEM_FREE | VMEM_ALLOC);
+	mutex_exit(&spl_large_reserve_arena->vm_lock);
 
 	if (reserve_free < reserve_size / 2 &&
 	    !vmem_canalloc_nomutex(spl_root_arena, spamax) &&
@@ -2514,8 +2524,8 @@ spl_root_refill(void *dummy)
 		}
 	}
 
-	uint64_t root_free = vmem_size(spl_root_arena, VMEM_FREE);
-	uint64_t xi_free = vmem_size(xnu_import_arena, VMEM_FREE);
+	uint64_t root_free = vmem_size_locked(spl_root_arena, VMEM_FREE);
+	uint64_t xi_free = vmem_size_locked(xnu_import_arena, VMEM_FREE);
 
 	// we still want to opportunistically grab spl_minalloc sized blocks
 	// if vmem_alloc(..., spl_minalloc, VM_NOSLEEP) calls would fail.
@@ -2629,9 +2639,11 @@ vmem_add_memory_to_spl_root_arena(size_t size, size_t span_size)
 
 	// vacuum root if we are fragmented (or have ample free in root)
 	// fragmentation metric: 12.5% free space
+	mutex_enter(&spl_root_arena->vm_lock);
 	size_t rtotal = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 	size_t rfree = vmem_size(spl_root_arena, VMEM_FREE);
 	size_t rused = vmem_size(spl_root_arena, VMEM_ALLOC);
+	mutex_exit(&spl_root_arena->vm_lock);
 	extern uint64_t real_total_memory;
 
 	if (rtotal > (real_total_memory / 4) && rfree > (rtotal / 8))
@@ -2662,14 +2674,18 @@ vmem_add_memory_to_spl_root_arena(size_t size, size_t span_size)
 		return(recovered_bytes);
 	}
 
+	mutex_enter(&spl_root_arena->vm_lock);
 	rfree = vmem_size(spl_root_arena, VMEM_FREE);
 	rused = vmem_size(spl_root_arena, VMEM_ALLOC);
+	mutex_exit(&spl_root_arena->vm_lock);
 	rtotal = rfree + rused;
 
 	// bail out early if there is ample space in any of the arenas
+	mutex_enter(&xnu_import_arena->vm_lock);
 	uint64_t xi_free = vmem_size(xnu_import_arena, VMEM_FREE);
 	uint64_t xi_size = vmem_size(xnu_import_arena, VMEM_FREE | VMEM_ALLOC);
-	uint64_t resv_alloc = vmem_size(spl_large_reserve_arena, VMEM_ALLOC);
+	mutex_exit(&xnu_import_arena->vm_lock);
+	uint64_t resv_alloc = vmem_size_locked(spl_large_reserve_arena, VMEM_ALLOC);
 
 	if (rtotal > resv_alloc) {
 		// we've pulled more than the reserve into spl_root_arena
@@ -2721,7 +2737,7 @@ vmem_add_memory_to_spl_root_arena(size_t size, size_t span_size)
 			mutex_exit(&vmem_flush_free_lock);
 			spl_root_arena->vm_kstat.vk_parent_alloc.value.ui64++;
 		}
-		rfree = vmem_size(spl_root_arena, VMEM_FREE);
+		rfree = vmem_size_locked(spl_root_arena, VMEM_FREE);
 		if (rfree > gibi)
 			return (recovered_bytes + i * minalloc);
 	}

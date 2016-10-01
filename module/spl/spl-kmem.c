@@ -4298,11 +4298,11 @@ spl_free_thread()
 			extern vmem_t *spl_root_arena;
 			extern vmem_t *spl_large_reserve_arena;
 			extern vmem_t *xnu_import_arena;
-			int64_t root_total = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE | VMEM_ALLOC);
+			int64_t root_total = (int64_t)vmem_size_locked(spl_root_arena, VMEM_FREE|VMEM_ALLOC);
 			int64_t root_fraction_total = root_total/64;
-			int64_t ra_free = (int64_t)spl_vmem_size(spl_root_arena, VMEM_FREE);
-			int64_t la_free = (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE);
-			int64_t xa_free = (int64_t)spl_vmem_size(xnu_import_arena, VMEM_FREE);
+			int64_t ra_free = (int64_t)vmem_size_locked(spl_root_arena, VMEM_FREE);
+			int64_t la_free = (int64_t)vmem_size_locked(spl_large_reserve_arena, VMEM_FREE);
+			int64_t xa_free = (int64_t)vmem_size_locked(xnu_import_arena, VMEM_FREE);
 
 			if (reserve_low && la_free < sixtyfour * 4ULL)
 				la_free = 0;
@@ -4335,9 +4335,9 @@ spl_free_thread()
 			}
 			// adjust for population of xnu_import arena
 			// beware of division by zero with unpopulated arenas (xi, mainly)
-			uint64_t xi_used = vmem_size(xnu_import_arena, VMEM_ALLOC);
-			uint64_t xi_size = vmem_size(xnu_import_arena, VMEM_ALLOC | VMEM_FREE);
-			uint64_t root_size = vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
+			uint64_t xi_used = vmem_size_locked(xnu_import_arena, VMEM_ALLOC);
+			uint64_t xi_size = vmem_size_locked(xnu_import_arena, VMEM_ALLOC | VMEM_FREE);
+			uint64_t root_size = vmem_size_locked(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 			// xi is too big, shrink
 			if (xi_used > 0 && xi_size > 0) {
 				if ((xi_used * 100ULL / real_total_memory) > 20) {
@@ -4354,7 +4354,7 @@ spl_free_thread()
 			}
 		}
 
-		uint64_t zio_size = vmem_size(zio_arena, VMEM_ALLOC | VMEM_FREE);
+		uint64_t zio_size = vmem_size_locked(zio_arena, VMEM_ALLOC | VMEM_FREE);
 		if (zio_size > 0) {
 			static uint64_t zio_last_too_big = 0;
 			static int64_t imposed_cap = 75;
@@ -4396,8 +4396,8 @@ spl_free_thread()
 		if (emergency_lowmem && new_spl_free >= 0LL) {
 			new_spl_free = -1024LL;
 			extern vmem_t *spl_root_arena;
-			uint64_t root_size = spl_vmem_size(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
-			uint64_t root_free = spl_vmem_size(spl_root_arena, VMEM_FREE);
+			uint64_t root_size = vmem_size_locked(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
+			uint64_t root_free = vmem_size_locked(spl_root_arena, VMEM_FREE);
 			int64_t difference = root_size - root_free;
 			if (difference > 16384LL) {
 				new_spl_free -= difference / 16;
