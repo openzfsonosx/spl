@@ -1143,16 +1143,20 @@ spl_vmem_malloc_if_no_pressure(size_t size)
  *
  */
 
-static inline void *
-timed_alloc_any_arena(vmem_t *vmp, size_t size, hrtime_t timeout, hrtime_t resolution, bool best)
+static void *
+timed_alloc_reserve(size_t size, hrtime_t timeout, hrtime_t resolution, bool best)
 {
+	vmem_t *vmp = spl_large_reserve_arena;
+
+	const size_t minfree = 32ULL*1024ULL*1024ULL;
+	const size_t waitsize = MAX(size, minfree);
 
 	int flags = VM_ABORT | VM_NOSLEEP;
 	if (best)
 		flags |= VM_BESTFIT;
 
 	mutex_enter(&vmp->vm_lock);
-	if (vmem_canalloc(vmp, size)) {
+	if (vmem_canalloc(vmp, waitsize)) {
 		mutex_exit(&vmp->vm_lock);
 		void *p = vmem_alloc(vmp, size, flags);
 		if (p) {
@@ -1161,24 +1165,22 @@ timed_alloc_any_arena(vmem_t *vmp, size_t size, hrtime_t timeout, hrtime_t resol
 	}
 	(void) cv_timedwait_hires(&vmp->vm_cv, &vmp->vm_lock,
 	    timeout, resolution, 0);
+	int can = vmem_canalloc(vmp, size);
+	int canbig = vmem_canalloc(vmp, waitsize);
 	mutex_exit(&vmp->vm_lock);
-	return (vmem_alloc(vmp, size, flags));
-}
 
-static void *
-timed_alloc_reserve(size_t size, hrtime_t timeout, hrtime_t resolution, bool best)
-{
-	const uint64_t minsegfree = 16ULL*1024ULL*1024ULL;
-	const uint64_t minfree = 32ULL*1024ULL*1024ULL;
-
-	// leave either at least a single 16 MiB segment free, or whatever
-	// makes up at least 32 MiB worth of data.
-	if (vmem_size(spl_large_reserve_arena, VMEM_FREE) <= minfree ||
-	    !vmem_canalloc(spl_large_reserve_arena, minsegfree)) {
+	if (!can)
 		return (NULL);
-	}
 
-	void *p = timed_alloc_any_arena(spl_large_reserve_arena, size, timeout, resolution, best);
+	uint64_t f = vmem_size(vmp, VMEM_FREE);
+
+	if (f <= minfree * 2ULL)
+		return (NULL);
+
+	if (!canbig)
+		flags |= VM_BESTFIT;
+
+	void *p = vmem_alloc(vmp, size, flags);
 	if (p) {
 		atomic_inc_64(&ta_reserve_success);
 		atomic_add_64(&ta_reserve_success_bytes, size);
