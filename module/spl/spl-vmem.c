@@ -1168,10 +1168,13 @@ timed_alloc_any_arena(vmem_t *vmp, size_t size, hrtime_t timeout, hrtime_t resol
 static void *
 timed_alloc_reserve(size_t size, hrtime_t timeout, hrtime_t resolution, bool best)
 {
-	// leave at least a single 64 MiB segment free as reserve
-	const uint64_t headroom = 64ULL*1024ULL*1024ULL;
-	if (vmem_size(spl_large_reserve_arena, VMEM_FREE) <= headroom ||
-	    !vmem_canalloc(spl_large_reserve_arena, headroom)) {
+	const uint64_t minsegfree = 16ULL*1024ULL*1024ULL;
+	const uint64_t minfree = 32ULL*1024ULL*1024ULL;
+
+	// leave either at least a single 16 MiB segment free, or whatever
+	// makes up at least 32 MiB worth of data.
+	if (vmem_size(spl_large_reserve_arena, VMEM_FREE) <= minfree ||
+	    !vmem_canalloc(spl_large_reserve_arena, minsegfree)) {
 		return (NULL);
 	}
 
