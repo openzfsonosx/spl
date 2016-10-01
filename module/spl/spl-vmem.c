@@ -417,6 +417,7 @@ uint64_t ta_reserve_success = 0;
 uint64_t ta_reserve_success_bytes = 0;
 uint64_t ta_reserve_fail = 0;
 uint64_t ta_xnu_vmem_alloc = 0;
+uint64_t ta_xnu_vmem_alloc_wait = 0;
 uint64_t ta_xnu_vmem_bytes = 0;
 uint64_t ta_xnu_first_alloc = 0;
 uint64_t ta_xnu_second_alloc = 0;
@@ -1191,6 +1192,17 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 		atomic_inc_64(&ta_xnu_vmem_alloc);
 		atomic_add_64(&ta_xnu_vmem_bytes, size);
 		return (m);
+	} else if (timeout >= MSEC2NSEC(1)) {
+		mutex_enter(&vmp->vm_lock);
+		(void)cv_timedwait_hires(&vmp->vm_cv, &vmp->vm_lock,
+		    timeout, resolution, 0);
+		mutex_exit(&vmp->vm_lock);
+		m = vmem_alloc(vmp, size, VM_NOSLEEP | VM_ABORT);
+		if (m) {
+			atomic_inc_64(&ta_xnu_vmem_alloc_wait);
+			atomic_add_64(&ta_xnu_vmem_bytes, size);
+			return (m);
+		}
 	}
 
 	uint64_t covering_size; // ask xnu for a big block

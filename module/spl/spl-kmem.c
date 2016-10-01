@@ -533,6 +533,7 @@ extern uint64_t ta_reserve_success;
 extern uint64_t ta_reserve_success_bytes;
 extern uint64_t ta_reserve_fail;
 extern uint64_t ta_xnu_vmem_alloc;
+extern uint64_t ta_xnu_vmem_alloc_wait;
 extern uint64_t ta_xnu_vmem_bytes;
 extern uint64_t ta_xnu_first_alloc;
 extern uint64_t ta_xnu_second_alloc;
@@ -597,6 +598,7 @@ typedef struct spl_stats {
 	kstat_named_t ta_reserve_success_bytes;
 	kstat_named_t ta_reserve_fail;
 	kstat_named_t ta_xnu_vmem_alloc;
+	kstat_named_t ta_xnu_vmem_alloc_wait;
 	kstat_named_t ta_xnu_vmem_bytes;
 	kstat_named_t ta_xnu_first_alloc;
 	kstat_named_t ta_xnu_second_alloc;
@@ -661,6 +663,7 @@ static spl_stats_t spl_stats = {
 	{"ta_reserve_alloc_bytes", KSTAT_DATA_UINT64},
 	{"ta_reserve_fail", KSTAT_DATA_UINT64},
 	{"ta_xnu_vmem_alloc", KSTAT_DATA_UINT64},
+	{"ta_xnu_vmem_alloc_wait", KSTAT_DATA_UINT64},
 	{"ta_xnu_vmem_bytes", KSTAT_DATA_UINT64},
 	{"ta_xnu_first_alloc", KSTAT_DATA_UINT64},
 	{"ta_xnu_second_alloc", KSTAT_DATA_UINT64},
@@ -4689,6 +4692,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->ta_reserve_success_bytes.value.ui64 = ta_reserve_success_bytes;
 		ks->ta_reserve_fail.value.ui64 = ta_reserve_fail;
 		ks->ta_xnu_vmem_alloc.value.ui64 = ta_xnu_vmem_alloc;
+		ks->ta_xnu_vmem_alloc_wait.value.ui64 = ta_xnu_vmem_alloc_wait;
 		ks->ta_xnu_vmem_bytes.value.ui64 = ta_xnu_vmem_bytes;
 		ks->ta_xnu_first_alloc.value.ui64 = ta_xnu_first_alloc;
 		ks->ta_xnu_second_alloc.value.ui64 = ta_xnu_second_alloc;
