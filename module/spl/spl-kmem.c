@@ -4421,7 +4421,7 @@ spl_free_thread()
 		mutex_enter(&spl_free_thread_lock);
 		CALLB_CPR_SAFE_BEGIN(&cpr);
 		(void) cv_timedwait_hires(&spl_free_thread_cv, &spl_free_thread_lock,
-		    MSEC2NSEC(10), MSEC2NSEC(1), 0);
+		    MSEC2NSEC(10), 0, 0);
 		CALLB_CPR_SAFE_END(&cpr, &spl_free_thread_lock);
 	}
 	spl_free_thread_exit = FALSE;

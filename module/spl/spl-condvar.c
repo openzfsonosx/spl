@@ -156,7 +156,7 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
     if (ts.tv_nsec <= 100) {
 		printf("cv_timedwait_hires: warning, sleep is less that 100nsec %lds\n",
 			   ts.tv_nsec);
-        ts.tv_nsec = 1000; // At least one millisec
+        ts.tv_nsec = 1000; // At least one microsecond
 	}
 
     if (ts.tv_nsec > 400L * NSEC_PER_SEC) {

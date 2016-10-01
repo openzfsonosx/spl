@@ -1348,12 +1348,15 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 
 		void *p = NULL;
 
-		hrtime_t resolution = MSEC2NSEC(1);
+		hrtime_t resolution = 0; // this is OK in current cv_timedwait_hires()
 		hrtime_t maxtime;
 
-		const hrtime_t tinymaxtime = MSEC2NSEC(1);
-		const hrtime_t shortmaxtime = MSEC2NSEC(5);
-		const hrtime_t longmaxtime = MSEC2NSEC(100);
+		// cv_timedwait_hires() has a lower limit of 100 nsec, which
+		// is reset to 1000 nsec (== 1 usec), so we are OK with microseconds
+		// which xnu's mach msleep is OK with too.
+		const hrtime_t tinymaxtime = USEC2NSEC(1);
+		const hrtime_t shortmaxtime = MSEC2NSEC(1);
+		const hrtime_t longmaxtime = MSEC2NSEC(10);
 		const hrtime_t verylongmaxtime = MSEC2NSEC(500);
 
 		if (flags & (VM_NOSLEEP | VM_ABORT))
