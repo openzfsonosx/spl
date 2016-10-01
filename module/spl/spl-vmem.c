@@ -1369,7 +1369,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		const hrtime_t tinymaxtime = USEC2NSEC(1);
 		const hrtime_t shortmaxtime = MSEC2NSEC(1);
 		const hrtime_t longmaxtime = MSEC2NSEC(10);
-		const hrtime_t verylongmaxtime = MSEC2NSEC(500);
+		const hrtime_t verylongmaxtime = MSEC2NSEC(100);
 
 		if (flags & (VM_NOSLEEP | VM_ABORT))
 			maxtime = tinymaxtime;
