@@ -4232,7 +4232,7 @@ spl_free_thread()
 		new_spl_free = 0LL;
 
 		if (vm_page_free_wanted > 0) {
-			int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -8LL;
+			int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -16LL;
 			if (bminus > -16LL*1024LL*1024LL)
 				bminus = -16LL*1024LL*1024LL;
 			new_spl_free = bminus;
@@ -4240,7 +4240,7 @@ spl_free_thread()
 			emergency_lowmem = true;
 			// atomic swaps to set these variables used in .../zfs/arc.c
 			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
-			__sync_lock_test_and_set(&spl_free_manual_pressure, -8LL * new_spl_free);
+			__sync_lock_test_and_set(&spl_free_manual_pressure, -16LL * new_spl_free);
 		}
 
 		// if we can't allocate a 64MiB segment
@@ -4306,7 +4306,7 @@ spl_free_thread()
 
 			if (reserve_low && la_free < sixtyfour * 4ULL)
 				la_free = 0;
-			else if (la_free >= sixtyfour * 4ULL)
+			else if (!reserve_low || la_free >= sixtyfour * 4ULL)
 				lowmem = false;
 
 			int64_t root_free = la_free;
