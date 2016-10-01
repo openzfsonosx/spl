@@ -4152,19 +4152,25 @@ spl_free_manual_pressure_wrapper(void)
 }
 
 void
-spl_free_set_pressure(int64_t p)
+spl_free_set_pressure(int64_t new_p)
 {
 	mutex_enter(&spl_free_manual_pressure_lock);
-	spl_free_manual_pressure = p;
+	int64_t previous_highest_pressure;
+	__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
+	if (new_p > previous_highest_pressure || new_p <= 0)
+		__sync_lock_test_and_set(&spl_free_manual_pressure, new_p);
 	spl_free_fast_pressure = FALSE;
 	mutex_exit(&spl_free_manual_pressure_lock);
 }
 
 void
-spl_free_set_emergency_pressure(int64_t p)
+spl_free_set_emergency_pressure(int64_t new_p)
 {
 	mutex_enter(&spl_free_manual_pressure_lock);
-	spl_free_manual_pressure = p;
+        int64_t previous_highest_pressure;
+	__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
+	if (new_p > previous_highest_pressure || new_p <= 0)
+		__sync_lock_test_and_set(&spl_free_manual_pressure, new_p);
 	spl_free_fast_pressure = TRUE;
 	mutex_exit(&spl_free_manual_pressure_lock);
 }
@@ -4237,13 +4243,25 @@ spl_free_thread()
 			__sync_lock_test_and_set(&spl_free_manual_pressure, -8LL * new_spl_free);
 		}
 
+		// if we can't allocate a 64MiB segment
+
+		boolean_t reserve_low = false;
+		extern vmem_t *spl_large_reserve_arena;
+		const uint64_t sixtyfour = 64ULL*1024ULL*1024ULL;
+		const uint64_t rvallones = (sixtyfour << 1ULL) - 1ULL;
+		const uint64_t rvmask = ~rvallones;
+		uint64_t rvfreebits;
+		atomic_swap_64(&rvfreebits,
+		    spl_large_reserve_arena->vm_freemap);
+		if ((rvfreebits & rvmask) == 0) {
+			reserve_low = true;
+		}
+
 		if (!emergency_lowmem) {
 			int64_t above_min_free_pages = vm_page_free_count - vm_page_free_min;
 			int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
-			if (above_min_free_bytes < 16LL*1024LL*1024LL) {
-				extern vmem_t *spl_large_reserve_arena;
-				if (vmem_size(spl_large_reserve_arena, VMEM_FREE) < 64ULL*1024ULL*1024ULL)
-					lowmem = true;
+			if (above_min_free_bytes < 16LL*1024LL*1024LL && reserve_low) {
+				lowmem = true;
 			}
 			if (above_min_free_bytes <= 0LL)
 				emergency_lowmem = true;
@@ -4286,15 +4304,21 @@ spl_free_thread()
 			int64_t la_free = (int64_t)spl_vmem_size(spl_large_reserve_arena, VMEM_FREE);
 			int64_t xa_free = (int64_t)spl_vmem_size(xnu_import_arena, VMEM_FREE);
 
+			if (reserve_low && la_free < sixtyfour * 4ULL)
+				la_free = 0;
+			else if (la_free >= sixtyfour * 4ULL)
+				lowmem = false;
+
 			int64_t root_free = la_free;
+
 			if ((ra_free + xa_free) > 0)
 				root_free += (ra_free + xa_free) / 4;
 
 			if (lowmem) {
-				if (la_free < 64LL * 1024LL * 1024LL)
-					root_free = 16LL * 1024LL * 1024LL;
-				else
+				if (la_free >= sixtyfour)
 					root_free = la_free / 4;
+				else
+					root_free = 0;
 			}
 
 			// if there's free space for spl_root_arena to grow into without
