@@ -335,7 +335,8 @@ static vmem_t *spl_root_arena_parent;
 static void *spl_root_initial_reserve_import;
 static  uint64_t spl_root_initial_reserve_import_size;
 vmem_t *spl_large_reserve_arena;
-static void *spl_large_reserve_initial_allocation;
+static void *spl_large_reserve_initial_allocation = NULL;
+static void *spl_large_reserve_initial_allocation_two = NULL;
 static size_t spl_large_reserve_initial_allocation_size;
 vmem_t *xnu_import_arena;
 #define NUMBER_OF_ARENAS_IN_VMEM_INIT 10
@@ -2484,6 +2485,18 @@ spl_root_refill(void *dummy)
 		}
 	}
 
+	// proactively raid the large initial allocation, even if filling is stopped
+	// this saves on intensive mutex and condvar activity in and below sra_root_alloc()
+	// we will only do this if we can leave behind at least a whole 64MiB segment.
+
+	if (!vmem_canalloc_nomutex(spl_root_arena, spamax) &&
+	    vmem_canalloc_nomutex(spl_large_reserve_arena, 4ULL * spamax)) {
+		void *m = vmem_alloc(spl_large_reserve_arena, spamax, VM_NOSLEEP | VM_ABORT);
+		if (m) {
+			vmem_add_as_import(spl_root_arena, m, spamax, 0);
+		}
+	}
+
 	uint64_t root_free = vmem_size(spl_root_arena, VMEM_FREE);
 	uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
 	uint64_t xi_free = vmem_size(xnu_import_arena, VMEM_FREE);
@@ -2816,6 +2829,7 @@ vmem_init(const char *heap_name,
 
 	const uint64_t half_gibibyte = 512ULL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
+	boolean_t addtwo = false;
 	if (real_total_memory <= 15ULL*1024ULL*1024ULL*1024ULL) {
 		spl_large_reserve_initial_allocation_size =
 		    MAX(real_total_memory / 16, half_gibibyte);
@@ -2825,6 +2839,7 @@ vmem_init(const char *heap_name,
 		// nb: xnu forbids single allocations > 2 GiB in vm_kern.c.
 		if (spl_large_reserve_initial_allocation_size > 4ULL * half_gibibyte)
 			spl_large_reserve_initial_allocation_size = 4ULL * half_gibibyte;
+		addtwo = true;
 	}
 
 	printf("SPL: %s: doing initial large allocation of %llu bytes\n",
@@ -2844,6 +2859,23 @@ vmem_init(const char *heap_name,
 
 	printf("SPL: %s created spl_large_reserve_arena with %llu bytes.\n",
 	    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
+
+	// for large memory systems, there is enormous value in having an even larger
+	// reserve arena
+
+	if (addtwo) {
+		spl_large_reserve_initial_allocation_two =
+		    osif_malloc(spl_large_reserve_initial_allocation_size);
+		if (spl_large_reserve_initial_allocation_two == NULL)
+			panic("SPL: %s unable to make second spl_large_reserve_arena allocation of %llu bytes\n",
+			    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
+		if(NULL == vmem_add(spl_large_reserve_arena, spl_large_reserve_initial_allocation_two,
+			spl_large_reserve_initial_allocation_size, 0))
+			panic("SPL: %s vmem_add(splra, splra2, %llu, 0)  returned NULL!\n",
+			    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
+		printf("%s: successfully added %llu bytes to spl_large_reserve_arena.\n",
+		    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
+	}
 
 	spl_root_initial_reserve_import_size = half_gibibyte/16;
 	spl_root_initial_reserve_import = vmem_alloc(spl_large_reserve_arena,
@@ -2993,12 +3025,16 @@ vmem_fini(vmem_t *heap)
 	printf("SPL: Released %llu bytes from arenas\n", total);
 	list_destroy(&freelist);
 
-#ifdef _KERNEL
 	extern void osif_free(void *, uint64_t);
 	printf("SPL: %s freeing spl_large_reserve_initial_allocation of %llu bytes.\n",
 	    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
 	osif_free(spl_large_reserve_initial_allocation, spl_large_reserve_initial_allocation_size);
-#endif
+	if (spl_large_reserve_initial_allocation_two) {
+		printf("SPL: %s freeing spl_large_reserve_initial_allocation_two of %llu bytes.\n",
+		    __func__, (uint64_t)spl_large_reserve_initial_allocation_size);
+		osif_free(spl_large_reserve_initial_allocation_two,
+		    spl_large_reserve_initial_allocation_size);
+	}
 	
 #if 0 // Don't release, panics
 	mutex_destroy(&vmem_flush_free_lock);
