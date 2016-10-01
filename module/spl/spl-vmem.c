@@ -2494,9 +2494,14 @@ spl_root_refill(void *dummy)
 
 	// proactively raid the large initial allocation, even if filling is stopped
 	// this saves on intensive mutex and condvar activity in and below sra_root_alloc()
-	// we will only do this if we can leave behind at least a whole 64MiB segment.
+	// we will only do this if we can leave behind at least a whole 64MiB segment
+	// and more than half of the reserve is free
 
-	if (!vmem_canalloc_nomutex(spl_root_arena, spamax) &&
+	uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
+	uint64_t reserve_size = vmem_size(spl_large_reserve_arena, VMEM_FREE | VMEM_ALLOC);
+
+	if (reserve_free < reserve_size / 2 &&
+	    !vmem_canalloc_nomutex(spl_root_arena, spamax) &&
 	    vmem_canalloc_nomutex(spl_large_reserve_arena, 4ULL * spamax)) {
 		void *m = vmem_alloc(spl_large_reserve_arena, spamax, VM_NOSLEEP | VM_ABORT);
 		if (m) {
@@ -2505,7 +2510,6 @@ spl_root_refill(void *dummy)
 	}
 
 	uint64_t root_free = vmem_size(spl_root_arena, VMEM_FREE);
-	uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
 	uint64_t xi_free = vmem_size(xnu_import_arena, VMEM_FREE);
 
 	// we still want to opportunistically grab spl_minalloc sized blocks
