@@ -554,6 +554,10 @@ extern uint64_t spl_vmem_conditional_alloc_fail_bytes;
 extern uint64_t spl_vmem_conditional_alloc_deny;
 extern uint64_t spl_vmem_conditional_alloc_deny_bytes;
 
+extern boolean_t spl_root_refill_enabled;
+extern uint32_t spl_root_refill_percent_highwater;
+extern uint32_t spl_root_refill_percent_lowater;
+
 typedef struct spl_stats {
 	kstat_named_t spl_os_alloc;
 	kstat_named_t spl_active_threads;
@@ -613,6 +617,9 @@ typedef struct spl_stats {
 	kstat_named_t spl_vmem_conditional_alloc_fail_bytes;
 	kstat_named_t spl_vmem_conditional_alloc_deny;
 	kstat_named_t spl_vmem_conditional_alloc_deny_bytes;
+	kstat_named_t spl_root_refill_running;
+	kstat_named_t spl_root_refill_lopct;
+	kstat_named_t spl_root_refill_hipct;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -674,6 +681,9 @@ static spl_stats_t spl_stats = {
 	{"vmem_conditional_alloc_fail_bytes", KSTAT_DATA_UINT64},
 	{"vmem_conditional_alloc_deny", KSTAT_DATA_UINT64},
 	{"vmem_conditional_alloc_deny_bytes", KSTAT_DATA_UINT64},
+	{"root_refill_running", KSTAT_DATA_UINT64},
+	{"root_refill_low_percent", KSTAT_DATA_UINT64},
+	{"root_refill_high_percent", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4636,6 +4646,17 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		  spl_reap_timeout_seconds = ks->spl_spl_reap_timeout_seconds.value.ui64;
 		}
 
+		if (ks->spl_root_refill_running.value.ui64 != (uint64_t)spl_root_refill_enabled)
+			spl_root_refill_enabled = (boolean_t)ks->spl_root_refill_running.value.ui64;
+
+		if (ks->spl_root_refill_lopct.value.ui64 != (uint64_t)spl_root_refill_percent_lowater &&
+		    ks->spl_root_refill_lopct.value.ui64 > 5 && ks->spl_root_refill_lopct.value.ui64 < 90)
+			spl_root_refill_percent_lowater = (uint32_t)ks->spl_root_refill_lopct.value.ui64;
+
+		if (ks->spl_root_refill_hipct.value.ui64 != (uint64_t)spl_root_refill_percent_highwater &&
+		    ks->spl_root_refill_hipct.value.ui64 > 5 && ks->spl_root_refill_hipct.value.ui64 < 90)
+			spl_root_refill_percent_highwater = (uint32_t)ks->spl_root_refill_hipct.value.ui64;
+
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
 		ks->spl_active_threads.value.ui64 = zfs_threads;
@@ -4689,6 +4710,9 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_vmem_conditional_alloc_deny.value.ui64 = spl_vmem_conditional_alloc_deny;
 		ks->spl_vmem_conditional_alloc_deny_bytes.value.ui64 = spl_vmem_conditional_alloc_deny_bytes;
 
+		ks->spl_root_refill_running.value.ui64 = (uint64_t)spl_root_refill_enabled;
+		ks->spl_root_refill_lopct.value.ui64 = (uint64_t)spl_root_refill_percent_lowater;
+		ks->spl_root_refill_hipct.value.ui64 = (uint64_t)spl_root_refill_percent_highwater;
 	}
 
 	return (0);

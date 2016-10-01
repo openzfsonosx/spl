@@ -343,7 +343,9 @@ static struct timespec	vmem_update_interval	= {15, 0};	/* vmem_update() every 15
 static struct timespec  spl_root_refill_interval = {0, MSEC2NSEC(100)};   // spl_root_refill() every 100 ms
 static struct timespec  spl_root_refill_interval_long = {1, 0}; // every one second otherwise
 static struct timespec  vmem_vacuum_thread_interval = {30, 0};
-static boolean_t spl_root_refill_enabled = true;
+boolean_t spl_root_refill_enabled = true;
+uint32_t spl_root_refill_percent_highwater = 60;
+uint32_t spl_root_refill_percent_lowater = 50;
 uint32_t vmem_mtbf;		/* mean time between failures [default: off] */
 size_t vmem_seg_size = sizeof (vmem_seg_t);
 
@@ -2441,8 +2443,6 @@ vmem_update(void *dummy)
 static uint64_t vmem_add_memory_to_spl_root_arena(size_t, size_t);
 static void spl_root_arena_free_to_free_arena(vmem_t *, void *, size_t);
 
-static boolean_t refill_thread_disabled = true;
-
 void
 spl_root_refill(void *dummy)
 {
@@ -2491,8 +2491,10 @@ spl_root_refill(void *dummy)
 	// if we don't have target_free in spl_root_arena, try to add spans
 	// as long as total vmem isn't above 60% of real_total_memory.
 
-	uint64_t high_threshold = real_total_memory * 60ULL / 100ULL;
-	uint64_t low_threshold = real_total_memory * 50ULL / 100ULL;
+	uint64_t hipct = (uint64_t)spl_root_refill_percent_highwater;
+	uint64_t lopct = (uint64_t)spl_root_refill_percent_lowater;
+	uint64_t high_threshold = real_total_memory * hipct / 100ULL;
+	uint64_t low_threshold = real_total_memory * lopct / 100ULL;
 
 	if (!hit_highwater_and_waiting &&
 	    arena_free < target_free  &&
