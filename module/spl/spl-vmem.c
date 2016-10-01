@@ -1168,6 +1168,13 @@ timed_alloc_any_arena(vmem_t *vmp, size_t size, hrtime_t timeout, hrtime_t resol
 static void *
 timed_alloc_reserve(size_t size, hrtime_t timeout, hrtime_t resolution, bool best)
 {
+	// leave at least a single 64 MiB segment free as reserve
+	const uint64_t headroom = 64ULL*1024ULL*1024ULL;
+	if (vmem_size(spl_large_reserve_arena, VMEM_FREE) <= headroom ||
+	    !vmem_canalloc(spl_large_reserve_arena, headroom)) {
+		return (NULL);
+	}
+
 	void *p = timed_alloc_any_arena(spl_large_reserve_arena, size, timeout, resolution, best);
 	if (p) {
 		atomic_inc_64(&ta_reserve_success);
@@ -1393,7 +1400,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			maxtime = shortmaxtime;
 
 		// try a wait to see if we can recover some space
-		if (!(flags & (VM_NOSLEEP | VM_ABORT)) &&
+		if (!(flags & (VM_NOSLEEP | VM_ABORT | VM_PUSHPAGE)) &&
 		    vmem_canalloc_nomutex(free_arena, size)) {
 			(void) vmem_flush_free_to_root();
 			mutex_enter(&vmp->vm_lock);
@@ -2738,7 +2745,7 @@ static void
 vmem_free_transfer(vmem_t *source, void *inaddr, size_t size, vmem_t *destination)
 {
 	bzero(inaddr, size);
-	vmem_add_as_import(destination, inaddr, size, VM_SLEEP);
+	vmem_add_as_import(destination, inaddr, size, VM_PUSHPAGE);
 }
 
 static void
