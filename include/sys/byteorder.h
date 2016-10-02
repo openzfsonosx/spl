@@ -53,6 +53,9 @@
 #if !defined(htonll)
 #define htonll(x)       __DARWIN_OSSwapInt64(x)
 #endif
+#if !defined(ntohll)
+#define ntohll(x)       __DARWIN_OSSwapInt64(x)
+#endif
 
 
 
