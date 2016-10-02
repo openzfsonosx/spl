@@ -4330,6 +4330,9 @@ spl_free_thread()
 		}
 
 		uint64_t zio_size = vmem_size_locked(zio_arena, VMEM_ALLOC | VMEM_FREE);
+		uint64_t zio_metadata_size = vmem_size_locked(zio_metadata_arena,
+		    VMEM_ALLOC | VMEM_FREE);
+		zio_size += zio_metadata_size;
 		if (zio_size > 0) {
 			static uint64_t zio_last_too_big = 0;
 			static int64_t imposed_cap = 75;
@@ -4387,6 +4390,8 @@ spl_free_thread()
 				elapsed = 5*hz;
 			if (now - last_reap > elapsed) {
 				kmem_reap();
+				vmem_qcache_reap(zio_arena);
+				vmem_qcache_reap(zio_metadata_arena);
 				vmem_qcache_reap(kmem_default_arena);
 				last_reap = now;
 			}

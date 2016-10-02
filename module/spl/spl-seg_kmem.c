@@ -133,8 +133,8 @@ void segkmem_free(vmem_t *vmp, void *inaddr, size_t size);
 uint64_t segkmem_total_mem_allocated = 0;	/* Total memory held allocated */
 vmem_t *heap_arena;							/* primary kernel heap arena */
 vmem_t *zio_arena_parent = NULL;
-vmem_t *zio_arena;							/* arena for allocating zio memory */
-vmem_t *zio_metadata_arena;
+vmem_t *zio_arena;							/* arena for allocating file data */
+vmem_t *zio_metadata_arena;                                             /* and for allocation of zfs metadata */
 
 #ifdef _KERNEL
 extern uint64_t total_memory;
@@ -231,6 +231,18 @@ segkmem_zio_init()
 
 	// for now we duke it out on size using segkmem_zio_alloc
 
+	// Illumos does not segregate zio_metadata_arena out of heap,
+	// almost exclusively for reasons involving panic dump data
+	// retention.     However, parenting zio_metadata_arena to
+	// spl_root_arena and giving it its own qcaches provides better
+	// kstat observability *and* noticeably better performance in
+	// realworld (zfs/dmu) metadata-heavy activity.    Additionally,
+	// the qcaches pester spl_root_arena only for slabs 256k and bigger,
+	// and each of the qcache entries (powers of two from PAGESIZE to
+	// 64k) are *exact-fit* and therefore dramatically reduce internal
+	// fragmentation and more than pay off for the extra code and (tiny)
+	// extra data for holding the arenas' segment tables.
+
 #ifdef _KERNEL
 	extern vmem_t *spl_root_arena;
 
@@ -257,6 +269,7 @@ segkmem_zio_init()
 #endif
 
 	ASSERT(zio_arena != NULL);
+	ASSERT(zio_metadata_arena != NULL);
 }
 
 void
@@ -264,5 +277,8 @@ segkmem_zio_fini(void)
 {
 	if (zio_arena) {
 		vmem_destroy(zio_arena);
+	}
+	if (zio_metadata_arena) {
+		vmem_destroy(zio_metadata_arena);
 	}
 }
