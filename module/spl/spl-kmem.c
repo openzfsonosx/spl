@@ -105,7 +105,7 @@ static boolean_t spl_free_fast_pressure = FALSE;
 
 static int64_t spl_minimal_uses_spl_free = TRUE;
 
-static uint64_t spl_reap_timeout_seconds = 600;
+static uint64_t spl_reap_timeout_seconds = 7100;
 
 // Start and end address of kernel memory
 extern vm_offset_t virtual_space_start;
