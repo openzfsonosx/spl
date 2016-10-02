@@ -134,6 +134,7 @@ uint64_t segkmem_total_mem_allocated = 0;	/* Total memory held allocated */
 vmem_t *heap_arena;							/* primary kernel heap arena */
 vmem_t *zio_arena_parent = NULL;
 vmem_t *zio_arena;							/* arena for allocating zio memory */
+vmem_t *zio_metadata_arena;
 
 #ifdef _KERNEL
 extern uint64_t total_memory;
@@ -238,6 +239,10 @@ segkmem_zio_init()
 	zio_arena = vmem_create("zfs_file_data", NULL, 0,
 	    PAGESIZE, vmem_alloc, vmem_free, spl_root_arena,
 	    64 * 1024, VM_SLEEP);
+
+	zio_metadata_arena = vmem_create("zfs_metadata", NULL, 0,
+	    PAGESIZE, vmem_alloc, vmem_free, spl_root_arena,
+	    64 * 1024, VM_SLEEP);
 #else
 	zio_arena_parent = vmem_create("zfs_file_data_p", NULL, 0,
 	    PAGESIZE, NULL, NULL, 0, NULL, VM_SLEEP);
@@ -245,6 +250,10 @@ segkmem_zio_init()
 	zio_arena = vmem_create("zfs_file_data", NULL, 0,
 	    PAGESIZE, segkmem_zio_alloc, segkmem_zio_free, zio_arena_parent,
 	    0, VM_SLEEP);
+
+	zio_metadata_arena = vmem_create("zfs_metadata", NULL, 0,
+	    PAGESIZE, segkmem_zio_alloc, segkmem_zio_free, zio_arena_parent,
+	   0, VM_SLEEP);
 #endif
 
 	ASSERT(zio_arena != NULL);
