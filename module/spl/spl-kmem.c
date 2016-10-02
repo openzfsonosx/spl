@@ -76,12 +76,6 @@ uint32_t vm_page_free_min_min = 32*1024*1024/4096;	// so 8192 pages
 
 #define SMALL_PRESSURE_INCURSION_PAGES (vm_page_free_min >> 5)
 
-static kcondvar_t spl_mach_pressure_monitor_thread_cv;
-static kmutex_t spl_mach_pressure_monitor_thread_lock;
-static boolean_t spl_mach_pressure_monitor_thread_exit;
-static boolean_t spl_os_pages_are_wanted;
-static kmutex_t spl_os_pages_are_wanted_lock;
-
 static kcondvar_t spl_free_thread_cv;
 static kmutex_t spl_free_thread_lock;
 static boolean_t spl_free_thread_exit;
@@ -102,13 +96,6 @@ extern vm_offset_t virtual_space_end;
 // Can be polled to determine if the VM is experiecing
 // a shortage of free pages.
 extern int vm_pool_low(void);
-
-// Kernel API for monitoring memory pressure.
-extern kern_return_t
-mach_vm_pressure_monitor(boolean_t	wait_for_pressure,
-						 unsigned int	nsecs_monitored,
-						 unsigned int	*pages_reclaimed_p,
-						 unsigned int	*pages_wanted_p);
 
 // Which CPU are we executing on?
 extern int cpu_number();
@@ -553,7 +540,6 @@ typedef struct spl_stats {
 	kstat_named_t spl_active_mutex;
 	kstat_named_t spl_active_rwlock;
 	kstat_named_t spl_active_tsd;
-	kstat_named_t spl_spl_mach_pressure_monitor_wake_count;
 	kstat_named_t spl_vm_page_free_min_multiplier;
 	kstat_named_t spl_vm_page_free_min_min;
 	kstat_named_t spl_free_wake_count;
@@ -613,7 +599,6 @@ static spl_stats_t spl_stats = {
 	{"active_mutex", KSTAT_DATA_UINT64},
 	{"active_rwlock", KSTAT_DATA_UINT64},
 	{"active_tsd", KSTAT_DATA_UINT64},
-	{"spl_mach_pressure_wake_count", KSTAT_DATA_UINT64},
 	{"vm_page_free_multiplier", KSTAT_DATA_UINT64},
 	{"vm_page_free_min_min", KSTAT_DATA_UINT64},
 	{"spl_free_wake_count", KSTAT_DATA_UINT64},
@@ -4447,71 +4432,6 @@ spl_free_thread()
 	thread_exit();
 }
 
-static void
-spl_mach_pressure_monitor_thread()
-{
-	callb_cpr_t cpr;
-	kern_return_t kr;
-	unsigned int nsecs_monitored = 1000000000 / 4;
-	unsigned int pages_reclaimed = 0;
-	unsigned int os_num_pages_wanted;
-
-	CALLB_CPR_INIT(&cpr, &spl_mach_pressure_monitor_thread_lock, callb_generic_cpr, FTAG);
-
-	mutex_enter(&spl_mach_pressure_monitor_thread_lock);
-
-	printf("SPL: beginning %s\n", __func__);
-
-	while (!spl_mach_pressure_monitor_thread_exit) {
-		mutex_exit(&spl_mach_pressure_monitor_thread_lock);
-
-		dprintf("SPL: %s calling mach_vm_pressure_monitor - may block for some time\n", __func__);
-
-		kr = mach_vm_pressure_monitor(TRUE, nsecs_monitored,
-									  &pages_reclaimed, &os_num_pages_wanted);
-
-		dprintf("SPL: %s back from mach_vm_pressure_montor - unblocked\n", __func__);
-
-		spl_stats.spl_spl_mach_pressure_monitor_wake_count.value.ui64++;
-
-		if (kr != KERN_SUCCESS) {
-			printf("SPL: %s: pages_reclaimed = %u, pages wanted = %d\n",
-			    __func__, pages_reclaimed, os_num_pages_wanted);
-		}
-
-		if (kr != KERN_SUCCESS) {
-			printf("SPL: %s: mach_vm_pressure_monitor returned returned non-success\n", __func__);
-		} else {
-			if (os_num_pages_wanted < 1) {
-				mutex_enter(&spl_os_pages_are_wanted_lock);
-				spl_os_pages_are_wanted = FALSE;
-				mutex_exit(&spl_os_pages_are_wanted_lock);
-			} else {
-				mutex_enter(&spl_os_pages_are_wanted_lock);
-				spl_os_pages_are_wanted = TRUE;
-				mutex_exit(&spl_os_pages_are_wanted_lock);
-				// might want to spl_free_set_pressre(os_num_pages_wanted * PAGESIZE);
-				// or alternatively use this value in spl_free_thread()
-			}
-		} // else: KERN_SUCCESS
-
-		mutex_enter(&spl_mach_pressure_monitor_thread_lock);
-		dprintf("SPL: %s calling cv_timedwait\n", __func__);
-		CALLB_CPR_SAFE_BEGIN(&cpr);
-		(void) cv_timedwait(&spl_mach_pressure_monitor_thread_cv,
-							&spl_mach_pressure_monitor_thread_lock,
-							ddi_get_lbolt() + hz);
-		CALLB_CPR_SAFE_END(&cpr, &spl_mach_pressure_monitor_thread_lock);
-		dprintf("SPL: %s back from cv_timedwait\n", __func__);
-	} // while
-	spl_mach_pressure_monitor_thread_exit = FALSE;
-	printf("SPL: %s exiting: cv_broadcasting\n", __func__);
-	cv_broadcast(&spl_mach_pressure_monitor_thread_cv);
-	printf("SPL: %s exiting: doing CALLB_CPR_EXIT\n", __func__);
-	CALLB_CPR_EXIT(&cpr);
-	thread_exit();
-}
-
 static int
 spl_kstat_update(kstat_t *ksp, int rw)
 {
@@ -4909,16 +4829,9 @@ spl_kmem_thread_init(void)
 	mutex_init(&spl_free_thread_lock, "spl_free_thead_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&spl_free_lock, "spl_free_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&spl_free_manual_pressure_lock, "spl_free_manual_pressure_lock", MUTEX_DEFAULT, NULL);
-	// Initialize the spl_mach_pressure_monitor_thread lock
-	mutex_init(&spl_mach_pressure_monitor_thread_lock, "mach_pressure_monitor_thread_lock", MUTEX_DEFAULT, NULL);
-	mutex_init(&spl_os_pages_are_wanted_lock, "spl_os_pages_are_wanted_lock", MUTEX_DEFAULT, NULL);
 
 	kmem_taskq = taskq_create("kmem_taskq", 1, minclsyspri,
 							  300, INT_MAX, TASKQ_PREPOPULATE);
-
-	spl_mach_pressure_monitor_thread_exit = FALSE;
-	(void) cv_init(&spl_mach_pressure_monitor_thread_cv, NULL, CV_DEFAULT, NULL);
-	(void) thread_create(NULL, 0, spl_mach_pressure_monitor_thread, 0, 0, 0, 0, 92);
 
 	spl_free_thread_exit = FALSE;
 	(void) thread_create(NULL, 0, spl_free_thread, 0, 0, 0, 0, 92);
@@ -4945,24 +4858,6 @@ spl_kmem_thread_fini(void)
 	mutex_destroy(&spl_free_thread_lock);
 	mutex_destroy(&spl_free_lock);
 	mutex_destroy(&spl_free_manual_pressure_lock);
-
-	printf("SPL: stop spl_mach_pressure_monitor_thread\n");
-	mutex_enter(&spl_mach_pressure_monitor_thread_lock);
-	printf("SPL: stop spl_mach_pressure_monitor_thread, lock acquired, setting exit variable and waiting\n");
-	spl_mach_pressure_monitor_thread_exit = TRUE;
-	printf("SPL: stop spl_mach_pressure_monitor_thread may take a long time in memory monitor call\n");
-	while (spl_mach_pressure_monitor_thread_exit) {
-		thread_wakeup((event_t)&vm_page_free_wanted);
-		cv_signal(&spl_mach_pressure_monitor_thread_cv);
-		cv_wait(&spl_mach_pressure_monitor_thread_cv, &spl_mach_pressure_monitor_thread_lock);
-	}
-	printf("SPL: spl_mach_pressure_monitor_thread stop: while loop ended, dropping mutex\n");
-	mutex_exit(&spl_mach_pressure_monitor_thread_lock);
-	printf("SPL: spl_mach_pressure_monitor_thread stop: destroying cv and mutex\n");
-	cv_destroy(&spl_mach_pressure_monitor_thread_cv);
-	mutex_destroy(&spl_mach_pressure_monitor_thread_lock);
-	mutex_destroy(&spl_os_pages_are_wanted_lock);
-
 
 	printf("SPL: bsd_untimeout\n");
 	bsd_untimeout(kmem_update,  0);
