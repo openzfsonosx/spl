@@ -4239,8 +4239,12 @@ spl_free_thread()
 			lowmem = true;
 			emergency_lowmem = true;
 			// atomic swaps to set these variables used in .../zfs/arc.c
-			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
+			int64_t previous_highest_pressure;
+			int64_t new_p = -bminus;
+			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
+			if (new_p > previous_highest_pressure || new_p <= 0)
 			__sync_lock_test_and_set(&spl_free_manual_pressure, -16LL * new_spl_free);
+			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
 		}
 
 		// if we can't allocate a 64MiB segment
@@ -4257,16 +4261,25 @@ spl_free_thread()
 			reserve_low = true;
 		}
 
-		if (!emergency_lowmem) {
-			int64_t above_min_free_pages = vm_page_free_count - vm_page_free_min;
-			int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
-			if (above_min_free_bytes < 16LL*1024LL*1024LL && reserve_low) {
-				lowmem = true;
-			}
-			if (above_min_free_bytes <= 0LL)
-				emergency_lowmem = true;
-			new_spl_free = above_min_free_bytes;
+		int64_t above_min_free_pages = vm_page_free_count - vm_page_free_min;
+		int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
+		if (above_min_free_bytes < 16LL*1024LL*1024LL && reserve_low) {
+			lowmem = true;
 		}
+		if (above_min_free_bytes <= 0LL) {
+			emergency_lowmem = true;
+			int64_t previous_highest_pressure;
+			int64_t new_p = above_min_free_bytes * 16LL;
+			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
+			if (new_p > previous_highest_pressure || new_p <= 0)
+				__sync_lock_test_and_set(&spl_free_manual_pressure, -16LL * new_spl_free);
+			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
+		}
+
+		if (!emergency_lowmem)
+			new_spl_free = above_min_free_bytes;
+		else if (above_min_free_bytes < 0LL)
+			new_spl_free += above_min_free_bytes;
 
 		if (!lowmem && recent_lowmem > 0) {
 			if (recent_lowmem + 4*hz < zfs_lbolt())
