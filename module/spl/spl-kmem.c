@@ -76,10 +76,6 @@ uint32_t vm_page_free_min_min = 32*1024*1024/4096;	// so 8192 pages
 
 #define SMALL_PRESSURE_INCURSION_PAGES (vm_page_free_min >> 5)
 
-static kcondvar_t memory_monitor_thread_cv;
-static kmutex_t memory_monitor_lock;
-static boolean_t memory_monitor_thread_exit;
-
 static kcondvar_t reap_thread_cv;
 static kmutex_t reap_thread_lock;
 static boolean_t reap_thread_exit;
@@ -564,7 +560,6 @@ typedef struct spl_stats {
 	kstat_named_t spl_active_threads;
 	kstat_named_t spl_active_mutex;
 	kstat_named_t spl_active_rwlock;
-	kstat_named_t spl_monitor_thread_wake_count;
 	kstat_named_t spl_active_tsd;
 	kstat_named_t spl_reap_thread_wake_count;
 	kstat_named_t spl_reap_thread_reaped_count;
@@ -629,7 +624,6 @@ static spl_stats_t spl_stats = {
 	{"active_threads", KSTAT_DATA_UINT64},
 	{"active_mutex", KSTAT_DATA_UINT64},
 	{"active_rwlock", KSTAT_DATA_UINT64},
-	{"monitor_thread_wake_count", KSTAT_DATA_UINT64},
 	{"active_tsd", KSTAT_DATA_UINT64},
 	{"reap_thread_wake_count", KSTAT_DATA_UINT64},
 	{"reap_thread_reaped_count", KSTAT_DATA_UINT64},
@@ -3251,7 +3245,6 @@ spl_minimal_physmem_p(void)
 	if (spl_minimal_physmem_p_logic()) {
 		return (1);
 	} else {
-		cv_signal(&memory_monitor_thread_cv);
 		return (0);
 	}
 }
@@ -4595,47 +4588,6 @@ spl_mach_pressure_monitor_thread()
 	thread_exit();
 }
 
-static void
-memory_monitor_thread()
-{
-	callb_cpr_t cpr;
-
-	CALLB_CPR_INIT(&cpr, &memory_monitor_lock, callb_generic_cpr, FTAG);
-
-	mutex_enter(&memory_monitor_lock);
-
-	printf("SPL: MMT beginning !memory_monitor_thread_exit loop\n");
-
-	while (!memory_monitor_thread_exit) {
-
-		mutex_exit(&memory_monitor_lock);
-
-		spl_stats.spl_monitor_thread_wake_count.value.ui64++;
-
-		if (!shutting_down) {
-			cv_broadcast(&memory_monitor_thread_cv);
-		}
-
-		// block until signalled, or after 1 second
-		mutex_enter(&memory_monitor_lock);
-		dprintf("SPL: MMT calling cv_timedwait\n");
-		CALLB_CPR_SAFE_BEGIN(&cpr);
-		(void) cv_timedwait(&memory_monitor_thread_cv,
-						   &memory_monitor_lock, ddi_get_lbolt() + hz);
-		dprintf("SPL: MMT back from cv_timedwait\n");
-		CALLB_CPR_SAFE_END(&cpr, &memory_monitor_lock);
-	} // while
-
-	memory_monitor_thread_exit = FALSE;
-	printf("SPL: MMT reset memory to FALSE and exiting: cv_broadcasting\n");
-	cv_broadcast(&memory_monitor_thread_cv);
-	printf("SPL: MMT exiting: doing CALLB_CPR_EXIT\n");
-	CALLB_CPR_EXIT(&cpr); // drops memory_monitor_lock
-	printf("SPL: MMT exiting: setting shutting_down to 2 and thread_exit()\n");
-	shutting_down = 2;
-	thread_exit();
-}
-
 static int
 spl_kstat_update(kstat_t *ksp, int rw)
 {
@@ -5039,8 +4991,6 @@ spl_kmem_thread_init(void)
 {
 	kmem_move_init();
 
-	// Initialize the MMT lock
-	mutex_init(&memory_monitor_lock, "memory_monitor_lock", MUTEX_DEFAULT, NULL);
 	// Initialize the reap thread locks
 	mutex_init(&reap_thread_lock, "reap_thread_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&reap_now_lock, "reap_now_lock", MUTEX_DEFAULT, NULL);
@@ -5063,10 +5013,6 @@ spl_kmem_thread_init(void)
 	(void) cv_init(&spl_mach_pressure_monitor_thread_cv, NULL, CV_DEFAULT, NULL);
 	(void) thread_create(NULL, 0, spl_mach_pressure_monitor_thread, 0, 0, 0, 0, 92);
 
-	memory_monitor_thread_exit = FALSE;
-	(void) thread_create(NULL, 0, memory_monitor_thread, 0, 0, 0, 0, 92);
-	(void) cv_init(&memory_monitor_thread_cv, NULL, CV_DEFAULT, NULL);
-
 	spl_free_thread_exit = FALSE;
 	(void) thread_create(NULL, 0, spl_free_thread, 0, 0, 0, 0, 92);
 	(void) cv_init(&spl_free_thread_cv, NULL, CV_DEFAULT, NULL);
@@ -5076,21 +5022,6 @@ void
 spl_kmem_thread_fini(void) 
 {
 	shutting_down = 1;
-
-	printf("SPL: stop memory monitor\n");
-	mutex_enter(&memory_monitor_lock);
-	printf("SPL: stop memory monitor, lock acquired, setting exit variable and waiting\n");
-	memory_monitor_thread_exit = TRUE;
-	while (memory_monitor_thread_exit) {
-		cv_signal(&memory_monitor_thread_cv);
-		cv_wait(&memory_monitor_thread_cv, &memory_monitor_lock);
-	}
-	printf("SPL: stop memory monitor while loop done, dropping mutex\n");
-	mutex_exit(&memory_monitor_lock);
-
-	printf("SPL: destroying MMT cv and lock\n");
-	cv_destroy(&memory_monitor_thread_cv);
-	mutex_destroy(&memory_monitor_lock);
 
 	printf("SPL: stop reap thread\n");
 	mutex_enter(&reap_thread_lock);
@@ -5154,11 +5085,6 @@ spl_kmem_thread_fini(void)
 	taskq_destroy(kmem_taskq);
 	kmem_taskq = 0;
 
-	// Find a better way to wait for memory_monitor_thread to quit.
-	printf("SPL: waiting on MMT to set shutting_down to 2\n");
-	while (shutting_down != 2) delay(hz>>4);
-
-	// FIXME - maybe it should tear down for symmetry
 	kmem_move_fini();
 
 }
@@ -6210,7 +6136,6 @@ spl_vm_pool_low(void)
 {
 	if (vm_page_free_wanted > 0 ||
 		(vm_page_free_count + vm_page_speculative_count/2) < VM_PAGE_FREE_MIN) {
-		cv_signal(&memory_monitor_thread_cv); // wake MMT to shrink
 		return (1);
 	}
 
