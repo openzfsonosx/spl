@@ -4238,6 +4238,34 @@ spl_free_thread()
 			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
 		}
 
+		// If have a memory shortage and we have not done
+		// so in a while (a short while for emergency_lowmem)
+		// then do a kmem_reap().
+		// See http://comments.gmane.org/gmane.os.illumos.devel/22552
+		// (notably Richard Elling's "A kernel module can call kmem_reap() whenever
+		// it wishes and some modules, like zfs, do so."
+		// If we reap, stop processing spl_free on this pass, to
+		// let the reaps (and arc, if pressure has been set above)
+		// do their job for a few milliseconds.
+		if (emergency_lowmem || lowmem) {
+			static uint64_t last_reap = 0;
+			uint64_t now = zfs_lbolt();
+			uint64_t elapsed = 300*hz;
+			if (emergency_lowmem)
+				elapsed = 5*hz;
+			if (now - last_reap > elapsed) {
+				kmem_reap();
+				vmem_qcache_reap(zio_arena);
+				vmem_qcache_reap(zio_metadata_arena);
+				vmem_qcache_reap(kmem_default_arena);
+				last_reap = now;
+				// drop the variable lock and jump to just before
+				// acquisition of the thread lock
+				mutex_exit(&spl_free_lock);
+				goto justwait;
+			}
+		}
+
 		if (!emergency_lowmem)
 			new_spl_free = above_min_free_bytes;
 		else if (above_min_free_bytes < 0LL)
@@ -4382,21 +4410,6 @@ spl_free_thread()
 			}
 		}
 
-		if (emergency_lowmem || lowmem) {
-			static uint64_t last_reap = 0;
-			uint64_t now = zfs_lbolt();
-			uint64_t elapsed = 300*hz;
-			if (emergency_lowmem)
-				elapsed = 5*hz;
-			if (now - last_reap > elapsed) {
-				kmem_reap();
-				vmem_qcache_reap(zio_arena);
-				vmem_qcache_reap(zio_metadata_arena);
-				vmem_qcache_reap(kmem_default_arena);
-				last_reap = now;
-			}
-		}
-
 		double delta = new_spl_free - base;
 
 		if (new_spl_free < 0LL)
@@ -4422,6 +4435,7 @@ spl_free_thread()
 		spl_free_delta_ema = (int64_t)ema_new;
 		ema_old = ema_new;
 
+	justwait:
 		mutex_enter(&spl_free_thread_lock);
 		CALLB_CPR_SAFE_BEGIN(&cpr);
 		(void) cv_timedwait_hires(&spl_free_thread_cv, &spl_free_thread_lock,
