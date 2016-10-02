@@ -2359,56 +2359,6 @@ vmem_hash_rescale(vmem_t *vmp)
 /*
  * Perform periodic maintenance on all vmem arenas.
  */
-static uint64_t zfs_arc_c_min = 0;
-static uint64_t spl_target_arc_c_min = 0;
-static uint64_t original_zfs_arc_min = 0;
-
-uint64_t
-spl_arc_c_min_update(uint64_t cur_arc_c_min)
-{
-	atomic_swap_64(&zfs_arc_c_min, cur_arc_c_min);
-	if (original_zfs_arc_min &&
-	    spl_target_arc_c_min &&
-	    spl_target_arc_c_min != cur_arc_c_min)
-		return (spl_target_arc_c_min);
-	else
-		return (cur_arc_c_min);
-}
-
-uint64_t
-spl_zfs_arc_min_set(uint64_t val)
-{
-	printf("SPL: %s, original_zfs_arc_min %llu -> %llu\n",
-	    __func__, original_zfs_arc_min, val);
-	atomic_swap_64(&original_zfs_arc_min, val);
-	atomic_swap_64(&spl_target_arc_c_min, val);
-	return (val);
-}
-
-static inline void
-deflate_arc_c_min(uint64_t howmuch)
-{
-	if (spl_target_arc_c_min > howmuch + (1024ULL * 1024ULL * 1024ULL))
-		atomic_sub_64(&spl_target_arc_c_min, howmuch);
-}
-
-
-static inline void
-reset_arc_c_min(void)
-{
-	if(zfs_arc_c_min != original_zfs_arc_min)
-		atomic_swap_64(&zfs_arc_c_min, original_zfs_arc_min);
-}
-
-static inline void
-increment_arc_c_min(uint64_t howmuch)
-{
-	if (original_zfs_arc_min &&
-	    spl_target_arc_c_min + howmuch >= original_zfs_arc_min)
-		reset_arc_c_min();
-	else if (original_zfs_arc_min)
-		atomic_add_64(&spl_target_arc_c_min, howmuch);
-}
 
 void vmem_vacuum_free_arena(void);
 void vmem_vacuum_xnu_import_arena(void);
