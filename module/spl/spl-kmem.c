@@ -76,12 +76,6 @@ uint32_t vm_page_free_min_min = 32*1024*1024/4096;	// so 8192 pages
 
 #define SMALL_PRESSURE_INCURSION_PAGES (vm_page_free_min >> 5)
 
-static kcondvar_t reap_thread_cv;
-static kmutex_t reap_thread_lock;
-static boolean_t reap_thread_exit;
-static boolean_t reap_now = 0;
-static kmutex_t reap_now_lock;
-
 static kcondvar_t spl_mach_pressure_monitor_thread_cv;
 static kmutex_t spl_mach_pressure_monitor_thread_lock;
 static boolean_t spl_mach_pressure_monitor_thread_exit;
@@ -100,8 +94,6 @@ static kmutex_t spl_free_manual_pressure_lock;
 static boolean_t spl_free_fast_pressure = FALSE;
 
 static int64_t spl_minimal_uses_spl_free = TRUE;
-
-static uint64_t spl_reap_timeout_seconds = 7100;
 
 // Start and end address of kernel memory
 extern vm_offset_t virtual_space_start;
@@ -320,7 +312,7 @@ static uint32_t kmem_reaping_idspace;
 /*
  * kmem tunables
  */
-static struct timespec	kmem_reap_interval	= {15, 0};
+static struct timespec kmem_reap_interval = {15, 0};
 int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 pgcnt_t kmem_reapahead = 0;	/* start reaping N pages before pageout */
 int kmem_panic = 1;		/* whether to panic on error */
@@ -561,9 +553,6 @@ typedef struct spl_stats {
 	kstat_named_t spl_active_mutex;
 	kstat_named_t spl_active_rwlock;
 	kstat_named_t spl_active_tsd;
-	kstat_named_t spl_reap_thread_wake_count;
-	kstat_named_t spl_reap_thread_reaped_count;
-	kstat_named_t spl_reap_thread_miss;
 	kstat_named_t spl_spl_mach_pressure_monitor_wake_count;
 	kstat_named_t spl_vm_page_free_min_multiplier;
 	kstat_named_t spl_vm_page_free_min_min;
@@ -574,7 +563,6 @@ typedef struct spl_stats {
 	kstat_named_t spl_spl_free_delta_ema;
 	kstat_named_t spl_spl_free_negative_count;
 	kstat_named_t spl_spl_minimal_uses_spl_free;
-	kstat_named_t spl_spl_reap_timeout_seconds;
 	kstat_named_t spl_osif_malloc_success;
 	kstat_named_t spl_osif_malloc_fail;
 	kstat_named_t spl_osif_free;
@@ -625,9 +613,6 @@ static spl_stats_t spl_stats = {
 	{"active_mutex", KSTAT_DATA_UINT64},
 	{"active_rwlock", KSTAT_DATA_UINT64},
 	{"active_tsd", KSTAT_DATA_UINT64},
-	{"reap_thread_wake_count", KSTAT_DATA_UINT64},
-	{"reap_thread_reaped_count", KSTAT_DATA_UINT64},
-	{"reap_thread_miss", KSTAT_DATA_UINT64},
 	{"spl_mach_pressure_wake_count", KSTAT_DATA_UINT64},
 	{"vm_page_free_multiplier", KSTAT_DATA_UINT64},
 	{"vm_page_free_min_min", KSTAT_DATA_UINT64},
@@ -638,7 +623,6 @@ static spl_stats_t spl_stats = {
 	{"spl_spl_free_delta_ema", KSTAT_DATA_UINT64},
 	{"spl_spl_free_negative_count", KSTAT_DATA_UINT64},
 	{"spl_spl_minimal_uses_spl_free", KSTAT_DATA_INT64},
-	{"spl_spl_reap_timeout_seconds", KSTAT_DATA_INT64},
 	{"spl_osif_malloc_success", KSTAT_DATA_UINT64},
 	{"spl_osif_malloc_fail", KSTAT_DATA_UINT64},
 	{"spl_osif_free", KSTAT_DATA_UINT64},
@@ -4464,66 +4448,6 @@ spl_free_thread()
 }
 
 static void
-reap_thread()
-{
-	callb_cpr_t cpr;
-	uint64_t last_reap = zfs_lbolt();
-	uint64_t previous_segkmem_total_mem_allocated = segkmem_total_mem_allocated;
-
-	CALLB_CPR_INIT(&cpr, &reap_thread_lock, callb_generic_cpr, FTAG);
-
-	mutex_enter(&reap_thread_lock);
-
-	printf("SPL: beginning reap_thread() loop\n");
-
-	while (!reap_thread_exit) {
-		mutex_exit(&reap_thread_lock);
-
-		spl_stats.spl_reap_thread_wake_count.value.ui64++;
-
-		mutex_enter(&reap_now_lock);
-		uint64_t om = segkmem_total_mem_allocated;
-		if (reap_now && spl_free_fast_pressure_wrapper() != 0) {
-			reap_now = 0;
-			mutex_exit(&reap_now_lock);
-			printf("SPL: %s: spl_fast_pressure set and reap_now set, delta %llu since %llu seconds ago\n",
-				   __func__, om - previous_segkmem_total_mem_allocated, (zfs_lbolt() - last_reap)/hz);
-			last_reap = zfs_lbolt();
-			previous_segkmem_total_mem_allocated = om;
-			kmem_reap();
-			kmem_reap_idspace();
-			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-		} else if ((zfs_lbolt() - last_reap > (hz*spl_reap_timeout_seconds))) {
-			reap_now = 0;
-			mutex_exit(&reap_now_lock);
-			dprintf("SPL: %s periodic unconditional reap: last reap %llu seconds ago, memory in use %llu\n",
-				   __func__, (zfs_lbolt() - last_reap)/hz, om);
-			last_reap = zfs_lbolt();
-			previous_segkmem_total_mem_allocated = om;
-			kmem_reap();
-			kmem_reap_idspace();
-			spl_stats.spl_reap_thread_reaped_count.value.ui64++;
-		} else {
-			reap_now = 0;
-			mutex_exit(&reap_now_lock);
-			if (previous_segkmem_total_mem_allocated > om)
-				previous_segkmem_total_mem_allocated = om;
-			spl_stats.spl_reap_thread_miss.value.ui64++;
-		}
-		mutex_enter(&reap_thread_lock);
-		CALLB_CPR_SAFE_BEGIN(&cpr);
-		(void) cv_timedwait(&reap_thread_cv, &reap_thread_lock, ddi_get_lbolt() + (10 * hz));
-		CALLB_CPR_SAFE_END(&cpr, &reap_thread_lock);
-	}
-	reap_thread_exit = FALSE;
-	printf("SPL: reap_thread_exit set to FALSE and exiting: cv_broadcasting\n");
-	cv_broadcast(&reap_thread_cv);
-	CALLB_CPR_EXIT(&cpr);
-	printf("SPL: %s thread exit\n", __func__);
-	thread_exit();
-}
-
-static void
 spl_mach_pressure_monitor_thread()
 {
 	callb_cpr_t cpr;
@@ -4614,28 +4538,19 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		if (ks->spl_spl_free_manual_pressure.value.i64 != spl_free_manual_pressure) {
 			spl_free_set_pressure(ks->spl_spl_free_manual_pressure.value.i64 * 1024 *1024);
 			if (ks->spl_spl_free_manual_pressure.value.i64 > 0) {
-				mutex_enter(&reap_now_lock);
 				kmem_reap();
 				vmem_qcache_reap(kmem_default_arena);
-				mutex_exit(&reap_now_lock);
 			}
 		}
 
 		if (ks->spl_spl_free_fast_pressure.value.i64 != spl_free_fast_pressure) {
 			if (spl_free_wrapper() != 0) {
 				spl_free_set_fast_pressure(TRUE);
-				mutex_enter(&reap_now_lock);
-				reap_now = TRUE;
-				mutex_exit(&reap_now_lock);
 			}
 		}
 
 		if (ks->spl_spl_minimal_uses_spl_free.value.i64 != spl_minimal_uses_spl_free) {
 			spl_minimal_uses_spl_free = ks->spl_spl_minimal_uses_spl_free.value.i64;
-		}
-
-		if (ks->spl_spl_reap_timeout_seconds.value.ui64 != spl_reap_timeout_seconds) {
-		  spl_reap_timeout_seconds = ks->spl_spl_reap_timeout_seconds.value.ui64;
 		}
 
 		if (ks->spl_root_refill_running.value.ui64 != (uint64_t)spl_root_refill_enabled)
@@ -4662,7 +4577,6 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_spl_free_fast_pressure.value.i64 = spl_free_fast_pressure;
 		ks->spl_spl_free_delta_ema.value.i64 = spl_free_delta_ema;
 		ks->spl_spl_minimal_uses_spl_free.value.i64 = spl_minimal_uses_spl_free;
-		ks->spl_spl_reap_timeout_seconds.value.ui64 = spl_reap_timeout_seconds;
 		ks->spl_osif_malloc_success.value.ui64 = stat_osif_malloc_success;
 		ks->spl_osif_malloc_fail.value.ui64 = stat_osif_malloc_fail;
 		ks->spl_osif_free.value.ui64 = stat_osif_free;
@@ -4991,9 +4905,6 @@ spl_kmem_thread_init(void)
 {
 	kmem_move_init();
 
-	// Initialize the reap thread locks
-	mutex_init(&reap_thread_lock, "reap_thread_lock", MUTEX_DEFAULT, NULL);
-	mutex_init(&reap_now_lock, "reap_now_lock", MUTEX_DEFAULT, NULL);
 	// Initialize the spl_free locks
 	mutex_init(&spl_free_thread_lock, "spl_free_thead_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&spl_free_lock, "spl_free_lock", MUTEX_DEFAULT, NULL);
@@ -5004,10 +4915,6 @@ spl_kmem_thread_init(void)
 
 	kmem_taskq = taskq_create("kmem_taskq", 1, minclsyspri,
 							  300, INT_MAX, TASKQ_PREPOPULATE);
-
-	reap_thread_exit = FALSE;
-	(void) thread_create(NULL, 0, reap_thread, 0, 0, 0, 0, 92);
-	(void) cv_init(&reap_thread_cv, NULL, CV_DEFAULT, NULL);
 
 	spl_mach_pressure_monitor_thread_exit = FALSE;
 	(void) cv_init(&spl_mach_pressure_monitor_thread_cv, NULL, CV_DEFAULT, NULL);
@@ -5022,22 +4929,6 @@ void
 spl_kmem_thread_fini(void) 
 {
 	shutting_down = 1;
-
-	printf("SPL: stop reap thread\n");
-	mutex_enter(&reap_thread_lock);
-	printf("SPL: stop reap thread, lock acquired, setting exit variable and waiting\n");
-	reap_thread_exit = TRUE;
-	while (reap_thread_exit) {
-		cv_signal(&reap_thread_cv);
-		cv_wait(&reap_thread_cv, &reap_thread_lock);
-	}
-
-	printf("SPL: reap thread stop: while loop ended, dropping mutex\n");
-	mutex_exit(&reap_thread_lock);
-	printf("SPL: reap thread stop: destroying cv and mutex\n");
-	cv_destroy(&reap_thread_cv);
-	mutex_destroy(&reap_thread_lock);
-	mutex_destroy(&reap_now_lock);
 
 	printf("SPL: stop spl_free_thread\n");
 	mutex_enter(&spl_free_thread_lock);
