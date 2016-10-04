@@ -4165,7 +4165,7 @@ spl_free_thread()
 
 	mutex_enter(&spl_free_lock);
 	spl_free = (int64_t)PAGESIZE *
-	    (int64_t)(vm_page_free_count + (vm_page_speculative_count/2) - vm_page_free_min);
+	    (int64_t)(vm_page_free_count + (vm_page_speculative_count/8) - vm_page_free_min);
 	mutex_exit(&spl_free_lock);
 
 	mutex_enter(&spl_free_thread_lock);
@@ -4304,9 +4304,9 @@ spl_free_thread()
 		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
 			int64_t speculative_bytes = (int64_t)PAGESIZE * vm_page_speculative_count;
 			if (speculative_bytes > real_total_memory / 16)
-				new_spl_free += speculative_bytes;
-			else if (speculative_bytes > 0)
 				new_spl_free += speculative_bytes / 2;
+			else if (speculative_bytes > 0)
+				new_spl_free += speculative_bytes / 8;
 		}
 
 		base = new_spl_free;

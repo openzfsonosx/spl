@@ -1059,6 +1059,9 @@ spl_vmem_xnu_useful_bytes_free(void)
 	uint64_t bytes_min = (uint64_t)vm_page_free_min * (uint64_t)PAGESIZE;
 	uint64_t bytes_spec = (uint64_t)vm_page_speculative_count * (uint64_t)PAGESIZE;
 
+	if (bytes_free <= bytes_min)
+		return (0);
+
 	uint64_t useful_free = bytes_free + (bytes_spec/2) - bytes_min;
 
 	return (useful_free);
