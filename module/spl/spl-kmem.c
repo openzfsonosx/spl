@@ -4432,7 +4432,7 @@ spl_free_thread()
 			}
 		}
 
-		double delta = new_spl_free - last_spl_free;
+		double delta = (double)new_spl_free - (double)last_spl_free;
 
 		if (new_spl_free < 0LL)
 			spl_stats.spl_spl_free_negative_count.value.ui64++;
@@ -4449,12 +4449,12 @@ spl_free_thread()
 		if (last_update > hz)
 			alpha = 1.0;
 		else {
-			double td_tick  = zfs_lbolt() - last_update;
+			double td_tick  = (double)(zfs_lbolt() - last_update);
 			alpha = td_tick / (double)(hz*100.0); // roughly 0.1
 		}
 
-		ema_new = (alpha * (double)delta) + (1.0 - alpha)*ema_old;
-		spl_free_delta_ema = (int64_t)ema_new;
+		ema_new = (alpha * delta) + (1.0 - alpha)*ema_old;
+		spl_free_delta_ema = ema_new;
 		ema_old = ema_new;
 
 	justwait:
