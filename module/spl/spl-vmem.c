@@ -1404,7 +1404,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 			maxtime = shortmaxtime;
 
 		// try a wait to see if we can recover some space
-		if (!(flags & (VM_NOSLEEP | VM_ABORT | VM_PUSHPAGE)) &&
+		if (!(flags & (VM_NOSLEEP | VM_ABORT)) &&
 		    vmem_canalloc_nomutex(free_arena, size)) {
 			(void) vmem_flush_free_to_root();
 			mutex_enter(&vmp->vm_lock);
@@ -2720,7 +2720,7 @@ static void
 vmem_free_transfer(vmem_t *source, void *inaddr, size_t size, vmem_t *destination)
 {
 	bzero(inaddr, size);
-	vmem_add_as_import(destination, inaddr, size, VM_PUSHPAGE);
+	vmem_add_as_import(destination, inaddr, size, VM_NOSLEEP);
 }
 
 static void
