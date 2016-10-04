@@ -1265,7 +1265,7 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 		// Therefore we want to tell arc we have
 		// hit an effective ceiling, but not have it overreact,
 		// so we do not get stutter after stutter.
-		spl_free_set_pressure((int64_t)size);
+		spl_free_set_emergency_pressure((int64_t)size*4LL);
 		mutex_enter(&vmp->vm_lock);
 		(void) cv_timedwait_hires(&vmp->vm_cv, &vmp->vm_lock,
 		    timeout, resolution, 0);
@@ -1298,10 +1298,10 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 	if (p == NULL) {
 		if (even_if_pressure) {
 			atomic_inc_64(&ta_xnu_unconditional_fail);
-			spl_free_set_emergency_pressure((int64_t)size * 4LL);
+			spl_free_set_emergency_pressure((int64_t)size * 16LL);
 		} else {
 			atomic_inc_64(&ta_xnu_fail);
-			spl_free_set_pressure((int64_t) size);
+			spl_free_set_emergency_pressure((int64_t)size* 4LL);
 		} return (NULL);
 	}
 
@@ -1365,7 +1365,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		atomic_add_64(&spl_root_allocator_minalloc_bytes_asked, size);
 
 	uint64_t loopstart = zfs_lbolt();
-	uint64_t one_second = loopstart + hz;
+	uint64_t one_tenth_second = loopstart + (hz/10);
 
 	bool tried_xnu_alloc = false;
 
@@ -1385,9 +1385,9 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		// is reset to 1000 nsec (== 1 usec), so we are OK with microseconds
 		// which xnu's mach msleep is OK with too.
 		const hrtime_t tinymaxtime = USEC2NSEC(1);
-		const hrtime_t shortmaxtime = MSEC2NSEC(1);
-		const hrtime_t longmaxtime = MSEC2NSEC(10);
-		const hrtime_t verylongmaxtime = MSEC2NSEC(100);
+		const hrtime_t shortmaxtime = USEC2NSEC(50);
+		const hrtime_t longmaxtime = MSEC2NSEC(1);
+		const hrtime_t verylongmaxtime = MSEC2NSEC(10);
 
 		if (flags & (VM_NOSLEEP | VM_ABORT))
 			maxtime = tinymaxtime;
@@ -1452,12 +1452,12 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		} else if (flags & VM_ABORT) {
 			maxtime = tinymaxtime;
 			even_if_pressure = false;
-		} else if ((zfs_lbolt() < one_second || pass < 5) &&
+		} else if ((zfs_lbolt() < one_tenth_second || pass < 5) &&
 		    !(flags & (VM_NOSLEEP | VM_ABORT))) {
 			// we don't try to do an allocation right away if we
 			// are permitted to wait
 			continue;
-		} else if (zfs_lbolt() < one_second) {
+		} else if (zfs_lbolt() < one_tenth_second) {
 			if (spl_root_refill_enabled)
 				maxtime = verylongmaxtime;
 			else
@@ -1481,7 +1481,7 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		} else if (flags & (VM_NOSLEEP | VM_ABORT)) {
 			spl_free_set_emergency_pressure(16*size);
 			return (NULL);
-		} else if (tried_xnu_alloc && (zfs_lbolt() > one_second || pass >= 10)) {
+		} else if (tried_xnu_alloc && (zfs_lbolt() > one_tenth_second || pass >= 10)) {
 			spl_free_set_emergency_pressure(16*size);
 			return (NULL);
 		}

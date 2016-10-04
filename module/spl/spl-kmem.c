@@ -4188,16 +4188,28 @@ spl_free_thread()
 
 		last_spl_free = spl_free;
 
-		// start with actual pages free plus half of speculative pages
-		// but if we are paging, start with -number_of_pages
-
 		new_spl_free = 0LL;
 
+		// if there is pressure that has not yet reached arc_reclaim_thread()
+		// then start with a negative new_spl_free
+		if (spl_free_manual_pressure > 0) {
+			new_spl_free -= spl_free_manual_pressure * 2LL;
+			lowmem = true;
+			if (spl_free_fast_pressure) {
+				emergency_lowmem = true;
+				new_spl_free -= spl_free_manual_pressure * 4LL;
+			}
+		}
+
+		// this is a sign of a period of time of low memory
+		// XNU's generation of this variable is not very predictable,
+		// but generally it should be taken seriously when it's positive
+		// (it is often falsely 0)
 		if (vm_page_free_wanted > 0) {
 			int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -16LL;
 			if (bminus > -16LL*1024LL*1024LL)
 				bminus = -16LL*1024LL*1024LL;
-			new_spl_free = bminus;
+			new_spl_free += bminus;
 			lowmem = true;
 			emergency_lowmem = true;
 			// atomic swaps to set these variables used in .../zfs/arc.c
@@ -4209,8 +4221,7 @@ spl_free_thread()
 			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
 		}
 
-		// if we can't allocate a 64MiB segment
-
+		// can we allocate a 64MiB segment from the reserve arena?
 		boolean_t reserve_low = false;
 		extern vmem_t *spl_large_reserve_arena;
 		const uint64_t sixtyfour = 64ULL*1024ULL*1024ULL;
@@ -4223,6 +4234,9 @@ spl_free_thread()
 			reserve_low = true;
 		}
 
+		// these variables are reliably maintained by XNU
+		// if vm_page_free_count > vm_page_free_min, then XNU
+		// is scanning pages to try to free some memory up
 		int64_t above_min_free_pages = vm_page_free_count - vm_page_free_min;
 		int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
 		if (above_min_free_bytes < 16LL*1024LL*1024LL && reserve_low) {
@@ -4238,17 +4252,9 @@ spl_free_thread()
 			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
 		}
 
-		if (!emergency_lowmem || !lowmem) {
-			if (spl_free_manual_pressure > MIN(last_spl_free, new_spl_free)) {
-				lowmem = true;
-				if (spl_free_fast_pressure)
-					emergency_lowmem = true;
-			}
-		}
-
-		// If have a memory shortage and we have not done
-		// so in a while (a short while for emergency_lowmem)
-		// then do a kmem_reap().
+		// If we have already detected a  memory shortage and we
+		// have not reaped in a while (a short while for emergency_lowmem),
+		// then do a kmem_reap() now.
 		// See http://comments.gmane.org/gmane.os.illumos.devel/22552
 		// (notably Richard Elling's "A kernel module can call kmem_reap() whenever
 		// it wishes and some modules, like zfs, do so."
@@ -4260,12 +4266,12 @@ spl_free_thread()
 			uint64_t now = zfs_lbolt();
 			uint64_t elapsed = 60*hz;
 			if (emergency_lowmem)
-				elapsed = 15*hz;
+				elapsed = 15*hz; // minimum frequency from kmem_reap_interval
 			if (now - last_reap > elapsed) {
-				kmem_reap();
 				vmem_qcache_reap(zio_arena);
 				vmem_qcache_reap(zio_metadata_arena);
 				vmem_qcache_reap(kmem_default_arena);
+				kmem_reap();
 				last_reap = now;
 				// drop the variable lock and jump to just before
 				// acquisition of the thread lock
@@ -4274,11 +4280,18 @@ spl_free_thread()
 			}
 		}
 
+		// If we are not critically low on memory or waiting for
+		// arc to react to our previous detection of critically low memory,
+		// then we can make use of the available memory below the point
+		// where XNU would start scanning
 		if (!emergency_lowmem)
 			new_spl_free = above_min_free_bytes;
 		else if (above_min_free_bytes < 0LL)
 			new_spl_free += above_min_free_bytes;
 
+		// Stay in a low memory condition for several seconds after we
+		// first detect that we are in it, giving the system (arc, xnu and userland)
+		// time to adapt
 		if (!lowmem && recent_lowmem > 0) {
 			if (recent_lowmem + 4*hz < zfs_lbolt())
 				lowmem = true;
@@ -4286,6 +4299,8 @@ spl_free_thread()
 				recent_lowmem = 0;
 		}
 
+		// If we are not low on memory, then gently squeeze speculative
+		// pages downwards, since ARC does a better job than spec caching
 		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
 			int64_t speculative_bytes = (int64_t)PAGESIZE * vm_page_speculative_count;
 			if (speculative_bytes > real_total_memory / 16)
@@ -4295,13 +4310,6 @@ spl_free_thread()
 		}
 
 		base = new_spl_free;
-
-		// if there are vmem waiters, signal need for a little space (use spl_minalloc?)
-		extern volatile uint64_t spl_vmem_threads_waiting;
-		int64_t w = (int64_t)spl_vmem_threads_waiting;
-		if (w > 0LL) {
-			new_spl_free -= (w * 1024LL * 1024LL);
-		}
 
 		// adjust for available memory in spl_root_arena
 		// cf arc_available_memory()
@@ -4365,6 +4373,12 @@ spl_free_thread()
 			}
 		}
 
+		// Adjust in the face of a large ARC.
+		// We don't treat (zfs) metadata and non-metadata
+		// differently here, and leave policy with respect
+		// to the relative value of each up to arc.c.
+		// O3X arc.c does not (yet) take these arena sizes into
+		// account like Illumos's does.
 		uint64_t zio_size = vmem_size_locked(zio_arena, VMEM_ALLOC | VMEM_FREE);
 		uint64_t zio_metadata_size = vmem_size_locked(zio_metadata_arena,
 		    VMEM_ALLOC | VMEM_FREE);
@@ -4418,7 +4432,7 @@ spl_free_thread()
 			}
 		}
 
-		double delta = new_spl_free - base;
+		double delta = new_spl_free - last_spl_free;
 
 		if (new_spl_free < 0LL)
 			spl_stats.spl_spl_free_negative_count.value.ui64++;
