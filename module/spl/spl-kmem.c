@@ -4238,6 +4238,14 @@ spl_free_thread()
 			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
 		}
 
+		if (!emergency_lowmem || !lowmem) {
+			if (spl_free_manual_pressure > MIN(last_spl_free, new_spl_free)) {
+				lowmem = true;
+				if (spl_free_fast_pressure)
+					emergency_lowmem = true;
+			}
+		}
+
 		// If have a memory shortage and we have not done
 		// so in a while (a short while for emergency_lowmem)
 		// then do a kmem_reap().
@@ -4250,9 +4258,9 @@ spl_free_thread()
 		if (emergency_lowmem || lowmem) {
 			static uint64_t last_reap = 0;
 			uint64_t now = zfs_lbolt();
-			uint64_t elapsed = 300*hz;
+			uint64_t elapsed = 60*hz;
 			if (emergency_lowmem)
-				elapsed = 5*hz;
+				elapsed = 15*hz;
 			if (now - last_reap > elapsed) {
 				kmem_reap();
 				vmem_qcache_reap(zio_arena);

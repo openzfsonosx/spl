@@ -1250,6 +1250,22 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 	if (p) {
 		atomic_inc_64(&ta_xnu_first_alloc);
 	} else {
+		// The XNU allocator can take many milliseconds
+		// below this point, and that and the potential
+		// exhaustion of the full timeout period here
+		// can lead to choppy streaming video playback
+		// when the arc is essentially at maximal size
+		// and is not seeing pressure because xnu is
+		// compressing and dropping pages in the background
+		// while still maintaining a healthy number of
+		// free pages.  this effect is most obvious
+		// when the streaming dataset's recordsize is at
+		// or above spl_minfree, especially if we fall
+		// through to doing just size alloc below.
+		// Therefore we want to tell arc we have
+		// hit an effective ceiling, but not have it overreact,
+		// so we do not get stutter after stutter.
+		spl_free_set_pressure((int64_t)size);
 		mutex_enter(&vmp->vm_lock);
 		(void) cv_timedwait_hires(&vmp->vm_cv, &vmp->vm_lock,
 		    timeout, resolution, 0);
@@ -1280,11 +1296,13 @@ timed_alloc_root_xnu(size_t size, hrtime_t timeout, hrtime_t resolution, bool ev
 		}
 	}
 	if (p == NULL) {
-		if (even_if_pressure)
+		if (even_if_pressure) {
 			atomic_inc_64(&ta_xnu_unconditional_fail);
-		else
+			spl_free_set_emergency_pressure((int64_t)size * 4LL);
+		} else {
 			atomic_inc_64(&ta_xnu_fail);
-		return (NULL);
+			spl_free_set_pressure((int64_t) size);
+		} return (NULL);
 	}
 
 	mutex_enter(&vmp->vm_lock);
@@ -1461,10 +1479,10 @@ spl_root_allocator(vmem_t *vmp, size_t size, int flags)
 		if (p != NULL) {
 			return (p);
 		} else if (flags & (VM_NOSLEEP | VM_ABORT)) {
-			spl_free_set_emergency_pressure(size);
+			spl_free_set_emergency_pressure(16*size);
 			return (NULL);
 		} else if (tried_xnu_alloc && (zfs_lbolt() > one_second || pass >= 10)) {
-			spl_free_set_emergency_pressure(2*size);
+			spl_free_set_emergency_pressure(16*size);
 			return (NULL);
 		}
 		tried_xnu_alloc = true;
