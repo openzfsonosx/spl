@@ -4089,22 +4089,6 @@ spl_free_wrapper(void)
 	return (spl_free);
 }
 
-void
-spl_free_wrapper_reset(void)
-{
-	mutex_enter(&spl_free_lock);
-	__sync_lock_test_and_set(&spl_free, 0LL);
-	mutex_exit(&spl_free_lock);
-}
-
-void
-spl_free_wrapper_set(int64_t new)
-{
-	mutex_enter(&spl_free_lock);
-	__sync_lock_test_and_set(&spl_free, new);
-	mutex_exit(&spl_free_lock);
-}
-
 // this is intended to substitute for kmem_avail() in arc.c
 // when arc_reclaim_thread() calls spl_free_set_pressure(0);
 int64_t
@@ -4244,12 +4228,15 @@ spl_free_thread()
 		}
 		if (above_min_free_bytes <= 0LL) {
 			emergency_lowmem = true;
+			new_spl_free += above_min_free_bytes * 16LL;
+			int64_t new_p = above_min_free_bytes * -16LL;			
 			int64_t previous_highest_pressure;
-			int64_t new_p = above_min_free_bytes * 16LL;
 			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 			if (new_p > previous_highest_pressure || new_p <= 0)
-				__sync_lock_test_and_set(&spl_free_manual_pressure, -16LL * new_spl_free);
+				__sync_lock_test_and_set(&spl_free_manual_pressure, new_p);
 			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
+		} else {
+			new_spl_free += above_min_free_bytes;
 		}
 
 		// If we have already detected a  memory shortage and we
@@ -4280,15 +4267,6 @@ spl_free_thread()
 			}
 		}
 
-		// If we are not critically low on memory or waiting for
-		// arc to react to our previous detection of critically low memory,
-		// then we can make use of the available memory below the point
-		// where XNU would start scanning
-		if (!emergency_lowmem)
-			new_spl_free = above_min_free_bytes;
-		else if (above_min_free_bytes < 0LL)
-			new_spl_free += above_min_free_bytes;
-
 		// Stay in a low memory condition for several seconds after we
 		// first detect that we are in it, giving the system (arc, xnu and userland)
 		// time to adapt
@@ -4303,7 +4281,7 @@ spl_free_thread()
 		// pages downwards, since ARC does a better job than spec caching
 		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
 			int64_t speculative_bytes = (int64_t)PAGESIZE * vm_page_speculative_count;
-			if (speculative_bytes > real_total_memory / 16)
+			if (speculative_bytes > (int64_t)real_total_memory / 16LL)
 				new_spl_free += speculative_bytes / 2;
 			else if (speculative_bytes > 0)
 				new_spl_free += speculative_bytes / 8;
@@ -4323,9 +4301,9 @@ spl_free_thread()
 			int64_t la_free = (int64_t)vmem_size_locked(spl_large_reserve_arena, VMEM_FREE);
 			int64_t xa_free = (int64_t)vmem_size_locked(xnu_import_arena, VMEM_FREE);
 
-			if (reserve_low && la_free < sixtyfour * 4ULL)
+			if (reserve_low && la_free < (int64_t)sixtyfour * 4LL)
 				la_free = 0;
-			else if (!reserve_low || la_free >= sixtyfour * 4ULL)
+			else if (!reserve_low || la_free >= (int64_t)sixtyfour * 4LL)
 				lowmem = false;
 
 			int64_t root_free = la_free;
@@ -4334,7 +4312,7 @@ spl_free_thread()
 				root_free += (ra_free + xa_free) / 4;
 
 			if (lowmem) {
-				if (la_free >= sixtyfour)
+				if (la_free >= (int64_t)sixtyfour)
 					root_free = la_free / 4;
 				else
 					root_free = 0;
