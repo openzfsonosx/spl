@@ -67,12 +67,6 @@
 extern volatile unsigned int vm_page_free_wanted; // 0 by default smd
 extern unsigned int vm_page_free_min; // 3500 by default smd kern.vm_page_free_min, rarely changes
 extern volatile unsigned int vm_page_free_count; // will tend to vm_page_free_min smd
-extern volatile unsigned int vm_page_speculative_count; // is currently 20k (and tends to 5%? - ca 800M) smd
-
-// VM_PAGE_FREE_MIN tunables principally used in kmem_avail()
-uint32_t vm_page_free_min_multiplier = 8;	// so 3500*this = 14000 pages
-uint32_t vm_page_free_min_min = 32*1024*1024/4096;	// so 8192 pages
-#define VM_PAGE_FREE_MIN (MAX(vm_page_free_min * vm_page_free_min_multiplier, vm_page_free_min_min))
 
 #define SMALL_PRESSURE_INCURSION_PAGES (vm_page_free_min >> 5)
 
@@ -86,8 +80,6 @@ int64_t spl_free_delta_ema;
 static int64_t spl_free_manual_pressure = 0;
 static kmutex_t spl_free_manual_pressure_lock;
 static boolean_t spl_free_fast_pressure = FALSE;
-
-static int64_t spl_minimal_uses_spl_free = TRUE;
 
 // Start and end address of kernel memory
 extern vm_offset_t virtual_space_start;
@@ -540,15 +532,12 @@ typedef struct spl_stats {
 	kstat_named_t spl_active_mutex;
 	kstat_named_t spl_active_rwlock;
 	kstat_named_t spl_active_tsd;
-	kstat_named_t spl_vm_page_free_min_multiplier;
-	kstat_named_t spl_vm_page_free_min_min;
 	kstat_named_t spl_free_wake_count;
 	kstat_named_t spl_spl_free;
 	kstat_named_t spl_spl_free_manual_pressure;
 	kstat_named_t spl_spl_free_fast_pressure;
 	kstat_named_t spl_spl_free_delta_ema;
 	kstat_named_t spl_spl_free_negative_count;
-	kstat_named_t spl_spl_minimal_uses_spl_free;
 	kstat_named_t spl_osif_malloc_success;
 	kstat_named_t spl_osif_malloc_fail;
 	kstat_named_t spl_osif_free;
@@ -599,15 +588,12 @@ static spl_stats_t spl_stats = {
 	{"active_mutex", KSTAT_DATA_UINT64},
 	{"active_rwlock", KSTAT_DATA_UINT64},
 	{"active_tsd", KSTAT_DATA_UINT64},
-	{"vm_page_free_multiplier", KSTAT_DATA_UINT64},
-	{"vm_page_free_min_min", KSTAT_DATA_UINT64},
 	{"spl_free_wake_count", KSTAT_DATA_UINT64},
 	{"spl_spl_free", KSTAT_DATA_INT64},
 	{"spl_spl_free_manual_pressure", KSTAT_DATA_UINT64},
 	{"spl_spl_free_fast_pressure", KSTAT_DATA_UINT64},
 	{"spl_spl_free_delta_ema", KSTAT_DATA_UINT64},
 	{"spl_spl_free_negative_count", KSTAT_DATA_UINT64},
-	{"spl_spl_minimal_uses_spl_free", KSTAT_DATA_INT64},
 	{"spl_osif_malloc_success", KSTAT_DATA_UINT64},
 	{"spl_osif_malloc_fail", KSTAT_DATA_UINT64},
 	{"spl_osif_free", KSTAT_DATA_UINT64},
@@ -3194,7 +3180,9 @@ spl_minimal_physmem_p_logic()
 	// do we have enough memory to avoid throttling?
 	if (vm_page_free_wanted > 0)
 		return (false);
-	if (vm_page_free_count > (vm_page_free_min - SMALL_PRESSURE_INCURSION_PAGES))
+	if (vm_page_free_count < (vm_page_free_min + 512))
+		// 512 pages above 3500 (normal vm_page_free_min)
+		// 2MiB above 13 MiB
 		return (false);
 	return (true);
 }
@@ -3207,15 +3195,7 @@ spl_minimal_physmem_p(void)
 	// we want a small bit of pressure here so that we can compete
 	// a little with the xnu buffer cache
 
-	if (spl_minimal_uses_spl_free) {
-		return (spl_free > -1024LL);
-	}
-
-	if (spl_minimal_physmem_p_logic()) {
-		return (1);
-	} else {
-		return (0);
-	}
+	return (spl_free > -1024LL);
 }
 
 /*
@@ -4149,7 +4129,7 @@ spl_free_thread()
 
 	mutex_enter(&spl_free_lock);
 	spl_free = (int64_t)PAGESIZE *
-	    (int64_t)(vm_page_free_count + (vm_page_speculative_count/8) - vm_page_free_min);
+	    (int64_t)(vm_page_free_count - vm_page_free_min);
 	mutex_exit(&spl_free_lock);
 
 	mutex_enter(&spl_free_thread_lock);
@@ -4277,16 +4257,6 @@ spl_free_thread()
 				recent_lowmem = 0;
 		}
 
-		// If we are not low on memory, then gently squeeze speculative
-		// pages downwards, since ARC does a better job than spec caching
-		if (!emergency_lowmem && !lowmem && vm_page_speculative_count > 2LL) {
-			int64_t speculative_bytes = (int64_t)PAGESIZE * vm_page_speculative_count;
-			if (speculative_bytes > (int64_t)real_total_memory / 16LL)
-				new_spl_free += speculative_bytes / 2;
-			else if (speculative_bytes > 0)
-				new_spl_free += speculative_bytes / 8;
-		}
-
 		base = new_spl_free;
 
 		// adjust for available memory in spl_root_arena
@@ -4398,16 +4368,19 @@ spl_free_thread()
 			}
 		}
 
-		// when in emergency lowmem, do not allow new_spl_free to be positive
+		// try to get 1/64 of spl_root_arena freed up
 		if (emergency_lowmem && new_spl_free >= 0LL) {
-			new_spl_free = -1024LL;
 			extern vmem_t *spl_root_arena;
 			uint64_t root_size = vmem_size_locked(spl_root_arena, VMEM_ALLOC | VMEM_FREE);
 			uint64_t root_free = vmem_size_locked(spl_root_arena, VMEM_FREE);
 			int64_t difference = root_size - root_free;
-			if (difference > 16384LL) {
-				new_spl_free -= difference / 16;
+			int64_t target = root_size / 64;
+			if (difference < target) {
+				new_spl_free -= target;
 			}
+			// and we should definitely not be returning positive now
+			if (new_spl_free >= 0LL)
+				new_spl_free = -1024LL;
 		}
 
 		double delta = (double)new_spl_free - (double)last_spl_free;
@@ -4458,22 +4431,6 @@ spl_kstat_update(kstat_t *ksp, int rw)
 
 	if (rw == KSTAT_WRITE) {
 
-		if (ks->spl_vm_page_free_min_multiplier.value.ui64 != (uint64_t)vm_page_free_min_multiplier) {
-			printf("SPL: vm_page_free_min_multiplier was %u, now %u, headroom now %u\n",
-				   vm_page_free_min_multiplier,
-				   (uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64,
-				   MAX(vm_page_free_min*(uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64, vm_page_free_min_min));
-			vm_page_free_min_multiplier = (uint32_t)ks->spl_vm_page_free_min_multiplier.value.ui64;
-		}
-		if (ks->spl_vm_page_free_min_min.value.ui64 != (uint64_t)vm_page_free_min_min) {
-			printf("SPL: vm_page_free_min_min was %u, now %u, headroom now %u\n",
-				   vm_page_free_min_min,
-				   (uint32_t)ks->spl_vm_page_free_min_min.value.ui64,
-				   MAX(vm_page_free_min*vm_page_free_min_multiplier, (uint32_t)ks->spl_vm_page_free_min_min.value.ui64));
-			vm_page_free_min_min = (uint32_t)ks->spl_vm_page_free_min_min.value.ui64;
-		}
-
-
 		if (ks->spl_spl_free_manual_pressure.value.i64 != spl_free_manual_pressure) {
 			spl_free_set_pressure(ks->spl_spl_free_manual_pressure.value.i64 * 1024 *1024);
 			if (ks->spl_spl_free_manual_pressure.value.i64 > 0) {
@@ -4486,10 +4443,6 @@ spl_kstat_update(kstat_t *ksp, int rw)
 			if (spl_free_wrapper() != 0) {
 				spl_free_set_fast_pressure(TRUE);
 			}
-		}
-
-		if (ks->spl_spl_minimal_uses_spl_free.value.i64 != spl_minimal_uses_spl_free) {
-			spl_minimal_uses_spl_free = ks->spl_spl_minimal_uses_spl_free.value.i64;
 		}
 
 		if (ks->spl_root_refill_running.value.ui64 != (uint64_t)spl_root_refill_enabled)
@@ -4509,13 +4462,10 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_active_mutex.value.ui64 = zfs_active_mutex;
 		ks->spl_active_rwlock.value.ui64 = zfs_active_rwlock;
 		ks->spl_active_tsd.value.ui64 = spl_tsd_size();
-		ks->spl_vm_page_free_min_multiplier.value.ui64 = (uint64_t)vm_page_free_min_multiplier;
-		ks->spl_vm_page_free_min_min.value.ui64 = (uint64_t)vm_page_free_min_min;
 		ks->spl_spl_free.value.i64 = spl_free;
 		ks->spl_spl_free_manual_pressure.value.i64 = spl_free_manual_pressure;
 		ks->spl_spl_free_fast_pressure.value.i64 = spl_free_fast_pressure;
 		ks->spl_spl_free_delta_ema.value.i64 = spl_free_delta_ema;
-		ks->spl_spl_minimal_uses_spl_free.value.i64 = spl_minimal_uses_spl_free;
 		ks->spl_osif_malloc_success.value.ui64 = stat_osif_malloc_success;
 		ks->spl_osif_malloc_fail.value.ui64 = stat_osif_malloc_fail;
 		ks->spl_osif_free.value.ui64 = stat_osif_free;
@@ -5939,12 +5889,12 @@ kmem_size(void)
 int
 spl_vm_pool_low(void) 
 {
-	if (vm_page_free_wanted > 0 ||
-		(vm_page_free_count + vm_page_speculative_count/2) < VM_PAGE_FREE_MIN) {
-		return (1);
-	}
+	bool m = spl_minimal_physmem_p_logic();
 
-	return (0);
+	if (m)
+		return (0);
+	else
+		return (1);
 }
 
 // ===============================================================
