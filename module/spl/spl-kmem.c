@@ -3912,7 +3912,7 @@ kmem_cache_init(int pass, int use_large_pages)
 		kmem_default_arena = vmem_create("kmem_default",
 										 NULL, 0, PAGESIZE,
 										 vmem_alloc, vmem_free, kmem_va_arena,
-										 16 * PAGESIZE, VMC_DUMPSAFE | VM_SLEEP);
+										 0, VMC_DUMPSAFE | VM_SLEEP);
 
 		/* Figure out what our maximum cache size is */
 		maxbuf = kmem_max_cached;
@@ -4237,7 +4237,7 @@ spl_free_thread()
 			if (now - last_reap > elapsed) {
 				vmem_qcache_reap(zio_arena);
 				vmem_qcache_reap(zio_metadata_arena);
-				vmem_qcache_reap(kmem_default_arena);
+				vmem_qcache_reap(kmem_va_arena);
 				kmem_reap();
 				last_reap = now;
 				// drop the variable lock and jump to just before
@@ -4435,7 +4435,7 @@ spl_kstat_update(kstat_t *ksp, int rw)
 			spl_free_set_pressure(ks->spl_spl_free_manual_pressure.value.i64 * 1024 *1024);
 			if (ks->spl_spl_free_manual_pressure.value.i64 > 0) {
 				kmem_reap();
-				vmem_qcache_reap(kmem_default_arena);
+				vmem_qcache_reap(kmem_va_arena);
 			}
 		}
 
