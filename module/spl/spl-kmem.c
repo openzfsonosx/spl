@@ -4120,7 +4120,7 @@ spl_free_thread()
 {
 	callb_cpr_t cpr;
 	uint64_t last_update = zfs_lbolt();
-	uint64_t last_spl_free;
+	int64_t last_spl_free;
 	double ema_new = 0;
 	double ema_old = 0;
 	double alpha;
@@ -4181,7 +4181,7 @@ spl_free_thread()
 			int64_t new_p = -bminus;
 			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 			if (new_p > previous_highest_pressure || new_p <= 0)
-			__sync_lock_test_and_set(&spl_free_manual_pressure, -16LL * new_spl_free);
+				__sync_lock_test_and_set(&spl_free_manual_pressure, -16LL * new_spl_free);
 			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
 		}
 
@@ -4201,23 +4201,25 @@ spl_free_thread()
 		// these variables are reliably maintained by XNU
 		// if vm_page_free_count > vm_page_free_min, then XNU
 		// is scanning pages to try to free some memory up
-		int64_t above_min_free_pages = vm_page_free_count - vm_page_free_min;
+		int64_t above_min_free_pages = (int64_t)vm_page_free_count - (int64_t)vm_page_free_min;
 		int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
-		if (above_min_free_bytes < 16LL*1024LL*1024LL && reserve_low) {
+		// vm_page_free_min normally 3500, page free target normally 4000 but not exported
+		// so we are not scanning if we are 500 pages above vm_page_free_min.
+		// even if we're scanning we may have plenty of space in the reserve arena.
+		if (above_min_free_bytes < (int64_t)PAGESIZE * 500LL && reserve_low) {
 			lowmem = true;
 		}
-		if (above_min_free_bytes <= 0LL) {
+		if (above_min_free_bytes < 0LL && reserve_low) {
+			int64_t new_p = -1LL * above_min_free_bytes;
 			emergency_lowmem = true;
-			new_spl_free += above_min_free_bytes * 16LL;
-			int64_t new_p = above_min_free_bytes * -16LL;			
 			int64_t previous_highest_pressure;
 			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 			if (new_p > previous_highest_pressure || new_p <= 0)
 				__sync_lock_test_and_set(&spl_free_manual_pressure, new_p);
 			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
-		} else {
-			new_spl_free += above_min_free_bytes;
 		}
+
+		new_spl_free += above_min_free_bytes;
 
 		// If we have already detected a  memory shortage and we
 		// have not reaped in a while (a short while for emergency_lowmem),
@@ -4244,6 +4246,24 @@ spl_free_thread()
 				// acquisition of the thread lock
 				mutex_exit(&spl_free_lock);
 				goto justwait;
+			}
+		}
+
+		// a number or exceptions to reverse the lowmem / emergency_lowmem states
+		// (but not the pressure set) if we have recently reaped
+
+		if (!reserve_low) {
+			lowmem = false;
+			emergency_lowmem = false;
+		}
+
+		extern volatile unsigned int vm_page_speculative_count;
+		if (vm_page_speculative_count > 0) {
+			if (vm_page_speculative_count / 4 + vm_page_free_count > vm_page_free_min) {
+				emergency_lowmem = false;
+			}
+			if (vm_page_speculative_count / 2 + vm_page_free_count > vm_page_free_min) {
+				lowmem = false;
 			}
 		}
 
@@ -4294,9 +4314,9 @@ spl_free_thread()
 				new_spl_free += root_free / 2;
 			}
 			// spl_root_arena has gotten really big, shrink hard
-			if ((root_total * 100ULL / real_total_memory) > 70) {
+			if ((root_total * 100LL / real_total_memory) > 70) {
 				new_spl_free -= root_fraction_total;
-			} else if ((root_total * 100ULL / real_total_memory) > 75) {
+			} else if ((root_total * 100LL / real_total_memory) > 75) {
 				new_spl_free -= root_fraction_total;
 				lowmem = true;
 			}
@@ -4331,6 +4351,7 @@ spl_free_thread()
 		uint64_t zio_metadata_size = vmem_size_locked(zio_metadata_arena,
 		    VMEM_ALLOC | VMEM_FREE);
 		zio_size += zio_metadata_size;
+		// wrap this in a basic block for lexical scope SSA convenience
 		if (zio_size > 0) {
 			static uint64_t zio_last_too_big = 0;
 			static int64_t imposed_cap = 75;
