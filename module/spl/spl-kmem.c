@@ -4182,7 +4182,8 @@ spl_free_thread()
 			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 			if (new_p > previous_highest_pressure || new_p <= 0)
 				__sync_lock_test_and_set(&spl_free_manual_pressure, -16LL * new_spl_free);
-			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
+			if (vm_page_free_wanted > vm_page_free_min / 8)
+				__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
 		}
 
 		// can we allocate a 64MiB segment from the reserve arena?
@@ -4209,6 +4210,7 @@ spl_free_thread()
 		if (above_min_free_bytes < (int64_t)PAGESIZE * 500LL && reserve_low) {
 			lowmem = true;
 		}
+		extern volatile unsigned int vm_page_speculative_count;
 		if (above_min_free_bytes < 0LL && reserve_low) {
 			int64_t new_p = -1LL * above_min_free_bytes;
 			emergency_lowmem = true;
@@ -4216,7 +4218,9 @@ spl_free_thread()
 			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 			if (new_p > previous_highest_pressure || new_p <= 0)
 				__sync_lock_test_and_set(&spl_free_manual_pressure, new_p);
-			__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
+			int64_t spec_bytes = (int64_t)vm_page_speculative_count * (int64_t)PAGESIZE;
+			if (vm_page_free_wanted > 0 || new_p > spec_bytes)
+				__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
 		}
 
 		new_spl_free += above_min_free_bytes;
@@ -4255,15 +4259,17 @@ spl_free_thread()
 		if (!reserve_low) {
 			lowmem = false;
 			emergency_lowmem = false;
+			__sync_lock_test_and_set(&spl_free_fast_pressure, FALSE);
 		}
 
-		extern volatile unsigned int vm_page_speculative_count;
 		if (vm_page_speculative_count > 0) {
 			if (vm_page_speculative_count / 4 + vm_page_free_count > vm_page_free_min) {
 				emergency_lowmem = false;
+				__sync_lock_test_and_set(&spl_free_fast_pressure, FALSE);
 			}
 			if (vm_page_speculative_count / 2 + vm_page_free_count > vm_page_free_min) {
 				lowmem = false;
+				__sync_lock_test_and_set(&spl_free_fast_pressure, FALSE);
 			}
 		}
 
