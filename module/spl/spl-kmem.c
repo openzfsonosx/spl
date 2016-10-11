@@ -4199,7 +4199,7 @@ spl_free_thread()
 
 		// but if we know we can allocate several MiB without goig to XNU, then
 		// don't react harshly.
-		
+
 		if (vm_page_free_wanted > 0 && reserve_low && !early_lots_free) {
 			int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -16LL;
 			if (bminus > -16LL*1024LL*1024LL)
@@ -4308,11 +4308,37 @@ spl_free_thread()
 		// Stay in a low memory condition for several seconds after we
 		// first detect that we are in it, giving the system (arc, xnu and userland)
 		// time to adapt
+
 		if (!lowmem && recent_lowmem > 0) {
 			if (recent_lowmem + 4*hz < zfs_lbolt())
 				lowmem = true;
 			else
 				recent_lowmem = 0;
+		}
+
+		// if we are in a lowmem "hangover", cure it with pressure, then wait
+		// for the pressure to take effect in arc.c code
+
+		// triggered when we have had at least one lowmem in the previous
+		// few seconds -- possibly two (one that causes a reap, one
+		// that falls through to the 4 second hold above).
+
+		if (recent_lowmem > 0 && early_lots_free && reserve_low) {
+			// we can't grab 64 MiB as a single segment,
+			// but otherwise have ample memory brought in from xnu,
+			// but recently we had lowmem... and still have lowmem.
+			// cure this condition with a dose of pressure.
+			if (above_min_free_bytes < 500LL*(int64_t)PAGESIZE) {
+				int64_t old_p;
+				__sync_lock_test_and_set(&old_p, spl_free_manual_pressure);
+				if (old_p <= 0) {
+					__sync_lock_test_and_set(&spl_free_manual_pressure,
+						-above_min_free_bytes);
+					recent_lowmem = 0;
+					mutex_exit(&spl_free_lock);
+					goto justwait;
+				}
+			}
 		}
 
 		base = new_spl_free;
