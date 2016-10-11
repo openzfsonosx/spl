@@ -4165,11 +4165,42 @@ spl_free_thread()
 			}
 		}
 
-		// this is a sign of a period of time of low memory
+		// can we allocate at least a 64MiB segment from the reserve arena?
+
+		boolean_t reserve_low = false;
+		extern vmem_t *spl_large_reserve_arena;
+		const uint64_t sixtyfour = 64ULL*1024ULL*1024ULL;
+		const uint64_t rvallones = (sixtyfour << 1ULL) - 1ULL;
+		const uint64_t rvmask = ~rvallones;
+		uint64_t rvfreebits;
+		atomic_swap_64(&rvfreebits,
+		    spl_large_reserve_arena->vm_freemap);
+		if ((rvfreebits & rvmask) == 0) {
+			reserve_low = true;
+		}
+
+		// are we likely to be able to allocate several MiB from the reserve arena?
+		// are we likely to be able to allocate several MiB from the root arena?
+
+		extern vmem_t *spl_root_arena;
+		boolean_t early_lots_free = false;
+		if (!reserve_low) {
+			early_lots_free = true;
+		} else if (vmem_size_locked(spl_large_reserve_arena, VMEM_FREE) > sixtyfour * 2ULL) {
+			early_lots_free = true;
+		} else if (vmem_size_locked(spl_root_arena, VMEM_FREE) > sixtyfour * 4ULL) {
+			early_lots_free = true;
+		}
+
+		// this is a sign of a period of time of low system memory, however
 		// XNU's generation of this variable is not very predictable,
 		// but generally it should be taken seriously when it's positive
 		// (it is often falsely 0)
-		if (vm_page_free_wanted > 0) {
+
+		// but if we know we can allocate several MiB without goig to XNU, then
+		// don't react harshly.
+		
+		if (vm_page_free_wanted > 0 && reserve_low && !early_lots_free) {
 			int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -16LL;
 			if (bminus > -16LL*1024LL*1024LL)
 				bminus = -16LL*1024LL*1024LL;
@@ -4184,34 +4215,30 @@ spl_free_thread()
 				__sync_lock_test_and_set(&spl_free_manual_pressure, -16LL * new_spl_free);
 			if (vm_page_free_wanted > vm_page_free_min / 8)
 				__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
-		}
-
-		// can we allocate a 64MiB segment from the reserve arena?
-		boolean_t reserve_low = false;
-		extern vmem_t *spl_large_reserve_arena;
-		const uint64_t sixtyfour = 64ULL*1024ULL*1024ULL;
-		const uint64_t rvallones = (sixtyfour << 1ULL) - 1ULL;
-		const uint64_t rvmask = ~rvallones;
-		uint64_t rvfreebits;
-		atomic_swap_64(&rvfreebits,
-		    spl_large_reserve_arena->vm_freemap);
-		if ((rvfreebits & rvmask) == 0) {
-			reserve_low = true;
+		} else if (vm_page_free_wanted > 0) {
+			int64_t bytes_wanted = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE;
+			new_spl_free -= bytes_wanted;
 		}
 
 		// these variables are reliably maintained by XNU
 		// if vm_page_free_count > vm_page_free_min, then XNU
-		// is scanning pages to try to free some memory up
+		// is scanning pages and we may want to try to free some memory up
+
 		int64_t above_min_free_pages = (int64_t)vm_page_free_count - (int64_t)vm_page_free_min;
 		int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
+
 		// vm_page_free_min normally 3500, page free target normally 4000 but not exported
 		// so we are not scanning if we are 500 pages above vm_page_free_min.
-		// even if we're scanning we may have plenty of space in the reserve arena.
-		if (above_min_free_bytes < (int64_t)PAGESIZE * 500LL && reserve_low) {
+
+		// even if we're scanning we may have plenty of space in the reserve arena,
+		// in which case we should not react too strongly
+
+		if (above_min_free_bytes < (int64_t)PAGESIZE * 500LL && reserve_low && !early_lots_free) {
+			// trigger a reap below
 			lowmem = true;
 		}
 		extern volatile unsigned int vm_page_speculative_count;
-		if (above_min_free_bytes < 0LL && reserve_low) {
+		if (above_min_free_bytes < 0LL && reserve_low && !early_lots_free) {
 			int64_t new_p = -1LL * above_min_free_bytes;
 			emergency_lowmem = true;
 			int64_t previous_highest_pressure;
@@ -4254,15 +4281,20 @@ spl_free_thread()
 		}
 
 		// a number or exceptions to reverse the lowmem / emergency_lowmem states
-		// (but not the pressure set) if we have recently reaped
+		// if we have recently reaped.  we also take the strong reaction sting
+		// out of the set pressure by turning off spl_free_fast_pressure, since
+		// that automatically provokes an arc shrink and arc reap
 
-		if (!reserve_low) {
+		if (!reserve_low || early_lots_free) {
 			lowmem = false;
 			emergency_lowmem = false;
 			__sync_lock_test_and_set(&spl_free_fast_pressure, FALSE);
 		}
 
 		if (vm_page_speculative_count > 0) {
+			// speculative memory can be squeezed a bit; it is file blocks  that
+			// have been prefetched by xnu but are not (yet) in use by any
+			// consumer
 			if (vm_page_speculative_count / 4 + vm_page_free_count > vm_page_free_min) {
 				emergency_lowmem = false;
 				__sync_lock_test_and_set(&spl_free_fast_pressure, FALSE);
@@ -4450,6 +4482,7 @@ spl_free_thread()
 	printf("SPL: %s thread_exit\n", __func__);
 	thread_exit();
 }
+
 
 static int
 spl_kstat_update(kstat_t *ksp, int rw)
