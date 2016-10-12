@@ -4150,6 +4150,8 @@ spl_free_thread()
 
 		mutex_enter(&spl_free_lock);
 
+		uint64_t time_now = zfs_lbolt();
+
 		last_spl_free = spl_free;
 
 		new_spl_free = 0LL;
@@ -4200,7 +4202,8 @@ spl_free_thread()
 		// but if we know we can allocate several MiB without goig to XNU, then
 		// don't react harshly.
 
-		if (vm_page_free_wanted > 0 && reserve_low && !early_lots_free) {
+		if ((vm_page_free_wanted > 0 && reserve_low && !early_lots_free) ||
+			vm_page_free_wanted >= 1024) {
 			int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -16LL;
 			if (bminus > -16LL*1024LL*1024LL)
 				bminus = -16LL*1024LL*1024LL;
@@ -4218,6 +4221,12 @@ spl_free_thread()
 		} else if (vm_page_free_wanted > 0) {
 			int64_t bytes_wanted = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE;
 			new_spl_free -= bytes_wanted;
+			if (reserve_low) {
+				lowmem = true;
+				if (recent_lowmem == 0) {
+					recent_lowmem = time_now;
+				}
+			}
 		}
 
 		// these variables are reliably maintained by XNU
@@ -4238,16 +4247,25 @@ spl_free_thread()
 			lowmem = true;
 		}
 		extern volatile unsigned int vm_page_speculative_count;
-		if (above_min_free_bytes < 0LL && reserve_low && !early_lots_free) {
+		if ((above_min_free_bytes < 0LL && reserve_low && !early_lots_free) ||
+		    above_min_free_bytes <= -4LL*1024LL*1024LL) {
 			int64_t new_p = -1LL * above_min_free_bytes;
 			emergency_lowmem = true;
+			lowmem = true;
+			recent_lowmem = time_now;
 			int64_t previous_highest_pressure;
 			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 			if (new_p > previous_highest_pressure || new_p <= 0)
 				__sync_lock_test_and_set(&spl_free_manual_pressure, new_p);
+			// force a stronger reaction from ARC if we are also low on
+			// speculative pages (xnu prefetched file blocks with no clients yet)
 			int64_t spec_bytes = (int64_t)vm_page_speculative_count * (int64_t)PAGESIZE;
 			if (vm_page_free_wanted > 0 || new_p > spec_bytes)
 				__sync_lock_test_and_set(&spl_free_fast_pressure, TRUE);
+		} else if (above_min_free_bytes < 0LL && reserve_low) {
+			lowmem = true;
+			if (recent_lowmem == 0)
+				recent_lowmem = time_now;
 		}
 
 		new_spl_free += above_min_free_bytes;
@@ -4263,7 +4281,7 @@ spl_free_thread()
 		// do their job for a few milliseconds.
 		if (emergency_lowmem || lowmem) {
 			static uint64_t last_reap = 0;
-			uint64_t now = zfs_lbolt();
+			uint64_t now = time_now;
 			uint64_t elapsed = 60*hz;
 			if (emergency_lowmem)
 				elapsed = 15*hz; // minimum frequency from kmem_reap_interval
@@ -4310,7 +4328,7 @@ spl_free_thread()
 		// time to adapt
 
 		if (!lowmem && recent_lowmem > 0) {
-			if (recent_lowmem + 4*hz < zfs_lbolt())
+			if (recent_lowmem + 4*hz < time_now)
 				lowmem = true;
 			else
 				recent_lowmem = 0;
@@ -4323,7 +4341,7 @@ spl_free_thread()
 		// few seconds -- possibly two (one that causes a reap, one
 		// that falls through to the 4 second hold above).
 
-		if (recent_lowmem > 0 && early_lots_free && reserve_low) {
+		if (recent_lowmem > time_now && early_lots_free && reserve_low) {
 			// we can't grab 64 MiB as a single segment,
 			// but otherwise have ample memory brought in from xnu,
 			// but recently we had lowmem... and still have lowmem.
@@ -4420,7 +4438,7 @@ spl_free_thread()
 			static uint64_t zio_last_too_big = 0;
 			static int64_t imposed_cap = 75;
 			const uint64_t seconds_of_lower_cap = 10*hz;
-			uint64_t now = zfs_lbolt();
+			uint64_t now = time_now;
 			uint32_t zio_pct = (uint32_t)(zio_size * 100ULL / real_total_memory);
 			// if not hungry for memory, shrink towards a
 			// 75% total memory cap on zfs_file_data
@@ -4479,14 +4497,14 @@ spl_free_thread()
 		mutex_exit(&spl_free_lock);
 
 		if (lowmem)
-			recent_lowmem = zfs_lbolt();
+			recent_lowmem = time_now;
 
 		// maintain an exponential moving average for the ema kstat
 		if (last_update > hz)
 			alpha = 1.0;
 		else {
-			double td_tick  = (double)(zfs_lbolt() - last_update);
-			alpha = td_tick / (double)(hz*100.0); // roughly 0.1
+			double td_tick  = (double)(time_now - last_update);
+			alpha = td_tick / (double)(hz*50.0); // roughly 0.02
 		}
 
 		ema_new = (alpha * delta) + (1.0 - alpha)*ema_old;
