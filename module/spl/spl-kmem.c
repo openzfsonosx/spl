@@ -316,7 +316,10 @@ size_t	kmem_max_cached = KMEM_BIG_MAXBUF;	/* maximum kmem_alloc cache */
  * fault, and wish to see the calling stack.
  */
 #ifdef DEBUG
-int kmem_flags = /* KMF_AUDIT | */ KMF_LITE /* | KMF_DEADBEEF | KMF_REDZONE | KMF_CONTENTS*/;
+// can be 0 or KMF_LITE
+// or KMF_DEADBEEF | KMF_REDZONE | KMF_CONTENTS
+// with or without KMF_AUDIT
+int kmem_flags = 0 /* KMF_LITE */ /* KMF_AUDIT | */ /* KMF_DEADBEEF | KMF_REDZONE | KMF_CONTENTS*/;
 #else
 int kmem_flags = 0;
 #endif
