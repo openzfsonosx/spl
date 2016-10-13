@@ -303,7 +303,7 @@ size_t kmem_failure_log_size;	/* failure log [4 pages per CPU] */
 size_t kmem_slab_log_size;	/* slab create log [4 pages per CPU] */
 size_t kmem_content_maxsave = 256; /* KMF_CONTENTS max bytes to log */
 size_t kmem_lite_minsize = 0;	/* minimum buffer size for KMF_LITE */
-size_t kmem_lite_maxalign = 1024; /* maximum buffer alignment for KMF_LITE */
+size_t kmem_lite_maxalign = 8192; /* maximum buffer alignment for KMF_LITE */
 int kmem_lite_pcs = 4;		/* number of PCs to store in KMF_LITE mode */
 size_t kmem_maxverify;		/* maximum bytes to inspect in debug routines */
 size_t kmem_minfirewall;	/* hardware-enforced redzone threshold */
