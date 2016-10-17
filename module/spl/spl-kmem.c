@@ -24,6 +24,8 @@
  * Copyright (C) 2008 MacZFS
  * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
  * Copyright (C) 2014 Brendon Humphrey <brendon.humphrey@mac.com>
+ * Copyright (C) 2016 Sean Doran <smd@use.net>
+ * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  *
  */
 
@@ -1744,6 +1746,21 @@ kmem_depot_ws_update(kmem_cache_t *cp)
 }
 
 /*
+ * Set the working set statistics for cp's depot to zero. (Everything is
+ * eligible for reaping.)
+ */
+static void
+kmem_depot_ws_zero(kmem_cache_t *cp)
+{
+	mutex_enter(&cp->cache_depot_lock);
+	cp->cache_full.ml_reaplimit = cp->cache_full.ml_total;
+	cp->cache_full.ml_min = cp->cache_full.ml_total;
+	cp->cache_empty.ml_reaplimit = cp->cache_empty.ml_total;
+	cp->cache_empty.ml_min = cp->cache_empty.ml_total;
+	mutex_exit(&cp->cache_depot_lock);
+}
+
+/*
  * The number of bytes to reap before we call kpreempt(). The default (1MB)
  * causes us to preempt reaping up to hundres of times per second.  Using a
  * larger value (1GB) causes this to have virtually no effect.
@@ -2787,14 +2804,7 @@ kmem_cache_magazine_purge(kmem_cache_t *cp)
 			kmem_magazine_destroy(cp, pmp, prounds);
 	}
 
-	/*
-	 * Updating the working set statistics twice in a row has the
-	 * effect of setting the working set size to zero, so everything
-	 * is eligible for reaping.
-	 */
-	kmem_depot_ws_update(cp);
-	kmem_depot_ws_update(cp);
-
+	kmem_depot_ws_zero(cp);
 	kmem_depot_ws_reap(cp);
 }
 
@@ -2836,16 +2846,14 @@ kmem_cache_magazine_disable(kmem_cache_t *cp)
 }
 
 /*
- * Reap (almost) everything right now.  See kmem_cache_magazine_purge()
- * for explanation of the back-to-back kmem_depot_ws_update() calls.
+ * Reap (almost) everything right now.
  */
 void
 kmem_cache_reap_now(kmem_cache_t *cp)
 {
 	ASSERT(list_link_active(&cp->cache_link));
 
-	kmem_depot_ws_update(cp);
-	kmem_depot_ws_update(cp);
+	kmem_depot_ws_zero(cp);
 
 	(void) taskq_dispatch(kmem_taskq,
 						  (task_func_t *)kmem_depot_ws_reap, cp, TQ_SLEEP);
