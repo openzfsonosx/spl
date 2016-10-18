@@ -2443,6 +2443,87 @@ vmem_update(void *dummy)
 }
 
 /*
+ * try to lift a large chunk of the reserve arena into the root arena
+ * this helps reduce refill thread going to the xnu allocator, and also
+ * having the refill thread be (and appear to be) underused compared to
+ * the root arena.
+ *
+ * greater use of the root arena will reduce the number of calls to
+ * XNU's allocator and freer, and also reduce the overall memory footprint
+ * of the vmem+kmem system.
+ *
+ * additionally this saves on intensive mutex and convar activity in and
+ * below sra_root_alloc()
+ *
+ * use parent_alloc flag for visibility.
+ *
+ */
+
+static uint64_t
+try_lift_reserve(void)
+{
+        mutex_enter(&spl_large_reserve_arena->vm_lock);
+        uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
+        uint64_t reserve_size = vmem_size(spl_large_reserve_arena, VMEM_ALLOC | VMEM_FREE);
+        mutex_exit(&spl_large_reserve_arena->vm_lock);
+	uint64_t h_unalign = reserve_size / 2;
+	uint64_t half_reserve_size;
+
+	// since we are interested in vmem segments, we really want
+	// to be working with powers-of-two
+
+	if (ISP2(h_unalign)) {
+		half_reserve_size = h_unalign;
+	} else {
+		int hb = highbit(h_unalign);
+		half_reserve_size = 1ULL << (hb - 1);
+		ASSERT(half_reserve_size == h_unalign);
+	}
+
+	if (reserve_free < half_reserve_size) {
+		uint64_t quarter_reserve_size = reserve_size / 4;
+		// if we have between 1/4 and 1/2 of the reserve free,
+		// and there is no SPAMAX segment available in spl_root,
+		// then we will only try to lift a 64 MiB this time
+		if (reserve_free >= quarter_reserve_size) {
+			const uint64_t spamax = 16ULL*1024ULL*1024ULL;
+			const uint64_t sixtyfour = 64ULL*1024ULL*1024ULL;
+			if (!vmem_canalloc_nomutex(spl_root_arena, spamax) &&
+			    vmem_canalloc_nomutex(spl_large_reserve_arena, sixtyfour)) {
+				void *m = vmem_alloc(spl_large_reserve_arena, sixtyfour,
+				    VM_NOSLEEP | VM_ABORT);
+				if (m) {
+					vmem_add_as_import(spl_root_arena, m, sixtyfour, 0);
+					atomic_inc_64(&spl_large_reserve_arena->vm_kstat.vk_parent_alloc.value.ui64);
+					return (sixtyfour);
+				} else {
+					return (0); // vmem_alloc failed
+				}
+			} else {
+				return (0); // root has memory, or reserve does not
+			}
+		}
+		return (0); // less than 1/2 free
+	}
+
+	uint64_t minimal_alloc = 16ULL*1024ULL*1024ULL;
+
+	for (uint64_t current_try = half_reserve_size;
+	     current_try >= minimal_alloc;
+	     current_try >>= 1ULL) {
+		void *m = vmem_alloc(spl_large_reserve_arena, current_try, VM_NOSLEEP | VM_ABORT);
+		if (m) {
+			atomic_inc_64(&spl_large_reserve_arena->vm_kstat.vk_parent_alloc.value.ui64);
+			vmem_add_as_import(spl_root_arena, m, current_try, 0);
+			return (current_try);
+		}
+	}
+
+	return (0);
+}
+
+
+/*
  * refill thread: regularly pull in memory, if needed and possible
  */
 static uint64_t vmem_add_memory_to_spl_root_arena(size_t, size_t);
@@ -2457,7 +2538,15 @@ spl_root_refill(void *dummy)
 
 	extern uint64_t real_total_memory;
 
-	uint64_t target_free = real_total_memory/64;
+	int64_t target_free = real_total_memory/64;
+
+	// maybe move some memory from the reserve arena
+
+	uint64_t lifted = try_lift_reserve();
+	if (lifted > 0) {
+		target_free -= lifted;
+		wait = true;
+	}
 
 	const uint64_t spamax = 16ULL * 1024ULL * 1024ULL;
 
@@ -2469,32 +2558,14 @@ spl_root_refill(void *dummy)
 	    !vmem_canalloc_nomutex(spl_large_reserve_arena, spamax) &&
 	    !vmem_canalloc_nomutex(xnu_import_arena, spamax)) {
 		if(vmem_add_memory_to_spl_root_arena(spamax, spamax) == spamax) {
-			target_free -= MIN(target_free, spamax);
-			wait = true; // we can satisfy spamax now, so no need to rusn
-		}
-	}
-
-	// proactively raid the large initial allocation, even if filling is stopped
-	// this saves on intensive mutex and condvar activity in and below sra_root_alloc()
-	// we will only do this if we can leave behind at least a whole 64MiB segment
-	// and more than half of the reserve is free
-
-	mutex_enter(&spl_large_reserve_arena->vm_lock);
-	uint64_t reserve_free = vmem_size(spl_large_reserve_arena, VMEM_FREE);
-	uint64_t reserve_size = vmem_size(spl_large_reserve_arena, VMEM_FREE | VMEM_ALLOC);
-	mutex_exit(&spl_large_reserve_arena->vm_lock);
-
-	if (reserve_free < reserve_size / 2 &&
-	    !vmem_canalloc_nomutex(spl_root_arena, spamax) &&
-	    vmem_canalloc_nomutex(spl_large_reserve_arena, 4ULL * spamax)) {
-		void *m = vmem_alloc(spl_large_reserve_arena, spamax, VM_NOSLEEP | VM_ABORT);
-		if (m) {
-			vmem_add_as_import(spl_root_arena, m, spamax, 0);
+			target_free -= spamax;
+			wait = true; // we can satisfy spamax now, so no need to rush
 		}
 	}
 
 	uint64_t root_free = vmem_size_locked(spl_root_arena, VMEM_FREE);
 	uint64_t xi_free = vmem_size_locked(xnu_import_arena, VMEM_FREE);
+	uint64_t reserve_free = vmem_size_locked(spl_large_reserve_arena, VMEM_FREE);
 
 	// we still want to opportunistically grab spl_minalloc sized blocks
 	// if vmem_alloc(..., spl_minalloc, VM_NOSLEEP) calls would fail.
@@ -2520,6 +2591,7 @@ spl_root_refill(void *dummy)
 	uint64_t low_threshold = real_total_memory * lopct / 100ULL;
 
 	if (!hit_highwater_and_waiting &&
+	    target_free > 0 &&
 	    arena_free < target_free  &&
 	    sys_mem_in_use < high_threshold &&
 	    spl_vmem_xnu_useful_bytes_free() > spl_minalloc * 32) {
@@ -2704,7 +2776,7 @@ vmem_add_memory_to_spl_root_arena(size_t size, size_t span_size)
 			mutex_enter(&vmem_flush_free_lock);
 		        vmem_add_as_import(spl_root_arena, a, minalloc, VM_NOSLEEP);
 			mutex_exit(&vmem_flush_free_lock);
-			spl_root_arena->vm_kstat.vk_parent_alloc.value.ui64++;
+			spl_root_arena->vm_kstat.vk_parent_xalloc.value.ui64++;
 		}
 		rfree = vmem_size_locked(spl_root_arena, VMEM_FREE);
 		if (rfree > gibi)
