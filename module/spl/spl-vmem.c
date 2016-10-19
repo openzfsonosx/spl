@@ -2535,6 +2535,8 @@ spl_root_refill(void *dummy)
 	boolean_t wait = true;
 	static boolean_t hit_highwater_and_waiting = false;
 	static uint64_t hit_highwater_waiting_since = 0;
+	static boolean_t we_added_to_pressure = false;
+	static uint64_t avoid_pressure_until = 0;
 
 	extern uint64_t real_total_memory;
 
@@ -2546,6 +2548,19 @@ spl_root_refill(void *dummy)
 	if (lifted > 0) {
 		target_free -= lifted;
 		wait = true;
+	}
+
+	uint64_t now = zfs_lbolt();
+
+	// if we contributed to pressure recently, skip to the bsd_timeout.
+	if (we_added_to_pressure == true) {
+		if (now >= avoid_pressure_until) {
+			we_added_to_pressure = false;
+		} else {
+			spl_root_refill_enabled = false;
+			wait = true;
+			goto out;
+		}
 	}
 
 	const uint64_t spamax = 16ULL * 1024ULL * 1024ULL;
@@ -2598,22 +2613,28 @@ spl_root_refill(void *dummy)
 		uint64_t r = vmem_add_memory_to_spl_root_arena(target_free, spl_minalloc);
 		if (r == 0) {
 			wait = true; // didn'g grab any, sleep longer
+			we_added_to_pressure = true;
+			avoid_pressure_until = now + hz*120;
 		} else if (r < target_free){
 			wait = true; // couldn't grab everything, so wait a while before retrying
 		} else {
-			wait = false; // grabbed everything, so wait a while for it to be used
+			wait = false; // grabbed everything, greedily grab more soon if necessary
 		}
+	} else if (spl_vmem_xnu_useful_bytes_free() < spl_minalloc * 32) {
+		we_added_to_pressure = true;
+		avoid_pressure_until = now + hz*120;
+		wait = true;
 	}
 
 	if (!hit_highwater_and_waiting && sys_mem_in_use > high_threshold) {
 		hit_highwater_and_waiting = true;
-		hit_highwater_waiting_since = zfs_lbolt();
+		hit_highwater_waiting_since = now;
 		wait = true;
 	} else if (hit_highwater_and_waiting &&
 		   sys_mem_in_use < low_threshold &&
-		   (zfs_lbolt() > (hit_highwater_waiting_since + 1800*hz))) {
+		   (now > (hit_highwater_waiting_since + 1800*hz))) {
 		printf("SPL: %s: below threshold after %llu seconds, filling again.\n",
-		 __func__, zfs_lbolt()-hit_highwater_waiting_since);
+		 __func__, now - hit_highwater_waiting_since);
 		hit_highwater_and_waiting = false;
 		hit_highwater_waiting_since = 0;
 		wait = false;
@@ -2626,7 +2647,7 @@ spl_root_refill(void *dummy)
 	// if we could allocate a large chunk of memory from the reserve, wait longer
 	if (!wait && vmem_canalloc_nomutex(spl_large_reserve_arena, target_free / 2))
 		wait = true;
-
+out:
 	if (wait)
 		bsd_timeout(spl_root_refill, dummy, &spl_root_refill_interval_long);
 	else
