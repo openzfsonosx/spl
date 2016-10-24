@@ -1924,7 +1924,7 @@ kmem_dump_init(size_t size)
  * for the calling CPU.
  */
 void
-kmem_dump_begin(void) 
+kmem_dump_begin(void)
 {
 	if (kmem_dump_start != NULL) {
 		kmem_cache_t *cp;
@@ -2749,7 +2749,7 @@ kmem_reap_common(void *flag_arg)
  * when memory gets tight.
  */
 void
-kmem_reap(void) 
+kmem_reap(void)
 {
 	kmem_reap_common(&kmem_reaping);
 }
@@ -2761,7 +2761,7 @@ kmem_reap(void)
  * work and unwanted side-effects from reclaim callbacks.
  */
 void
-kmem_reap_idspace(void) 
+kmem_reap_idspace(void)
 {
 	kmem_reap_common(&kmem_reaping_idspace);
 }
@@ -3199,7 +3199,7 @@ spl_minimal_physmem_p_logic()
 }
 
 int32_t
-spl_minimal_physmem_p(void) 
+spl_minimal_physmem_p(void)
 {
 
 	// arc will throttle throttle if we are paging, otherwise
@@ -3217,7 +3217,7 @@ spl_minimal_physmem_p(void)
  * due to kernel heap fragmentation.
  */
 size_t
-kmem_maxavail(void) 
+kmem_maxavail(void)
 {
 #ifndef APPLE
 	//    spgcnt_t pmem = availrmem - tune.t_minarmem;
@@ -3232,7 +3232,7 @@ kmem_maxavail(void)
  * Indicate whether memory-intensive kmem debugging is enabled.
  */
 int
-kmem_debugging(void) 
+kmem_debugging(void)
 {
 	return (kmem_flags & (KMF_AUDIT | KMF_REDZONE));
 }
@@ -4075,7 +4075,7 @@ kmem_cache_fini()
 
 // this is intended to substitute for kmem_avail() in arc.c
 int64_t
-spl_free_wrapper(void) 
+spl_free_wrapper(void)
 {
 	return (spl_free);
 }
@@ -4083,7 +4083,7 @@ spl_free_wrapper(void)
 // this is intended to substitute for kmem_avail() in arc.c
 // when arc_reclaim_thread() calls spl_free_set_pressure(0);
 int64_t
-spl_free_manual_pressure_wrapper(void) 
+spl_free_manual_pressure_wrapper(void)
 {
 	return (spl_free_manual_pressure);
 }
@@ -4092,7 +4092,7 @@ void
 spl_free_set_pressure(int64_t new_p)
 {
 	mutex_enter(&spl_free_manual_pressure_lock);
-	int64_t previous_highest_pressure;
+	int64_t previous_highest_pressure = 0;
 	__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 	if (new_p > previous_highest_pressure || new_p <= 0)
 		__sync_lock_test_and_set(&spl_free_manual_pressure, new_p);
@@ -4104,7 +4104,7 @@ void
 spl_free_set_emergency_pressure(int64_t new_p)
 {
 	mutex_enter(&spl_free_manual_pressure_lock);
-        int64_t previous_highest_pressure;
+        int64_t previous_highest_pressure = 0;
 	__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 	if (new_p > previous_highest_pressure || new_p <= 0)
 		__sync_lock_test_and_set(&spl_free_manual_pressure, new_p);
@@ -4222,7 +4222,7 @@ spl_free_thread()
 			lowmem = true;
 			emergency_lowmem = true;
 			// atomic swaps to set these variables used in .../zfs/arc.c
-			int64_t previous_highest_pressure;
+			int64_t previous_highest_pressure = 0;
 			int64_t new_p = -bminus;
 			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 			if (new_p > previous_highest_pressure || new_p <= 0)
@@ -4264,7 +4264,7 @@ spl_free_thread()
 			emergency_lowmem = true;
 			lowmem = true;
 			recent_lowmem = time_now;
-			int64_t previous_highest_pressure;
+			int64_t previous_highest_pressure = 0;
 			__sync_lock_test_and_set(&previous_highest_pressure, spl_free_manual_pressure);
 			if (new_p > previous_highest_pressure || new_p <= 0)
 				__sync_lock_test_and_set(&spl_free_manual_pressure, new_p);
@@ -4808,7 +4808,7 @@ spl_kmem_init(uint64_t xtotal_memory)
 }
 
 void
-spl_kmem_fini(void) 
+spl_kmem_fini(void)
 {
 	sysctl_unregister_oid(&sysctl__spl_kext_version);
 	sysctl_unregister_oid(&sysctl__spl);
@@ -4872,7 +4872,7 @@ spl_kmem_fini(void)
 }
 
 static void
-kmem_move_init(void) 
+kmem_move_init(void)
 {
 	kmem_defrag_cache = kmem_cache_create("kmem_defrag_cache",
 										  sizeof (kmem_defrag_t), 0, NULL, NULL, NULL, NULL,
@@ -4905,7 +4905,7 @@ kmem_move_fini(void)
 }
 
 void
-spl_kmem_thread_init(void) 
+spl_kmem_thread_init(void)
 {
 	kmem_move_init();
 
@@ -4923,7 +4923,7 @@ spl_kmem_thread_init(void)
 }
 
 void
-spl_kmem_thread_fini(void) 
+spl_kmem_thread_fini(void)
 {
 	shutting_down = 1;
 
@@ -4960,7 +4960,7 @@ spl_kmem_thread_fini(void)
 }
 
 void
-spl_kmem_mp_init(void) 
+spl_kmem_mp_init(void)
 {
 	kmem_update_timeout(NULL);
 }
@@ -5994,7 +5994,7 @@ kmem_cache_scan(kmem_cache_t *cp)
 
 
 size_t
-kmem_size(void) 
+kmem_size(void)
 {
 	return (total_memory); // smd
 }
@@ -6002,7 +6002,7 @@ kmem_size(void)
 // this is used in arc_reclaim_needed.  if 1, reclaim is needed.
 // returning 1 has the effect of throttling ARC, so be careful.
 int
-spl_vm_pool_low(void) 
+spl_vm_pool_low(void)
 {
 	bool m = spl_minimal_physmem_p_logic();
 
