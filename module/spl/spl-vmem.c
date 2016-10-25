@@ -452,12 +452,12 @@ static vmem_seg_t *
 vmem_getseg_global(void)
 {
 	vmem_seg_t *vsp;
-	
+
 	mutex_enter(&vmem_segfree_lock);
 	if ((vsp = vmem_segfree) != NULL)
 		vmem_segfree = vsp->vs_knext;
 	mutex_exit(&vmem_segfree_lock);
-	
+
 	return (vsp);
 }
 
@@ -480,13 +480,13 @@ static vmem_seg_t *
 vmem_getseg(vmem_t *vmp)
 {
 	vmem_seg_t *vsp;
-	
+
 	ASSERT(vmp->vm_nsegfree > 0);
-	
+
 	vsp = vmp->vm_segfree;
 	vmp->vm_segfree = vsp->vs_knext;
 	vmp->vm_nsegfree--;
-	
+
 	return (vsp);
 }
 
@@ -508,14 +508,14 @@ static void
 vmem_freelist_insert(vmem_t *vmp, vmem_seg_t *vsp)
 {
 	vmem_seg_t *vprev;
-	
+
 	ASSERT(*VMEM_HASH(vmp, vsp->vs_start) != vsp);
-	
+
 	vprev = (vmem_seg_t *)&vmp->vm_freelist[highbit(VS_SIZE(vsp)) - 1];
 	vsp->vs_type = VMEM_FREE;
 	vmp->vm_freemap |= VS_SIZE(vprev);
 	VMEM_INSERT(vprev, vsp, k);
-	
+
 	cv_broadcast(&vmp->vm_cv);
 }
 
@@ -527,7 +527,7 @@ vmem_freelist_delete(vmem_t *vmp, vmem_seg_t *vsp)
 {
 	ASSERT(*VMEM_HASH(vmp, vsp->vs_start) != vsp);
 	ASSERT(vsp->vs_type == VMEM_FREE);
-	
+
 	if (vsp->vs_knext->vs_start == 0 && vsp->vs_kprev->vs_start == 0) {
 		/*
 		 * The segments on both sides of 'vsp' are freelist heads,
@@ -546,24 +546,24 @@ static void
 vmem_hash_insert(vmem_t *vmp, vmem_seg_t *vsp)
 {
 	vmem_seg_t **bucket;
-	
+
 	vsp->vs_type = VMEM_ALLOC;
 	bucket = VMEM_HASH(vmp, vsp->vs_start);
 	vsp->vs_knext = *bucket;
 	*bucket = vsp;
-	
+
 	if (vmem_seg_size == sizeof (vmem_seg_t)) {
 		//		vsp->vs_depth = (uint8_t)getpcstack(vsp->vs_stack,
 		//											VMEM_STACK_DEPTH);
 		//		vsp->vs_thread = curthread;
-		
+
 		vsp->vs_depth = 0;
 		vsp->vs_thread = 0;
 		vsp->vs_timestamp = gethrtime();
 	} else {
 		vsp->vs_depth = 0;
 	}
-	
+
 	vmp->vm_kstat.vk_alloc.value.ui64++;
 	vmp->vm_kstat.vk_mem_inuse.value.ui64 += VS_SIZE(vsp);
 }
@@ -575,7 +575,7 @@ static vmem_seg_t *
 vmem_hash_delete(vmem_t *vmp, uintptr_t addr, size_t size)
 {
 	vmem_seg_t *vsp, **prev_vspp;
-	
+
 	prev_vspp = VMEM_HASH(vmp, addr);
 	while ((vsp = *prev_vspp) != NULL) {
 		if (vsp->vs_start == addr) {
@@ -585,17 +585,17 @@ vmem_hash_delete(vmem_t *vmp, uintptr_t addr, size_t size)
 		vmp->vm_kstat.vk_lookup.value.ui64++;
 		prev_vspp = &vsp->vs_knext;
 	}
-	
+
 	if (vsp == NULL)
 		panic("vmem_hash_delete(%p, %lx, %lu): bad free (name: %s, addr, size)",
 		    (void *)vmp, addr, size, vmp->vm_name);
 	if (VS_SIZE(vsp) != size)
 		panic("vmem_hash_delete(%p, %lx, %lu): wrong size (expect %lu)",
 			  (void *)vmp, addr, size, VS_SIZE(vsp));
-	
+
 	vmp->vm_kstat.vk_free.value.ui64++;
 	vmp->vm_kstat.vk_mem_inuse.value.ui64 -= size;
-	
+
 	return (vsp);
 }
 
@@ -606,14 +606,14 @@ static vmem_seg_t *
 vmem_seg_create(vmem_t *vmp, vmem_seg_t *vprev, uintptr_t start, uintptr_t end)
 {
 	vmem_seg_t *newseg = vmem_getseg(vmp);
-	
+
 	newseg->vs_start = start;
 	newseg->vs_end = end;
 	newseg->vs_type = 0;
 	newseg->vs_import = 0;
-	
+
 	VMEM_INSERT(vprev, newseg, a);
-	
+
 	return (newseg);
 }
 
@@ -625,7 +625,7 @@ vmem_seg_destroy(vmem_t *vmp, vmem_seg_t *vsp)
 {
 	ASSERT(vsp->vs_type != VMEM_ROTOR);
 	VMEM_DELETE(vsp, a);
-	
+
 	vmem_putseg(vmp, vsp);
 }
 
@@ -638,25 +638,25 @@ vmem_span_create(vmem_t *vmp, void *vaddr, size_t size, uint8_t import)
 	vmem_seg_t *newseg, *span;
 	uintptr_t start = (uintptr_t)vaddr;
 	uintptr_t end = start + size;
-	
+
 	ASSERT(MUTEX_HELD(&vmp->vm_lock));
-	
+
 	if ((start | end) & (vmp->vm_quantum - 1))
 		panic("vmem_span_create(%p, %p, %lu): misaligned (%s)",
 		    (void *)vmp, vaddr, size, vmp->vm_name);
-	
+
 	span = vmem_seg_create(vmp, vmp->vm_seg0.vs_aprev, start, end);
 	span->vs_type = VMEM_SPAN;
 	span->vs_import = import;
 	VMEM_INSERT(vmp->vm_seg0.vs_kprev, span, k);
-	
+
 	newseg = vmem_seg_create(vmp, span, start, end);
 	vmem_freelist_insert(vmp, newseg);
-	
+
 	if (import)
 		vmp->vm_kstat.vk_mem_import.value.ui64 += size;
 	vmp->vm_kstat.vk_mem_total.value.ui64 += size;
-	
+
 	return (newseg);
 }
 
@@ -668,16 +668,16 @@ vmem_span_destroy(vmem_t *vmp, vmem_seg_t *vsp)
 {
 	vmem_seg_t *span = vsp->vs_aprev;
 	size_t size = VS_SIZE(vsp);
-	
+
 	ASSERT(MUTEX_HELD(&vmp->vm_lock));
 	ASSERT(span->vs_type == VMEM_SPAN);
-	
+
 	if (span->vs_import)
 		vmp->vm_kstat.vk_mem_import.value.ui64 -= size;
 	vmp->vm_kstat.vk_mem_total.value.ui64 -= size;
-	
+
 	VMEM_DELETE(span, k);
-	
+
 	vmem_seg_destroy(vmp, vsp);
 	vmem_seg_destroy(vmp, span);
 }
@@ -695,13 +695,13 @@ vmem_seg_alloc(vmem_t *vmp, vmem_seg_t *vsp, uintptr_t addr, size_t size)
 	size_t vs_size = vs_end - vs_start;
 	size_t realsize = P2ROUNDUP(size, vmp->vm_quantum);
 	uintptr_t addr_end = addr + realsize;
-	
+
 	ASSERT(P2PHASE(vs_start, vmp->vm_quantum) == 0);
 	ASSERT(P2PHASE(addr, vmp->vm_quantum) == 0);
 	ASSERT(vsp->vs_type == VMEM_FREE);
 	ASSERT(addr >= vs_start && addr_end - 1 <= vs_end - 1);
 	ASSERT(addr - 1 <= addr_end - 1);
-	
+
 	/*
 	 * If we're allocating from the start of the segment, and the
 	 * remainder will be on the same freelist, we can save quite
@@ -714,20 +714,20 @@ vmem_seg_alloc(vmem_t *vmp, vmem_seg_t *vsp, uintptr_t addr, size_t size)
 		vmem_hash_insert(vmp, vsp);
 		return (vsp);
 	}
-	
+
 	vmem_freelist_delete(vmp, vsp);
-	
+
 	if (vs_end != addr_end)
 		vmem_freelist_insert(vmp,
 							 vmem_seg_create(vmp, vsp, addr_end, vs_end));
-	
+
 	if (vs_start != addr)
 		vmem_freelist_insert(vmp,
 							 vmem_seg_create(vmp, vsp->vs_aprev, vs_start, addr));
-	
+
 	vsp->vs_start = addr;
 	vsp->vs_end = addr + size;
-	
+
 	vmem_hash_insert(vmp, vsp);
 	return (vsp);
 }
@@ -757,14 +757,14 @@ vmem_populate(vmem_t *vmp, int vmflag)
 	size_t size;
 	kmutex_t *lp;
 	int i;
-	
+
 	while (vmp->vm_nsegfree < VMEM_MINFREE &&
 	    (vsp = vmem_getseg_global()) != NULL)
 		vmem_putseg(vmp, vsp);
-	
+
 	if (vmp->vm_nsegfree >= VMEM_MINFREE)
 		return (1);
-	
+
 	/*
 	 * If we're already populating, tap the reserve.
 	 */
@@ -772,26 +772,26 @@ vmem_populate(vmem_t *vmp, int vmflag)
 		ASSERT(vmp->vm_cflags & VMC_POPULATOR);
 		return (1);
 	}
-	
+
 	mutex_exit(&vmp->vm_lock);
-	
+
 	//	if (panic_thread == curthread)
 	//		lp = &vmem_panic_lock;
 	//	else
-	
+
 	if (vmflag & VM_NOSLEEP)
 		lp = &vmem_nosleep_lock;
 	else if (vmflag & VM_PUSHPAGE)
 		lp = &vmem_pushpage_lock;
 	else
 		lp = &vmem_sleep_lock;
-	
+
 	mutex_enter(lp);
-	
+
 	nseg = VMEM_MINFREE + vmem_populators * VMEM_POPULATE_RESERVE;
 	size = P2ROUNDUP(nseg * vmem_seg_size, vmem_seg_arena->vm_quantum);
 	nseg = size / vmem_seg_size;
-	
+
 	/*
 	 * The following vmem_alloc() may need to populate vmem_seg_arena
 	 * and all the things it imports from.  When doing so, it will tap
@@ -805,7 +805,7 @@ vmem_populate(vmem_t *vmp, int vmflag)
 		vmp->vm_kstat.vk_populate_fail.value.ui64++;
 		return (0);
 	}
-	
+
 	/*
 	 * Restock the arenas that may have been depleted during population.
 	 */
@@ -816,23 +816,23 @@ vmem_populate(vmem_t *vmp, int vmflag)
 						(vmem_seg_t *)(p + --nseg * vmem_seg_size));
 		mutex_exit(&vmem_populator[i]->vm_lock);
 	}
-	
+
 	mutex_exit(lp);
 	mutex_enter(&vmp->vm_lock);
-	
+
 	/*
 	 * Now take our own segments.
 	 */
 	ASSERT(nseg >= VMEM_MINFREE);
 	while (vmp->vm_nsegfree < VMEM_MINFREE)
 		vmem_putseg(vmp, (vmem_seg_t *)(p + --nseg * vmem_seg_size));
-	
+
 	/*
 	 * Give the remainder to charity.
 	 */
 	while (nseg > 0)
 		vmem_putseg_global((vmem_seg_t *)(p + --nseg * vmem_seg_size));
-	
+
 	return (1);
 }
 
@@ -846,12 +846,12 @@ vmem_advance(vmem_t *vmp, vmem_seg_t *walker, vmem_seg_t *afterme)
 	vmem_seg_t *vprev = walker->vs_aprev;
 	vmem_seg_t *vnext = walker->vs_anext;
 	vmem_seg_t *vsp = NULL;
-	
+
 	VMEM_DELETE(walker, a);
-	
+
 	if (afterme != NULL)
 		VMEM_INSERT(afterme, walker, a);
-	
+
 	/*
 	 * The walker segment's presence may have prevented its neighbors
 	 * from coalescing.  If so, coalesce them now.
@@ -869,7 +869,7 @@ vmem_advance(vmem_t *vmp, vmem_seg_t *walker, vmem_seg_t *afterme)
 	} else if (vnext->vs_type == VMEM_FREE) {
 		vsp = vnext;
 	}
-	
+
 	/*
 	 * vsp could represent a complete imported span,
 	 * in which case we must return it to the source.
@@ -905,14 +905,14 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 	uintptr_t addr;
 	size_t realsize = P2ROUNDUP(size, vmp->vm_quantum);
 	size_t vs_size;
-	
+
 	mutex_enter(&vmp->vm_lock);
-	
+
 	if (vmp->vm_nsegfree < VMEM_MINFREE && !vmem_populate(vmp, vmflag)) {
 		mutex_exit(&vmp->vm_lock);
 		return (NULL);
 	}
-	
+
 	/*
 	 * The common case is that the segment right after the rotor is free,
 	 * and large enough that extracting 'size' bytes won't change which
@@ -935,7 +935,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 		mutex_exit(&vmp->vm_lock);
 		return ((void *)addr);
 	}
-	
+
 	/*
 	 * Starting at the rotor, look for a segment large enough to
 	 * satisfy the allocation.
@@ -980,7 +980,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 			vsp = rotor->vs_anext;
 		}
 	}
-	
+
 	/*
 	 * We found a segment.  Extract enough space to satisfy the allocation.
 	 */
@@ -988,7 +988,7 @@ vmem_nextfit_alloc(vmem_t *vmp, size_t size, int vmflag)
 	vsp = vmem_seg_alloc(vmp, vsp, addr, size);
 	ASSERT(vsp->vs_type == VMEM_ALLOC &&
 	    vsp->vs_start == addr && vsp->vs_end == addr + size);
-	
+
 	/*
 	 * Advance the rotor to right after the newly-allocated segment.
 	 * That's where the next VM_NEXTFIT allocation will begin searching.
@@ -1011,12 +1011,12 @@ vmem_canalloc(vmem_t *vmp, size_t size)
 	int hb;
 	int flist = 0;
 	ASSERT(MUTEX_HELD(&vmp->vm_lock));
-	
+
 	if ((size & (size - 1)) == 0)
 		flist = lowbit(P2ALIGN(vmp->vm_freemap, size));
 	else if ((hb = highbit(size)) < VMEM_FREELISTS)
 		flist = lowbit(P2ALIGN(vmp->vm_freemap, 1UL << hb));
-	
+
 	return (flist);
 }
 
@@ -1510,31 +1510,31 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 
 	if (size > spl_minalloc)
 		spl_vmem_large_allocs++;
-	
+
 	if ((align | phase | nocross) & (vmp->vm_quantum - 1))
 		panic("vmem_xalloc(%p, %lu, %lu, %lu, %lu, %p, %p, %x): "
 			  "parameters not vm_quantum aligned",
 			  (void *)vmp, size, align_arg, phase, nocross,
 			  minaddr, maxaddr, vmflag);
-	
+
 	if (nocross != 0 &&
 		(align > nocross || P2ROUNDUP(phase + size, align) > nocross))
 		panic("vmem_xalloc(%p, %lu, %lu, %lu, %lu, %p, %p, %x): "
 			  "overconstrained allocation",
 			  (void *)vmp, size, align_arg, phase, nocross,
 			  minaddr, maxaddr, vmflag);
-	
+
 	if (phase >= align || (align & (align - 1)) != 0 ||
 		(nocross & (nocross - 1)) != 0)
 		panic("vmem_xalloc(%p, %lu, %lu, %lu, %lu, %p, %p, %x): "
 			  "parameters inconsistent or invalid",
 			  (void *)vmp, size, align_arg, phase, nocross,
 			  minaddr, maxaddr, vmflag);
-	
+
 	if ((mtbf = vmem_mtbf | vmp->vm_mtbf) != 0 && gethrtime() % mtbf == 0 &&
 		(vmflag & (VM_NOSLEEP | VM_PANIC)) == VM_NOSLEEP)
 		return (NULL);
-	
+
 	mutex_enter(&vmp->vm_lock);
 	for (;;) {
 		if (vmp->vm_nsegfree < VMEM_MINFREE &&
@@ -1569,7 +1569,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 				hb--;
 			flist = lowbit(P2ALIGN(vmp->vm_freemap, 1UL << hb));
 		}
-		
+
 		for (vbest = NULL, vsp = (flist == 0) ? NULL :
 			 vmp->vm_freelist[flist - 1].vs_knext;
 			 vsp != NULL; vsp = vsp->vs_knext) {
@@ -1630,7 +1630,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 			}
 			aneeded = MAX(size + aphase, vmp->vm_min_import);
 			asize = P2ROUNDUP(aneeded, aquantum);
-			
+
 			if (asize < size) {
 				/*
 				 * The rounding induced overflow; return NULL
@@ -1642,10 +1642,10 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 					mutex_exit(&vmp->vm_lock);
 					return (NULL);
 				}
-				
+
 				panic("vmem_xalloc(): size overflow");
 			}
-			
+
 			/*
 			 * Determine how many segment structures we'll consume.
 			 * The calculation must be precise because if we're
@@ -1661,7 +1661,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 				VMEM_SEGS_PER_LEFT_ALLOC;
 			else
 				resv = VMEM_SEGS_PER_ALLOC_MAX;
-			
+
 			ASSERT(vmp->vm_nsegfree >= resv);
 			vmp->vm_nsegfree -= resv;	/* reserve our segs */
 			mutex_exit(&vmp->vm_lock);
@@ -1717,7 +1717,7 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 				goto do_alloc;
 			}
 		}
-		
+
 		/*
 		 * If the requestor chooses to fail the allocation attempt
 		 * rather than reap wait and retry - get out of the loop.
@@ -1725,12 +1725,12 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 		if (vmflag & VM_ABORT)
 			break;
 		mutex_exit(&vmp->vm_lock);
-		
+
 		if (vmp->vm_cflags & VMC_IDENTIFIER)
 			kmem_reap_idspace();
 		else
 			kmem_reap();
-		
+
 		mutex_enter(&vmp->vm_lock);
 		if (vmflag & VM_NOSLEEP)
 			break;
@@ -1784,12 +1784,12 @@ void
 vmem_xfree(vmem_t *vmp, void *vaddr, size_t size)
 {
 	vmem_seg_t *vsp, *vnext, *vprev;
-	
+
 	mutex_enter(&vmp->vm_lock);
-	
+
 	vsp = vmem_hash_delete(vmp, (uintptr_t)vaddr, size);
 	vsp->vs_end = P2ROUNDUP(vsp->vs_end, vmp->vm_quantum);
-	
+
 	/*
 	 * Attempt to coalesce with the next segment.
 	 */
@@ -1800,7 +1800,7 @@ vmem_xfree(vmem_t *vmp, void *vaddr, size_t size)
 		vsp->vs_end = vnext->vs_end;
 		vmem_seg_destroy(vmp, vnext);
 	}
-	
+
 	/*
 	 * Attempt to coalesce with the previous segment.
 	 */
@@ -1812,7 +1812,7 @@ vmem_xfree(vmem_t *vmp, void *vaddr, size_t size)
 		vmem_seg_destroy(vmp, vsp);
 		vsp = vprev;
 	}
-	
+
 	/*
 	 * If the entire span is free, return it to the source.
 	 */
@@ -1850,42 +1850,42 @@ vmem_alloc(vmem_t *vmp, size_t size, int vmflag)
 
 	if (size > spl_minalloc)
 		spl_vmem_large_allocs++;
-	
+
 	if (size - 1 < vmp->vm_qcache_max)
 		return (kmem_cache_alloc(vmp->vm_qcache[(size - 1) >>
 												vmp->vm_qshift], vmflag & VM_KMFLAGS));
-	
+
 	if ((mtbf = vmem_mtbf | vmp->vm_mtbf) != 0 && gethrtime() % mtbf == 0 &&
 		(vmflag & (VM_NOSLEEP | VM_PANIC)) == VM_NOSLEEP)
 		return (NULL);
-	
+
 	if (vmflag & VM_NEXTFIT)
 		return (vmem_nextfit_alloc(vmp, size, vmflag));
-	
+
 	if (vmflag & (VM_BESTFIT | VM_FIRSTFIT))
 		return (vmem_xalloc(vmp, size, vmp->vm_quantum, 0, 0,
 							NULL, NULL, vmflag));
 	if (vmp->vm_cflags & VM_NEXTFIT)
 		return (vmem_nextfit_alloc(vmp, size, vmflag));
-	
+
 	/*
 	 * Unconstrained instant-fit allocation from the segment list.
 	 */
 	mutex_enter(&vmp->vm_lock);
-	
+
 	if (vmp->vm_nsegfree >= VMEM_MINFREE || vmem_populate(vmp, vmflag)) {
 		if ((size & (size - 1)) == 0)
 			flist = lowbit(P2ALIGN(vmp->vm_freemap, size));
 		else if ((hb = highbit(size)) < VMEM_FREELISTS)
 			flist = lowbit(P2ALIGN(vmp->vm_freemap, 1UL << hb));
 	}
-	
+
 	if (flist-- == 0) {
 		mutex_exit(&vmp->vm_lock);
 		return (vmem_xalloc(vmp, size, vmp->vm_quantum,
 							0, 0, NULL, NULL, vmflag));
 	}
-	
+
 	ASSERT(size <= (1UL << flist));
 	vsp = vmp->vm_freelist[flist].vs_knext;
 	addr = vsp->vs_start;
@@ -1920,7 +1920,7 @@ vmem_contains(vmem_t *vmp, void *vaddr, size_t size)
 	uintptr_t end = start + size;
 	vmem_seg_t *vsp;
 	vmem_seg_t *seg0 = &vmp->vm_seg0;
-	
+
 	mutex_enter(&vmp->vm_lock);
 	vmp->vm_kstat.vk_contains.value.ui64++;
 	for (vsp = seg0->vs_knext; vsp != seg0; vsp = vsp->vs_knext) {
@@ -1942,9 +1942,9 @@ vmem_add(vmem_t *vmp, void *vaddr, size_t size, int vmflag)
 	if (vaddr == NULL || size == 0)
 		panic("vmem_add(%p, %p, %lu): bad arguments",
 			  (void *)vmp, vaddr, size);
-	
+
 	ASSERT(!vmem_contains(vmp, vaddr, size));
-	
+
 	mutex_enter(&vmp->vm_lock);
 	if (vmem_populate(vmp, vmflag))
 		(void) vmem_span_create(vmp, vaddr, size, 0);
@@ -1988,13 +1988,13 @@ vmem_walk(vmem_t *vmp, int typemask,
 	vmem_seg_t *vsp;
 	vmem_seg_t *seg0 = &vmp->vm_seg0;
 	vmem_seg_t walker;
-	
+
 	if (typemask & VMEM_WALKER)
 		return;
-	
+
 	bzero(&walker, sizeof (walker));
 	walker.vs_type = VMEM_WALKER;
-	
+
 	mutex_enter(&vmp->vm_lock);
 	VMEM_INSERT(seg0, &walker, a);
 	for (vsp = seg0->vs_anext; vsp != seg0; vsp = vsp->vs_anext) {
@@ -2027,7 +2027,7 @@ size_t
 vmem_size(vmem_t *vmp, int typemask)
 {
 	uint64_t size = 0;
-	
+
 	if (typemask & VMEM_ALLOC)
 		size += vmp->vm_kstat.vk_mem_inuse.value.ui64;
 	if (typemask & VMEM_FREE)
@@ -2076,7 +2076,7 @@ vmem_create_common(const char *name, void *base, size_t size, size_t quantum,
 	vmem_seg_t *vsp;
 	vmem_freelist_t *vfp;
 	uint32_t id = atomic_inc_32_nv(&vmem_id);
-	
+
 	if (vmem_vmem_arena != NULL) {
 		vmp = vmem_alloc(vmem_vmem_arena, sizeof (vmem_t),
 						 vmflag & VM_KMFLAGS);
@@ -2084,59 +2084,59 @@ vmem_create_common(const char *name, void *base, size_t size, size_t quantum,
 		ASSERT(id <= VMEM_INITIAL);
 		vmp = &vmem0[id - 1];
 	}
-	
+
 	/* An identifier arena must inherit from another identifier arena */
 	ASSERT(source == NULL || ((source->vm_cflags & VMC_IDENTIFIER) ==
 							  (vmflag & VMC_IDENTIFIER)));
-	
+
 	if (vmp == NULL)
 		return (NULL);
 	bzero(vmp, sizeof (vmem_t));
-	
+
 	(void) snprintf(vmp->vm_name, VMEM_NAMELEN, "%s", name);
 	mutex_init(&vmp->vm_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&vmp->vm_cv, NULL, CV_DEFAULT, NULL);
 	vmp->vm_cflags = vmflag;
 	vmflag &= VM_KMFLAGS;
-	
+
 	vmp->vm_quantum = quantum;
 	vmp->vm_qshift = highbit(quantum) - 1;
 	nqcache = MIN(qcache_max >> vmp->vm_qshift, VMEM_NQCACHE_MAX);
-	
+
 	for (i = 0; i <= VMEM_FREELISTS; i++) {
 		vfp = &vmp->vm_freelist[i];
 		vfp->vs_end = 1UL << i;
 		vfp->vs_knext = (vmem_seg_t *)(vfp + 1);
 		vfp->vs_kprev = (vmem_seg_t *)(vfp - 1);
 	}
-	
+
 	vmp->vm_freelist[0].vs_kprev = NULL;
 	vmp->vm_freelist[VMEM_FREELISTS].vs_knext = NULL;
 	vmp->vm_freelist[VMEM_FREELISTS].vs_end = 0;
 	vmp->vm_hash_table = vmp->vm_hash0;
 	vmp->vm_hash_mask = VMEM_HASH_INITIAL - 1;
 	vmp->vm_hash_shift = highbit(vmp->vm_hash_mask);
-	
+
 	vsp = &vmp->vm_seg0;
 	vsp->vs_anext = vsp;
 	vsp->vs_aprev = vsp;
 	vsp->vs_knext = vsp;
 	vsp->vs_kprev = vsp;
 	vsp->vs_type = VMEM_SPAN;
-	
+
 	vsp = &vmp->vm_rotor;
 	vsp->vs_type = VMEM_ROTOR;
 	VMEM_INSERT(&vmp->vm_seg0, vsp, a);
-	
+
 	bcopy(&vmem_kstat_template, &vmp->vm_kstat, sizeof (vmem_kstat_t));
-	
+
 	vmp->vm_id = id;
 	if (source != NULL)
 		vmp->vm_kstat.vk_source_id.value.ui32 = source->vm_id;
 	vmp->vm_source = source;
 	vmp->vm_source_alloc = afunc;
 	vmp->vm_source_free = ffunc;
-	
+
 	/*
 	 * Some arenas (like vmem_metadata and kmem_metadata) cannot
 	 * use quantum caching to lower fragmentation.  Instead, we
@@ -2147,7 +2147,7 @@ vmem_create_common(const char *name, void *base, size_t size, size_t quantum,
 		VMEM_QCACHE_SLABSIZE(nqcache << vmp->vm_qshift);
 		nqcache = 0;
 	}
-	
+
 	if (nqcache != 0) {
 		ASSERT(!(vmflag & VM_NOSLEEP));
 		vmp->vm_qcache_max = nqcache << vmp->vm_qshift;
@@ -2160,21 +2160,21 @@ vmem_create_common(const char *name, void *base, size_t size, size_t quantum,
 												  NULL, vmp, KMC_QCACHE | KMC_NOTOUCH);
 		}
 	}
-	
+
 	if ((vmp->vm_ksp = kstat_create("vmem", vmp->vm_id, vmp->vm_name,
 									"vmem", KSTAT_TYPE_NAMED, sizeof (vmem_kstat_t) /
 									sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL)) != NULL) {
 		vmp->vm_ksp->ks_data = &vmp->vm_kstat;
 		kstat_install(vmp->vm_ksp);
 	}
-	
+
 	mutex_enter(&vmem_list_lock);
 	vmpp = &vmem_list;
 	while ((cur = *vmpp) != NULL)
 		vmpp = &cur->vm_next;
 	*vmpp = vmp;
 	mutex_exit(&vmem_list_lock);
-	
+
 	if (vmp->vm_cflags & VMC_POPULATOR) {
 		ASSERT(vmem_populators < VMEM_INITIAL);
 		vmem_populator[atomic_inc_32_nv(&vmem_populators) - 1] = vmp;
@@ -2182,12 +2182,12 @@ vmem_create_common(const char *name, void *base, size_t size, size_t quantum,
 		(void) vmem_populate(vmp, vmflag | VM_PANIC);
 		mutex_exit(&vmp->vm_lock);
 	}
-	
+
 	if ((base || size) && vmem_add(vmp, base, size, vmflag) == NULL) {
 		vmem_destroy(vmp);
 		return (NULL);
 	}
-	
+
 	return (vmp);
 }
 
@@ -2198,7 +2198,7 @@ vmem_xcreate(const char *name, void *base, size_t size, size_t quantum,
 {
 	ASSERT(!(vmflag & (VMC_POPULATOR | VMC_XALLOC)));
 	vmflag &= ~(VMC_POPULATOR | VMC_XALLOC);
-	
+
 	return (vmem_create_common(name, base, size, quantum,
 							   (vmem_alloc_t *)afunc, ffunc, source, qcache_max,
 							   vmflag | VMC_XALLOC));
@@ -2211,7 +2211,7 @@ vmem_create(const char *name, void *base, size_t size, size_t quantum,
 {
 	ASSERT(!(vmflag & (VMC_XALLOC | VMC_XALIGN)));
 	vmflag &= ~(VMC_XALLOC | VMC_XALIGN);
-	
+
 	return (vmem_create_common(name, base, size, quantum,
 							   afunc, ffunc, source, qcache_max, vmflag));
 }
@@ -2226,24 +2226,24 @@ vmem_destroy(vmem_t *vmp)
 	vmem_seg_t *seg0 = &vmp->vm_seg0;
 	vmem_seg_t *vsp, *anext;
 	size_t leaked;
-	
+
 	mutex_enter(&vmem_list_lock);
 	vmpp = &vmem_list;
 	while ((cur = *vmpp) != vmp)
 		vmpp = &cur->vm_next;
 	*vmpp = vmp->vm_next;
 	mutex_exit(&vmem_list_lock);
-	
+
 	leaked = vmem_size(vmp, VMEM_ALLOC);
 	if (leaked != 0)
 		printf( "SPL: vmem_destroy('%s'): leaked %lu %s\n",
 			   vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
 			   "identifiers" : "bytes");
-	
+
 	if (vmp->vm_hash_table != vmp->vm_hash0)
 		vmem_free(vmem_hash_arena, vmp->vm_hash_table,
 		    (vmp->vm_hash_mask + 1) * sizeof (void *));
-	
+
 	/*
 	 * Give back the segment structures for anything that's left in the
 	 * arena, e.g. the primary spans and their free segments.
@@ -2253,12 +2253,12 @@ vmem_destroy(vmem_t *vmp)
 		anext = vsp->vs_anext;
 		vmem_putseg_global(vsp);
 	}
-	
+
 	while (vmp->vm_nsegfree > 0)
 		vmem_putseg_global(vmem_getseg(vmp));
-	
+
 	kstat_delete(vmp->vm_ksp);
-	
+
 	mutex_destroy(&vmp->vm_lock);
 	cv_destroy(&vmp->vm_cv);
 	vmem_free(vmem_vmem_arena, vmp, sizeof (vmem_t));
@@ -2275,24 +2275,24 @@ vmem_destroy_internal(vmem_t *vmp)
 	vmem_seg_t *seg0 = &vmp->vm_seg0;
 	vmem_seg_t *vsp, *anext;
 	size_t leaked;
-	
+
 	mutex_enter(&vmem_list_lock);
 	vmpp = &vmem_list;
 	while ((cur = *vmpp) != vmp)
 		vmpp = &cur->vm_next;
 	*vmpp = vmp->vm_next;
 	mutex_exit(&vmem_list_lock);
-	
+
 	leaked = vmem_size(vmp, VMEM_ALLOC);
 	if (leaked != 0)
 		printf("SPL: vmem_destroy('%s'): leaked %lu %s\n",
 			   vmp->vm_name, leaked, (vmp->vm_cflags & VMC_IDENTIFIER) ?
 			   "identifiers" : "bytes");
-	
+
 	if (vmp->vm_hash_table != vmp->vm_hash0)
 		vmem_free(vmem_hash_arena, vmp->vm_hash_table,
 		    (vmp->vm_hash_mask + 1) * sizeof (void *));
-	
+
 	/*
 	 * Give back the segment structures for anything that's left in the
 	 * arena, e.g. the primary spans and their free segments.
@@ -2302,15 +2302,15 @@ vmem_destroy_internal(vmem_t *vmp)
 		anext = vsp->vs_anext;
 		vmem_putseg_global(vsp);
 	}
-	
+
 	while (vmp->vm_nsegfree > 0)
 		vmem_putseg_global(vmem_getseg(vmp));
-	
+
 	kstat_delete(vmp->vm_ksp);
-	
+
 	mutex_destroy(&vmp->vm_lock);
 	cv_destroy(&vmp->vm_cv);
-	
+
 	// Alas, to free, requires access to "vmem_vmem_arena" the very thing
 	// we release first.
 	//vmem_free(vmem_vmem_arena, vmp, sizeof (vmem_t));
@@ -2346,16 +2346,16 @@ vmem_hash_rescale(vmem_t *vmp)
 	if (new_table == NULL)
 		return;
 	bzero(new_table, new_size * sizeof (void *));
-	
+
 	mutex_enter(&vmp->vm_lock);
-	
+
 	old_size = vmp->vm_hash_mask + 1;
 	old_table = vmp->vm_hash_table;
-	
+
 	vmp->vm_hash_mask = new_size - 1;
 	vmp->vm_hash_table = new_table;
 	vmp->vm_hash_shift = highbit(vmp->vm_hash_mask);
-	
+
 	for (h = 0; h < old_size; h++) {
 		vsp = old_table[h];
 		while (vsp != NULL) {
@@ -2367,9 +2367,9 @@ vmem_hash_rescale(vmem_t *vmp)
 			vsp = next_vsp;
 		}
 	}
-	
+
 	mutex_exit(&vmp->vm_lock);
-	
+
 	if (old_table != vmp->vm_hash0)
 		vmem_free(vmem_hash_arena, old_table,
 		    old_size * sizeof (void *));
@@ -2658,7 +2658,7 @@ void
 vmem_qcache_reap(vmem_t *vmp)
 {
 	int i;
-	
+
 	/*
 	 * Reap any quantum caches that may be part of this vmem.
 	 */
@@ -2866,7 +2866,7 @@ vmem_init(const char *heap_name,
 	uint32_t id;
 	int nseg = VMEM_SEG_INITIAL;
 	vmem_t *heap;
-	
+
 	// XNU mutexes need initialisation
 	mutex_init(&vmem_list_lock, "vmem_list_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&vmem_segfree_lock, "vmem_segfree_lock", MUTEX_DEFAULT, NULL);
@@ -2875,10 +2875,10 @@ vmem_init(const char *heap_name,
 	mutex_init(&vmem_pushpage_lock, "vmem_pushpage_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&vmem_panic_lock, "vmem_panic_lock", MUTEX_DEFAULT, NULL);
 	mutex_init(&vmem_flush_free_lock, "vmem_flush_free_lock", MUTEX_DEFAULT, NULL);
-	
+
 	while (--nseg >= 0)
 		vmem_putseg_global(&vmem_seg0[nseg]);
-	
+
 	/*
 	 * On OSX we ultimately have to use the OS allocator
 	 * as the ource and sink of memory as it is allocated
@@ -2924,13 +2924,25 @@ vmem_init(const char *heap_name,
 	const uint64_t half_gibibyte = 512ULL*1024ULL*1024ULL;
 	extern uint64_t real_total_memory;
 	boolean_t addtwo = false;
-	if (real_total_memory <= 15ULL*1024ULL*1024ULL*1024ULL) {
+	if (real_total_memory <= 15ULL*1024ULL*1024ULL*1024ULL &&
+	    real_total_memory >= 4ULL*1024ULL*1024ULL*1024ULL) {
 		spl_large_reserve_initial_allocation_size =
 		    MAX(real_total_memory / 16, half_gibibyte);
+	} else if (real_total_memory < 4ULL*1024ULL*1024ULL*1024ULL) {
+		// We need some memory for child arenas and other structures,
+		// notably the vmem_metadata arena, which is a direct child
+		// of spl_large_reserve_arena.  If this alloc is too small
+		// we will panic when creating more arenas or kmem caches.
+		// Minimum RAM size supported by macOS and Mac OS X is 2 GiB,
+		// so 256 MiB could be as large as 1/8 of RAM total.
+		spl_large_reserve_initial_allocation_size = half_gibibyte / 4;
 	} else {
 		spl_large_reserve_initial_allocation_size =
 		    MAX(real_total_memory / 64, 2ULL * half_gibibyte);
 		// nb: xnu forbids single allocations > 2 GiB in vm_kern.c.
+		// for machines > 128 GiB, we make the large arena two spans
+		// of 2 GiB each; 4 GiB should be sufficient for any size machine,
+		// thanks to the fill thread
 		if (spl_large_reserve_initial_allocation_size > 4ULL * half_gibibyte)
 			spl_large_reserve_initial_allocation_size = 4ULL * half_gibibyte;
 		addtwo = true;
@@ -3013,7 +3025,7 @@ vmem_init(const char *heap_name,
 					   NULL, 0, heap_quantum,
 					   vmem_alloc, vmem_free, spl_root_arena, 0,
 					   VM_SLEEP);
-	
+
 	// Root all the low bandwidth metadata arenas off the reserve arena.
 	// The allocations will all be 32 kiB or larger, and are only on the
 	// order of 24 MiB.
@@ -3021,22 +3033,22 @@ vmem_init(const char *heap_name,
 	vmem_metadata_arena = vmem_create("vmem_metadata", // id 6
 	    NULL, 0, heap_quantum, vmem_alloc, vmem_free, spl_large_reserve_arena,
 	    8 * PAGESIZE, VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE);
-	
+
 	vmem_seg_arena = vmem_create("vmem_seg", // id 7
 								 NULL, 0, heap_quantum,
 								 vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								 VM_SLEEP | VMC_POPULATOR);
-	
+
 	vmem_hash_arena = vmem_create("vmem_hash", // id 8
 								  NULL, 0, 8,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
-	
+
 	vmem_vmem_arena = vmem_create("vmem_vmem", // id 9
 								  vmem0, sizeof (vmem0), 1,
 								  vmem_alloc, vmem_free, vmem_metadata_arena, 0,
 								  VM_SLEEP);
-	
+
 	// 10 (0-based) vmem_create before this line. - macroized NUMBER_OF_ARENAS_IN_VMEM_INIT
 	for (id = 0; id < vmem_id; id++) {
 		global_vmem_reap[id] = vmem_xalloc(vmem_vmem_arena, sizeof (vmem_t),
@@ -3048,7 +3060,7 @@ vmem_init(const char *heap_name,
 	vmem_update(NULL);
 	printf("SPL: starting vmem_vacuum_thread() thread\n");
 	vmem_vacuum_thread(NULL);
-	
+
 	return (heap);
 }
 
@@ -3063,7 +3075,7 @@ static list_t freelist;
 static void vmem_fini_freelist(void *vmp, void *start, size_t size)
 {
 	struct free_slab *fs;
-	
+
 	MALLOC(fs, struct free_slab *, sizeof(struct free_slab), M_TEMP, M_WAITOK);
 	fs->vmp = vmp;
 	fs->slabsize = size;
@@ -3082,21 +3094,21 @@ vmem_fini(vmem_t *heap)
 	bsd_untimeout(spl_root_refill, NULL);
 	bsd_untimeout(vmem_update, NULL);
 	bsd_untimeout(vmem_vacuum_thread, NULL);
-	
+
 	/* Create a list of slabs to free by walking the list of allocs */
 	list_create(&freelist, sizeof (struct free_slab),
 				offsetof(struct free_slab, next));
-	
+
 	/* Walk to list of allocations */
 	vmem_walk(vmem_seg_arena, VMEM_ALLOC,
 			  vmem_fini_freelist, vmem_seg_arena);
-	
+
 	vmem_walk(vmem_hash_arena, VMEM_ALLOC,
 			  vmem_fini_freelist, vmem_hash_arena);
-	
+
 	vmem_walk(heap, VMEM_ALLOC,
 			  vmem_fini_freelist, heap);
-	
+
 	vmem_walk(spl_root_arena, VMEM_ALLOC,
 	    vmem_fini_freelist, spl_root_arena);
 
@@ -3106,7 +3118,7 @@ vmem_fini(vmem_t *heap)
 	for (id = 0; id < NUMBER_OF_ARENAS_IN_VMEM_INIT; id++) {// From vmem_init, 10 vmem_create macroized
 		vmem_xfree(vmem_vmem_arena, global_vmem_reap[id], sizeof (vmem_t));
 	}
-	
+
 	/* Now release the list of allocs to built above */
 	total = 0;
 	while((fs = list_head(&freelist))) {
@@ -3129,7 +3141,7 @@ vmem_fini(vmem_t *heap)
 		osif_free(spl_large_reserve_initial_allocation_two,
 		    spl_large_reserve_initial_allocation_size);
 	}
-	
+
 #if 0 // Don't release, panics
 	mutex_destroy(&vmem_flush_free_lock);
 	mutex_destroy(&vmem_panic_lock);
