@@ -1,0 +1,2 @@
+#!/bin/bash
+nice tail -900F /var/log/system.log|egrep  --line-buffered 'USB|kex|SPL|ZFS|zfs| zed' | egrep --line-buffered -v 'zfs_vfs_(uuid_gen|getattr)'
