@@ -580,68 +580,33 @@ int	spl_vfs_get_notify_attributes(struct vnode_attr *vap)
 	return vfs_get_notify_attributes(vap);
 }
 
-
-#if ZFS_BOOT
-extern struct vfstable *vfsconf;
-struct vfstable {
-        void *vfc_vfsops;     /* filesystem operations vector */
-        char    vfc_name[MFSNAMELEN];   /* filesystem type name */
-        int     vfc_typenum;            /* historic filesystem type number */
-        int     vfc_refcount;           /* number mounted of this type */
-        int     vfc_flags;              /* permanent flags */
-        int     (*vfc_mountroot)(mount_t, vnode_t, vfs_context_t);      /* if != NULL, routine to mount root */
-        struct  vfstable *vfc_next;     /* next in list */
-        int32_t vfc_reserved1;
-        int32_t vfc_reserved2;
-        int       vfc_vfsflags;   /* for optional types */
-        void     *vfc_descptr;    /* desc table allocated address */
-        int       vfc_descsize;   /* size allocated for desc table */
-        void     *vfc_sysctl;    /* dynamically registered sysctl node */
-};
-
-
-/*
- * Hijacking vfc_mountroot require us to match the structures to each
- * XNU release, so it is not enabled by default. Compile with
- * --enable-boot
- * It would be super if Apple would let us set mountroot.
- */
-void spl_hijack_mountroot(void *func)
-{
-	struct vfstable *vfsp;
-
-	printf("SPL: Attempting to set mountroot\n");
-
-	/* HIJACK the vfs_mountroot() call to call us instead. */
-	for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next) {
-		if ((vfsp->vfc_name[0] == 'z') &&
-			(vfsp->vfc_name[1] == 'f') &&
-			(vfsp->vfc_name[2] == 's')) {
-			vfsp->vfc_mountroot = func;
-			printf("SPL: zfs->vfc_mountroot set to %p\n", func);
-		}
-	}
-}
-
-extern	struct vnode *rootvnode;
-void spl_setrootvnode(struct vnode *vp)
-{
-	rootvnode = vp;
-}
-#endif /* ZFS_BOOT */
-
 /* Root directory vnode for the system a.k.a. '/' */
 /* Must use vfs_rootvnode() to acquire a reference, and
  * vnode_put() to release it
  */
+
+/*
+ * From early boot (mountroot) we can not call vfs_rootvnode()
+ * or it will panic. So the default here is to return NULL until
+ * root has been mounted. XNU will call vfs_root() once that is
+ * done, so we use that to inform us that root is mounted. In nonboot,
+ * vfs_start is called early from kextload (zfs_osx.cpp).
+ */
+static int spl_skip_getrootdir = 1;
+
 struct vnode *
 getrootdir(void)
 {
-#if ZFS_BOOT
-	if (!rootvnode) return NULL;
-#endif
-	struct vnode *rvnode = vfs_rootvnode();
+	struct vnode *rvnode;
+	if (spl_skip_getrootdir) return NULL;
+
+	rvnode = vfs_rootvnode();
 	if (rvnode)
 		vnode_put(rvnode);
 	return rvnode;
+}
+
+void spl_vfs_start()
+{
+	spl_skip_getrootdir = 0;
 }
