@@ -306,5 +306,6 @@ extern void spl_hijack_mountroot(void *func);
 extern void spl_setrootvnode(struct vnode *vp);
 
 struct vnode *getrootdir(void);
+void spl_vfs_start(void);
 
 #endif /* SPL_VNODE_H */
