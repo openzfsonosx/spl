@@ -598,6 +598,17 @@ kstat_named_setstr(kstat_named_t *knp, const char *src)
 }
 
 void
+kstat_named_init(kstat_named_t *knp, const char *name, uchar_t data_type)
+{
+	kstat_set_string(knp->name, name);
+	knp->data_type = data_type;
+
+	if (data_type == KSTAT_DATA_STRING)
+		kstat_named_setstr(knp, NULL);
+}
+
+
+void
 kstat_waitq_enter(kstat_io_t *kiop)
 {
 }

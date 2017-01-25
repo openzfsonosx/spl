@@ -179,6 +179,7 @@ extern void kstat_waitq_enter(kstat_io_t *);
 extern void kstat_waitq_exit(kstat_io_t *);
 extern void kstat_runq_enter(kstat_io_t *);
 extern void kstat_runq_exit(kstat_io_t *);
+extern void kstat_named_init(kstat_named_t *, const char *, uchar_t);
 
 #define kstat_set_raw_ops(k,h,d,a)      __kstat_set_raw_ops(k,h,d,a)
 
