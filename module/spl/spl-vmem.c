@@ -2384,13 +2384,11 @@ xnu_alloc_throttled_bail(uint64_t now_ticks, vmem_t *calling_vmp, size_t size, i
 }
 
 static void *
-xnu_alloc_throttled(vmem_t *null_vmp, size_t size, int vmflag)
+xnu_alloc_throttled(vmem_t *bvmp, size_t size, int vmflag)
 {
 
 	// the caller is one of the bucket arenas.
 	// null_vmp will be spl_default_arena_parent, which is just a placeholder.
-
-	vmem_t *bvmp = vmem_bucket_arena_by_size(size);
 
 	uint64_t now = zfs_lbolt();
 	const uint64_t entry_now = now;
@@ -2446,7 +2444,7 @@ xnu_alloc_throttled(vmem_t *null_vmp, size_t size, int vmflag)
 	 * sufficient memory to appear in this arena that we can satisfy
 	 * the allocation.
 	 *
-	 * We call xnu_allocate_throttle_bail() after a few milliseconds of waiting;
+	 * We call xnu_alloc_throttle_bail() after a few milliseconds of waiting;
 	 * it will either return a pointer to newly allocated memory or NULL.  We
 	 * return the result.
 	 *
@@ -3252,6 +3250,8 @@ vmem_init(const char *heap_name,
 		    xnu_alloc_throttled, xnu_free_throttled, spl_default_arena_parent,
 		    minimum_allocsize, VM_SLEEP | VMC_POPULATOR | VMC_NO_QCACHE | VMC_TIMEFREE);
 		VERIFY(b != NULL);
+		b->vm_min_import = minimum_allocsize;
+		b->vm_source = b;
 		vmem_bucket_arena[bucket_number] = b;
 		vmem_bucket_id_to_bucket_number[b->vm_id] = bucket_number;
 	}
