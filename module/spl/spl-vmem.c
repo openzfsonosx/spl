@@ -3621,6 +3621,14 @@ spl_arc_no_grow_impl(const uint16_t b, const size_t size, const boolean_t buf_is
 	const bool fragmented = bucket_fragmented(b, now);
 
 	if (fragmented) {
+		if (size < 32768) {
+			// Don't suppress small qcached blocks when the
+			// qcache size (bucket_262144) is fragmented,
+			// since they will push everything else towards
+			// the tails of ARC lists without eating up a large
+			// amount of space themselves.
+			return (false);
+		}
 		const uint32_t b_bit = (uint32_t)1 << (uint32_t)b;
 		spl_arc_no_grow_bits |= b_bit;
 		const uint32_t sup_at_least_every = MIN(b_bit, 255);
