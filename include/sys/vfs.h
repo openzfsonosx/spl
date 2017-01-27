@@ -79,4 +79,7 @@ typedef struct fid {
     } un;
 } fid_t;
 
+
+extern void (*mountroot_post_hook)(void);
+
 #endif /* SPL_ZFS_H */
