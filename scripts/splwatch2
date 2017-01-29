@@ -3,4 +3,4 @@ PATH=/bin:/usr/bin:/sbin:/usr/sbin:/opt/local/bin
 export PATH
 export LC_ALL=en_GB.UTF-8
 
-watch -d sh -c 'echo; sysctl -h kstat.spl.misc.spl_misc.active_threads kstat.spl.misc.spl_misc.vmem_conditional_allocs kstat.spl.misc.spl_misc.spl_osif_malloc_success kstat.spl.misc.spl_misc.spl_osif_free kstat.spl.misc.spl_misc.spl_osif_malloc_bytes kstat.spl.misc.spl_misc.spl_osif_free_bytes kstat.vmem.vmem| egrep -v "(: 0$)|\.(lookup|search|mem_total|vmem_source):|(vmem\.vmem\.[^b])"; sysctl -h kstat.vmem.vmem.bucket_heap.mem_total kstat.spl.misc.spl_misc.spl_bucket_non_pow2_allocs'
+watch -d sh -c 'echo; sysctl -h kstat.spl.misc.spl_misc.active_threads kstat.spl.misc.spl_misc.vmem_conditional_allocs kstat.spl.misc.spl_misc.spl_osif_malloc_success kstat.spl.misc.spl_misc.spl_osif_free kstat.spl.misc.spl_misc.spl_osif_malloc_bytes kstat.spl.misc.spl_misc.spl_osif_free_bytes kstat.vmem.vmem| egrep -v "(: 0$)|\.(lookup|search|mem_total|vmem_source):|(vmem\.vmem\.[^b])"; sysctl -h kstat.vmem.vmem.bucket_heap.mem_total kstat.spl.misc.spl_misc.spl_bucket_non_pow2_allocs' 'kstat.unix.kmem_cache.kmem_slab_cache.reap'
