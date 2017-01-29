@@ -436,6 +436,9 @@ boolean_t spl_arc_no_grow(size_t, boolean_t);
 _Atomic uint64_t spl_arc_no_grow_bits = 0;
 uint64_t spl_arc_no_grow_count = 0;
 
+uint64_t spl_frag_max_walk = 1000; // compare span ages this many steps from the head of the freelist
+uint64_t spl_frag_walked_out = 0;
+
 extern void spl_free_set_emergency_pressure(int64_t p);
 extern uint64_t segkmem_total_mem_allocated;
 extern uint64_t total_memory;
@@ -515,7 +518,8 @@ vmem_freelist_insert_sort_by_time(vmem_t *vmp, vmem_seg_t *vsp)
 	ASSERT(vmp->vm_cflags & VMC_TIMEFREE);
 	ASSERT(vsp->vs_span_createtime > 0);
 
-	const uint32_t max_walk_steps = 100;
+	const uint64_t abs_max_walk_steps = 1ULL << 30ULL;
+	uint32_t max_walk_steps = (uint32_t)MIN(spl_frag_max_walk, abs_max_walk_steps);
 
 	vmem_seg_t *vprev;
 
@@ -601,6 +605,7 @@ vmem_freelist_insert_sort_by_time(vmem_t *vmp, vmem_seg_t *vsp)
 			}
 			dprintf("SPL: %s: walked out (%s)\n", __func__, vmp->vm_name);
 			// IOSleep(1);
+			atomic_inc_64(&spl_frag_walked_out);
 			break;
 		}
 		if (n->vs_knext == NULL) {

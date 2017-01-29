@@ -547,6 +547,9 @@ extern void spl_set_bucket_tunable_small_span(uint64_t);
 extern _Atomic uint64_t spl_arc_no_grow_bits;
 extern uint64_t spl_arc_no_grow_count;
 
+extern uint64_t spl_frag_max_walk;
+extern uint64_t spl_frag_walked_out;
+
 uint64_t spl_buckets_mem_free = 0;
 
 
@@ -605,6 +608,8 @@ typedef struct spl_stats {
 	kstat_named_t spl_buckets_mem_free;
 	kstat_named_t spl_arc_no_grow_bits;
 	kstat_named_t spl_arc_no_grow_count;
+	kstat_named_t spl_frag_max_walk;
+	kstat_named_t spl_frag_walked_out;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -662,6 +667,9 @@ static spl_stats_t spl_stats = {
 	{"spl_buckets_mem_free", KSTAT_DATA_UINT64},
 	{"spl_arc_no_grow_bits", KSTAT_DATA_UINT64},
 	{"spl_arc_no_grow_count", KSTAT_DATA_UINT64},
+
+	{"spl_vmem_frag_max_walk", KSTAT_DATA_UINT64},
+	{"spl_vmem_frag_walked_out", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4784,6 +4792,10 @@ spl_kstat_update(kstat_t *ksp, int rw)
 			spl_set_bucket_tunable_small_span(ks->spl_bucket_tunable_small_span.value.ui64);
 		}
 
+		if (ks->spl_frag_max_walk.value.ui64 != spl_frag_max_walk) {
+			spl_frag_max_walk = ks->spl_frag_max_walk.value.ui64;
+		}
+
 	} else {
 		ks->spl_os_alloc.value.ui64 = segkmem_total_mem_allocated;
 		ks->spl_active_threads.value.ui64 = zfs_threads;
@@ -4837,6 +4849,9 @@ spl_kstat_update(kstat_t *ksp, int rw)
 		ks->spl_buckets_mem_free.value.ui64 = spl_buckets_mem_free;
 		ks->spl_arc_no_grow_bits.value.ui64 = spl_arc_no_grow_bits;
 		ks->spl_arc_no_grow_count.value.ui64 = spl_arc_no_grow_count;
+
+		ks->spl_frag_max_walk.value.ui64 = spl_frag_max_walk;
+		ks->spl_frag_walked_out.value.ui64 = spl_frag_walked_out;
 	}
 
 	return (0);
