@@ -551,7 +551,7 @@ extern uint64_t spl_frag_max_walk;
 extern uint64_t spl_frag_walked_out;
 
 uint64_t spl_buckets_mem_free = 0;
-
+uint64_t spl_arc_reclaim_avoided = 0;
 
 typedef struct spl_stats {
 	kstat_named_t spl_os_alloc;
@@ -610,6 +610,7 @@ typedef struct spl_stats {
 	kstat_named_t spl_arc_no_grow_count;
 	kstat_named_t spl_frag_max_walk;
 	kstat_named_t spl_frag_walked_out;
+	kstat_named_t spl_arc_reclaim_avoided;
 } spl_stats_t;
 
 static spl_stats_t spl_stats = {
@@ -670,6 +671,7 @@ static spl_stats_t spl_stats = {
 
 	{"spl_vmem_frag_max_walk", KSTAT_DATA_UINT64},
 	{"spl_vmem_frag_walked_out", KSTAT_DATA_UINT64},
+	{"spl_arc_reclaim_avoided", KSTAT_DATA_UINT64},
 };
 
 static kstat_t *spl_ksp = 0;
@@ -4852,6 +4854,8 @@ spl_kstat_update(kstat_t *ksp, int rw)
 
 		ks->spl_frag_max_walk.value.ui64 = spl_frag_max_walk;
 		ks->spl_frag_walked_out.value.ui64 = spl_frag_walked_out;
+
+		ks->spl_arc_reclaim_avoided.value.ui64 = spl_arc_reclaim_avoided;
 	}
 
 	return (0);
@@ -6602,4 +6606,60 @@ spl_zio_kmem_cache_alloc(kmem_cache_t *cp, int kmflag, size_t size, size_t cache
 	void *n = kmem_cache_alloc(cp, kmflag);
 
 	return(n);
+}
+
+/*
+ * return true if the reclaim thread should be awakened
+ * because we do not have enough memory on hand
+ */
+boolean_t
+spl_arc_reclaim_needed(const size_t bytes, kmem_cache_t **zp)
+{
+
+	/*
+	 * fast path:
+	 * if our argument is 0, then do the equivalent of
+	 * if (arc_available_memory() < 0) return (B_TRUE);
+	 * which is traditional arc.c appraoch
+	 * so we can arc_reclaim_needed() -> spl_arc_reclaim_needed(0)
+	 * if we desire.
+	 */
+	if (bytes == 0 && spl_free < 0) {
+		return (B_TRUE);
+	}
+
+	// copy some code from zio_buf_alloc()
+	size_t c = (bytes - 1) >> SPA_MINBLOCKSHIFT;
+	VERIFY3U(c, <, SPA_MAXBLOCKSIZE >> SPA_MINBLOCKSHIFT);
+
+	// if there is free memory in the kmem cache slab layer
+	// then we do not have to reclaim
+
+	if (zp[c]->cache_bufslab > 1) {
+		if (spl_free < 0)
+			atomic_inc_64(&spl_arc_reclaim_avoided);
+		return (B_FALSE);
+	}
+
+	extern uint64_t vmem_xnu_useful_bytes_free(void);
+	const uint64_t min_threshold = 64ULL*1024ULL*1024ULL;
+	const uint64_t pm_pct = real_total_memory >> 8;
+	const uint64_t high_threshold = MAX(min_threshold, (uint64_t)pm_pct);
+	const uint64_t low_threshold = bytes;
+
+	const uint64_t f = vmem_xnu_useful_bytes_free();
+
+	if (f <= low_threshold) {
+		return (B_TRUE);
+	} else if (f > high_threshold) {
+		if (spl_free < 0)
+			atomic_inc_64(&spl_arc_reclaim_avoided);
+		return (B_FALSE);
+	}
+
+	if (spl_free < 0) {
+		return (B_TRUE);
+	} else {
+		return (B_FALSE);
+	}
 }
