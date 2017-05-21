@@ -432,12 +432,13 @@ uint64_t spl_bucket_tunable_small_span = 0;
 // for XAT & XATB visibility into VBA queue
 static _Atomic uint32_t spl_vba_threads[VMEM_BUCKETS] = { 0 };
 static uint32_t vmem_bucket_id_to_bucket_number[NUMBER_OF_ARENAS_IN_VMEM_INIT] = { 0 };
-boolean_t spl_arc_no_grow(size_t, boolean_t);
+boolean_t spl_arc_no_grow(size_t, boolean_t, kmem_cache_t **);
 _Atomic uint64_t spl_arc_no_grow_bits = 0;
 uint64_t spl_arc_no_grow_count = 0;
 
 uint64_t spl_frag_max_walk = 1000; // compare span ages this many steps from the head of the freelist
 uint64_t spl_frag_walked_out = 0;
+uint64_t spl_frag_walk_cnt = 0;
 
 extern void spl_free_set_emergency_pressure(int64_t p);
 extern uint64_t segkmem_total_mem_allocated;
@@ -512,11 +513,64 @@ vmem_putseg(vmem_t *vmp, vmem_seg_t *vsp)
 
 #define dprintf(...)
 
+/*
+ * return true when we continue the for loop in
+ * vmem_freelist_insert_sort_by_time
+ */
+static inline bool
+flist_sort_compare(bool newfirst,
+    const vmem_seg_t *vhead,
+    const vmem_seg_t *nextlist,
+    vmem_seg_t *p, vmem_seg_t *to_insert)
+{
+	/* vsp is the segment we are inserting into the freelist
+	 * p is a freelist poniter or an element inside a  non-empty freelist
+	 * if we return false, then vsp is inserted immedaitely after p,
+         */
+
+	// always enter the for loop if we're at the front of a flist
+	if (p == vhead)
+		return (true);
+
+
+	const vmem_seg_t *n = p->vs_knext;
+
+	if (n == nextlist || n == NULL) {
+		// if we are at the tail of the flist, then
+		// insert vsp between p and n
+		return (false);
+	}
+
+	if (n->vs_import == true && to_insert->vs_import == false) {
+		/* put non-imported segments before imported segments
+		 * no matter what their respective create times are,
+		 * thereby making imported segments more likely "age out"
+		 */
+		return (false);  // inserts to_insert between p and n
+	}
+
+	if (newfirst == true) {
+		if (n->vs_span_createtime < to_insert->vs_span_createtime) {
+			// n is older than me, so insert me between p and n
+			return (false);
+		}
+	} else {
+		if (n->vs_span_createtime > to_insert->vs_span_createtime) {
+			// n is newer than me, so insert me between p and n
+			return (false);
+		}
+	}
+	// continue iterating
+	return (true);
+}
+
 static void
 vmem_freelist_insert_sort_by_time(vmem_t *vmp, vmem_seg_t *vsp)
 {
 	ASSERT(vmp->vm_cflags & VMC_TIMEFREE);
 	ASSERT(vsp->vs_span_createtime > 0);
+
+	const bool newfirst = 0 == (vmp->vm_cflags & VMC_OLDFIRST);
 
 	const uint64_t abs_max_walk_steps = 1ULL << 30ULL;
 	uint32_t max_walk_steps = (uint32_t)MIN(spl_frag_max_walk, abs_max_walk_steps);
@@ -556,7 +610,7 @@ vmem_freelist_insert_sort_by_time(vmem_t *vmp, vmem_seg_t *vsp)
 
 	int next_listnum = my_listnum + 1;
 
-	vmem_seg_t *nextlist = (vmem_seg_t *)&vmp->vm_freelist[next_listnum];
+	const vmem_seg_t *nextlist = (vmem_seg_t *)&vmp->vm_freelist[next_listnum];
 
 	ASSERT(vsp->vs_span_createtime != 0);
 	if (vsp->vs_span_createtime == 0) {
@@ -567,17 +621,22 @@ vmem_freelist_insert_sort_by_time(vmem_t *vmp, vmem_seg_t *vsp)
 	// continuing our example, starts with p at flist[8k]
 	// and n at the following freelist entry
 
+	const vmem_seg_t *vhead = vprev;
 	vmem_seg_t *p = vprev;
 	vmem_seg_t *n = p->vs_knext;
 
 	// walk from the freelist head looking for
-	// a segment whose creation time is later than
+	// a segment whose creation time is earlier than
 	// the segment to be inserted's creation time,
 	// then insert before that segment.
 
 	for (uint32_t step = 0;
-	     p->vs_span_createtime <= vsp->vs_span_createtime;
+	     flist_sort_compare(newfirst, vhead, nextlist, p, vsp) == true;
 	     step++) {
+		// iterating while predecessor pointer p was created
+		// at a later tick than funcarg vsp.
+		//
+		// below we set p to n and update n.
 		ASSERT(n != NULL);
 		if (n == nextlist) {
 			dprintf("SPL: %s: at marker (%s)(steps: %u) p->vs_start, end == %lu, %lu\n",
@@ -600,7 +659,7 @@ vmem_freelist_insert_sort_by_time(vmem_t *vmp, vmem_seg_t *vsp)
 			// we have walked far enough.
 			// put this segment at the tail of the freelist.
 			if (nextlist->vs_kprev != NULL) {
-				n = nextlist;
+				n = (vmem_seg_t *)nextlist;
 				p = nextlist->vs_kprev;
 			}
 			dprintf("SPL: %s: walked out (%s)\n", __func__, vmp->vm_name);
@@ -616,6 +675,7 @@ vmem_freelist_insert_sort_by_time(vmem_t *vmp, vmem_seg_t *vsp)
 		}
 		p = n;
 		n = n->vs_knext;
+		atomic_inc_64(&spl_frag_walk_cnt);
 	}
 
 	ASSERT(p != NULL);
@@ -1685,13 +1745,8 @@ vmem_alloc(vmem_t *vmp, size_t size, int vmflag)
 
 	if (flist-- == 0) {
 		mutex_exit(&vmp->vm_lock);
-		if (0 == (vmp->vm_cflags & VMC_TIMEFREE))  {
-			return (vmem_xalloc(vmp, size, vmp->vm_quantum,
-							0, 0, NULL, NULL, vmflag));
-		} else {
-			return (vmem_xalloc(vmp, size, vmp->vm_quantum,
-				0, 0, NULL, NULL, vmflag | VM_BESTFIT));
-		}
+		return (vmem_xalloc(vmp, size, vmp->vm_quantum,
+			0, 0, NULL, NULL, vmflag));
 	}
 
 	ASSERT(size <= (1UL << flist));
@@ -2402,8 +2457,7 @@ xnu_alloc_throttled(vmem_t *bvmp, size_t size, int vmflag)
 
 	if (m != NULL) {
 		atomic_inc_64(&spl_xat_success);
-		if (now > hz)
-			atomic_swap_64(&spl_xat_lastalloc,  now / hz);
+		spl_xat_lastalloc = gethrtime();
 		// wake up waiters on all the arena condvars
 		// since there is apparently no memory shortage.
 		vmem_bucket_wake_all_waiters();
@@ -2414,7 +2468,7 @@ xnu_alloc_throttled(vmem_t *bvmp, size_t size, int vmflag)
 
 	if (vmflag & VM_PANIC) {
 		// force an allocation now to avoid a panic
-		atomic_swap_64(&spl_xat_lastalloc,  now / hz);
+		spl_xat_lastalloc = gethrtime();
 		spl_free_set_emergency_pressure(4LL * (int64_t)size);
 		void *p = spl_vmem_malloc_unconditionally(size);
 		// p cannot be NULL (unconditional kernel malloc always works or panics)
@@ -2433,8 +2487,7 @@ xnu_alloc_throttled(vmem_t *bvmp, size_t size, int vmflag)
 		if (p != NULL) {
 			atomic_inc_64(&spl_xat_late_success_nosleep);
 			cv_broadcast(&bvmp->vm_cv);
-			if (now > hz)
-				atomic_swap_64(&spl_xat_lastalloc,  now / hz);
+			spl_xat_lastalloc = gethrtime();
 		}
 		// if p == NULL, then there will be an increment in the fail kstat
 		return (p);
@@ -2496,7 +2549,7 @@ xnu_alloc_throttled(vmem_t *bvmp, size_t size, int vmflag)
 			void *a = spl_vmem_malloc_if_no_pressure(size);
 			if (a != NULL) {
 				atomic_inc_64(&spl_xat_late_success);
-				atomic_swap_64(&spl_xat_lastalloc,  now / hz);
+				spl_xat_lastalloc = gethrtime();
 				waiters--;
 				// Wake up all waiters on the bucket arena locks,
 				// since the system apparently has memory again.
@@ -2529,7 +2582,7 @@ xnu_alloc_throttled(vmem_t *bvmp, size_t size, int vmflag)
 			}
 			void *b = xnu_alloc_throttled_bail(now, bvmp, size, vmflag);
 			bailing_threads--;
-			atomic_swap_64(&spl_xat_lastalloc, now / hz);
+			spl_xat_lastalloc = gethrtime();
 			// wake up waiters on the arena lock,
 			// since they now have memory they can use.
 			cv_broadcast(&bvmp->vm_cv);
@@ -2603,8 +2656,7 @@ xnu_free_throttled(vmem_t *vmp, void *vaddr, size_t size)
 	// protected by is_freeing.   Release it after the osif_free()
 	// call has been made and the lastfree bookkeeping has been done.
 	osif_free(vaddr, size);
-	uint64_t now = zfs_lbolt();
-	atomic_swap_64(&spl_xat_lastfree,  now / hz);
+	spl_xat_lastfree = gethrtime();
 	is_freeing = false;
 	a_waiters--;
 	kpreempt(KPREEMPT_SYNC);
@@ -3175,11 +3227,11 @@ vmem_init(const char *heap_name,
 	// smallest allocation that vmem_bucket_allocate will ask for.
 	//
 	// The bucket arenas in turn exchange memory with XNU's allocator/freer in
-	// large spans (> 1MiB).
+	// large spans (~ 1 MiB is stable on all systems but creates bucket fragmentation)
 	//
 	// Segregating by size constrains internal fragmentation within the bucket and
 	// provides kstat.vmem visiblity and span-size policy to be applied to particular
-	// buckets (notably the 128k one).
+	// buckets (notably the sources of most allocations, see the comments below)
 	//
 	// For VMEM_BUCKET_HIBIT == 12,
 	// vmem_bucket_arena[n] holds allocations from 2^[n+11]+1 to  2^[n+12],
@@ -3189,61 +3241,87 @@ vmem_init(const char *heap_name,
 	// allocations 1 MiB and smaller, but larger than 512 kiB.
 
 	// create arenas for the VMEM_BUCKETS, id 2 - id 14
+
+	extern uint64_t real_total_memory;
+	VERIFY3U(real_total_memory,>=,1024ULL*1024ULL*1024ULL);
+
+	// adjust minimum bucket span size for memory size
+	// see comments in the switch below
+	// large span: 1 MiB and bigger on large-memory (> 32 GiB)  systems
+	// small span: 256 kiB and bigger on large-memory systems
+	const uint64_t k = 1024ULL;
+	const uint64_t qm = 256ULL * k;
+	const uint64_t m = 1024ULL* k;
+	const uint64_t big = MAX(real_total_memory / (k * 32ULL), m);
+	const uint64_t small = MAX(real_total_memory / (k * 128ULL), qm);
+	spl_bucket_tunable_large_span = MIN(big, 16ULL * m);
+	spl_bucket_tunable_small_span = small;
+	printf("SPL: %s: real_total_memory %llu, large spans %llu, small spans %llu\n",
+	    __func__, real_total_memory,
+	    spl_bucket_tunable_large_span, spl_bucket_tunable_small_span);
+
 	for (int32_t i = VMEM_BUCKET_LOWBIT; i <= VMEM_BUCKET_HIBIT; i++) {
+		size_t minimum_allocsize = 0;
 		const uint64_t bucket_largest_size = (1ULL << (uint64_t)i);
 		char *buf = vmem_alloc(spl_default_arena, VMEM_NAMELEN + 21, VM_SLEEP);
 		(void) snprintf(buf, VMEM_NAMELEN + 20, "%s_%llu",
 		    "bucket", bucket_largest_size);
 		printf("SPL: %s creating arena %s (i == %d)\n", __func__, buf, i);
-		extern uint64_t real_total_memory;
-		if (real_total_memory > 0) {
-			// adjust minimum bucket span size for memory size
-			// we do not want to be smaller than 1 MiB
-			const uint64_t k = 1024ULL;
-			const uint64_t m = 1024ULL* k;
-			const uint64_t b = MAX(real_total_memory / (k * 16ULL), m);
-			const uint64_t s = MAX(b / 2ULL, m);
-			spl_bucket_tunable_large_span = MIN(b, 16ULL * m);
-			spl_bucket_tunable_small_span = s;
-			printf("SPL: %s: real_total_memory %llu, large spans %llu, small spans %llu\n",
-			    __func__, real_total_memory,
-			    spl_bucket_tunable_large_span, spl_bucket_tunable_small_span);
-		}
-		size_t minimum_allocsize = 0;
 		switch (i) {
+		case 15:
 		case 16:
-		case 17:
-			// The 128k bucket will generally be the most fragmented of all
-			// because it is one step larger than the maximum qcache size
-			// and is a popular size for the zio data and metadata arenas,
-			// with a small amount of va heap use.
-			//
-			// These static factors and the dynamism of a busy zfs system lead
-			// to interleaving 128k allocations with very different lifespans
-			// into the same xnu allocation, and at 16MiB this tends to
-			// leads to substantial (~ 1/2 GiB) waste.   That does not seem
-			// like much memory for most sytems, but it tends to represent holding
-			// ~ 4x more memory than the ideal case of 0 waste, thus the division by
-			// four of minimum_allocate compared to the 16 MiB default.   Additionally,
-			// this interleaving makes it harder to shrink the overall SPL memory
-			// use when memory is cruicially low.
-			//
-			// The trade off here is contributing to the fragmentation of
-			// the xnu freelist, so the step-down should not be even smaller.
-			//
-			// The 64k bucket is typically very low bandwidth and often holds just
-			// one or two spans thanks to qcaching so does not need to be large.
+			/*
+			 * With the arrival of abd, the 2^15 (== 32768) and 2^16
+			 * buckets are by far the most busy, holding respectively
+			 * the qcache spans of kmem_va (the kmem_alloc et al. heap)
+			 * and zfs_qcache (notably the source for the abd_chunk arena)
+			 *
+			 * The lifetime of early (i.e., after import and mount)
+			 * allocations can be highly variable, leading
+			 * to persisting fragmentation from the first eviction after
+			 * arc has grown large.    This can happen if, for example,
+			 * there substantial import and mounting (and mds/mdworker and
+			 * backupd scanning) activity before a user logs in and starts
+			 * demanding memory in userland (e.g. by firing up a browser or
+			 * mail app).
+			 *
+			 * Crucially, this makes it difficult to give back memory to xnu
+			 * without holding the ARC size down for long periods of time.
+			 *
+			 * We can mitigate this by exchanging smaller
+			 * amounts of memory with xnu for these buckets.
+			 * There are two downsides: xnu's memory
+			 * freelist will be prone to greater
+			 * fragmentation, which will affect all
+			 * allocation and free activity using xnu's
+			 * allocator including kexts other than our; and
+			 * we are likely to have more waits in the throttled
+			 * alloc function, as more threads are likely to require
+			 * slab importing into the kmem layer and fewer threads
+			 * can be satisfied by a small allocation vs a large one.
+			 *
+			 * The import sizes are sysadmin-tunable by setting
+			 * kstat.spl.misc.spl_misc.spl_tunable_small_span
+			 * to a power-of-two number of bytes in zsysctl.conf
+			 * should a sysadmin prefer non-early allocations to
+			 * be larger or smaller depending on system performance
+			 * and workload.
+			 *
+			 * However, a zfs booting system must use the defaults
+			 * here for the earliest allocations, therefore they.
+			 * should be only large enough to protect system performance
+			 * if the sysadmin never changes the tunable span sizes.
+			 */
 			minimum_allocsize = MAX(spl_bucket_tunable_small_span,
 			    bucket_largest_size * 4);
 			break;
 		default:
-			// 16 MiB has proven to be a decent choice, with surprisingly
-			// little waste.   The greatest waste has in practice been in
-			// the 128k bucket (see above), the 256k bucket under unusual
-			// circumstances (although this is much  smaller as a percentage,
-			// and in particular less than 1/2, so a step change to 8 MiB would
-			// not be very worthwhile), the 64k bucket (see above), and the
-			// 2 MiB bucket (which will typically occupy only one span anyway).
+			/*
+			 * These buckets are all relatively low bandwidth and
+			 * with relatively uniform lifespans for most allocations
+			 * (borrowed arc buffers dominate).   They should be large
+			 * enough that they do not pester xnu.
+			 */
 			minimum_allocsize = MAX(spl_bucket_tunable_large_span,
 			    bucket_largest_size * 4);
 			break;
@@ -3268,7 +3346,7 @@ vmem_init(const char *heap_name,
 	spl_heap_arena = vmem_create("bucket_heap", // id 15
 	    NULL, 0, heap_quantum,
 	    vmem_bucket_alloc, vmem_bucket_free, spl_default_arena_parent, 0,
-	    VM_SLEEP);
+	    VM_SLEEP | VMC_TIMEFREE | VMC_OLDFIRST);
 
 	VERIFY(spl_heap_arena != NULL);
 
@@ -3616,7 +3694,8 @@ bucket_fragmented(const uint16_t bn, const uint64_t now)
  * return true if the bucket for size is fragmented
  * */
 static inline bool
-spl_arc_no_grow_impl(const uint16_t b, const size_t size, const boolean_t buf_is_metadata)
+spl_arc_no_grow_impl(const uint16_t b, const size_t size, const boolean_t buf_is_metadata,
+	kmem_cache_t **kc)
 {
 
 	static _Atomic uint8_t frag_suppression_counter[VMEM_BUCKETS] = { 0 };
@@ -3651,9 +3730,10 @@ spl_arc_no_grow_impl(const uint16_t b, const size_t size, const boolean_t buf_is
 		spl_arc_no_grow_bits &= ~b_bit;
 	}
 
-	extern bool spl_zio_is_suppressed(const size_t, const uint64_t, const boolean_t);
+	extern bool spl_zio_is_suppressed(const size_t, const uint64_t, const boolean_t,
+	    kmem_cache_t **);
 
-	return (spl_zio_is_suppressed(size, now, buf_is_metadata));
+	return (spl_zio_is_suppressed(size, now, buf_is_metadata, kc));
 }
 
 static inline uint16_t
@@ -3667,11 +3747,11 @@ vmem_bucket_number_arc_no_grow(const size_t size)
 }
 
 boolean_t
-spl_arc_no_grow(size_t size, boolean_t buf_is_metadata)
+spl_arc_no_grow(size_t size, boolean_t buf_is_metadata, kmem_cache_t **zp)
 {
 	const uint16_t b = vmem_bucket_number_arc_no_grow(size);
 
-	const bool rv = spl_arc_no_grow_impl(b, size, buf_is_metadata);
+	const bool rv = spl_arc_no_grow_impl(b, size, buf_is_metadata, zp);
 
 	if (rv) {
 		atomic_inc_64(&spl_arc_no_grow_count);
