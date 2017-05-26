@@ -27,3 +27,4 @@ _VNOP_LOOKUP
 _vnode_notify
 _vfs_get_notify_attributes
 _kauth_cred_getgroups
+_rootvnode

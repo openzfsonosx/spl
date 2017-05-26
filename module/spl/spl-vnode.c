@@ -585,28 +585,20 @@ int	spl_vfs_get_notify_attributes(struct vnode_attr *vap)
  * vnode_put() to release it
  */
 
-/*
- * From early boot (mountroot) we can not call vfs_rootvnode()
- * or it will panic. So the default here is to return NULL until
- * root has been mounted. XNU will call vfs_root() once that is
- * done, so we use that to inform us that root is mounted. In nonboot,
- * vfs_start is called early from kextload (zfs_osx.cpp).
- */
-static int spl_skip_getrootdir = 1;
+extern struct vnode *rootvnode;
 
 struct vnode *
 getrootdir(void)
 {
 	struct vnode *rvnode;
-	if (spl_skip_getrootdir) return NULL;
+
+	// Unfortunately, Apple's vfs_rootvnode() fails to check for
+	// NULL rootvp, and just panics. We aren't technically allowed to
+	// see rootvp, but in the interest of avoiding a panic...
+	if (rootvnode == NULL) return NULL;
 
 	rvnode = vfs_rootvnode();
 	if (rvnode)
 		vnode_put(rvnode);
 	return rvnode;
-}
-
-void spl_vfs_start()
-{
-	spl_skip_getrootdir = 0;
 }
