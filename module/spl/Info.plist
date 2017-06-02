@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>spl</string>
 	<key>CFBundleIdentifier</key>
-	<string>net.lundman.spl</string>
+	<string>org.openzfsonosx.spl</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -52,7 +52,7 @@
 		<string>8.0.0</string>
 		<key>com.apple.kpi.unsupported</key>
 		<string>8.0.0</string>
-		<key>net.lundman.kernel.dependencies</key>
+		<key>org.openzfsonosx.kernel.dependencies</key>
 		<string>12.5.0</string>
 	</dict>
 </dict>

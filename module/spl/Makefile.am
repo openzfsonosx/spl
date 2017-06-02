@@ -73,15 +73,15 @@ spl.kext$(EXEEXT): spl $(PLIST_STRING) $(INFO_PLIST)
 	@cp -f $(INFO_PLIST) spl.kext/Contents/
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(SPL_META_VERSION)" spl.kext/Contents/Info.plist
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(SPL_META_VERSION)" spl.kext/Contents/Info.plist
-	/usr/libexec/PlistBuddy -c "Delete :OSBundleLibraries:net.lundman.kernel.dependencies" spl.kext/Contents/Info.plist
-	/usr/libexec/PlistBuddy -c "Add :OSBundleLibraries:net.lundman.kernel.dependencies.$(SPL_KERNEL_DEPENDENCIES) string 12.5.0" spl.kext/Contents/Info.plist
+	/usr/libexec/PlistBuddy -c "Delete :OSBundleLibraries:org.openzfsonosx.kernel.dependencies" spl.kext/Contents/Info.plist
+	/usr/libexec/PlistBuddy -c "Add :OSBundleLibraries:org.openzfsonosx.kernel.dependencies.$(SPL_KERNEL_DEPENDENCIES) string 12.5.0" spl.kext/Contents/Info.plist
 	@cp -f $(PLIST_STRING) spl.kext/Contents/Resources/English.lproj/
 	@cp -f spl spl.kext/Contents/MacOS/
 	@mkdir -p spl.kext/Contents/PlugIns/KernelExports.kext/
 	@cd KernelExports && $(MAKE)
 	@cp -f KernelExports/KernelExports spl.kext/Contents/PlugIns/KernelExports.kext/
 	cp -f KernelExports/Info.plist spl.kext/Contents/PlugIns/KernelExports.kext/
-	/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier net.lundman.kernel.dependencies.$(SPL_KERNEL_DEPENDENCIES)" spl.kext/Contents/PlugIns/KernelExports.kext/Info.plist
+	/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier org.openzfsonosx.kernel.dependencies.$(SPL_KERNEL_DEPENDENCIES)" spl.kext/Contents/PlugIns/KernelExports.kext/Info.plist
 	if [ "0$(ZFS_BOOT)" -eq 1 ]; then /usr/libexec/PlistBuddy -c "Add :OSBundleRequired string Root" spl.kext/Contents/Info.plist; fi
 	cp -f KernelExports/version.plist spl.kext/Contents/PlugIns/KernelExports.kext/
 	mkdir -p KernelExports.kext

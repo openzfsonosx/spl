@@ -9,7 +9,7 @@
 	<key>CFBundleGetInfoString</key>
 	<string>Mach Kernel Pseudoextension, Apple Computer Inc, 12.5.0</string>
 	<key>CFBundleIdentifier</key>
-	<string>net.lundman.kernel.dependencies</string>
+	<string>org.openzfsonosx.kernel.dependencies</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
