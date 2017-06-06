@@ -109,12 +109,11 @@ extern void (*__ihook_free)(void *);
 #include <sys/systeminfo.h>
 
 
-extern const char              *panicstr;
 extern int system_inshutdown;
 
 const char *spl_panicstr(void)
 {
-    return panicstr;
+    return NULL;
 }
 
 int spl_system_inshutdown(void)
