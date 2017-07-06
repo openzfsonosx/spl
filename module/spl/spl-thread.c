@@ -41,7 +41,7 @@ kthread_t *
 spl_thread_create(
         caddr_t         stk,
         size_t          stksize,
-        void            (*proc)(),
+        void            (*proc)(void *),
         void            *arg,
         size_t          len,
         /*struct proc     *pp,*/

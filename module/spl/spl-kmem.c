@@ -91,7 +91,7 @@ extern vm_offset_t virtual_space_end;
 extern int vm_pool_low(void);
 
 // Which CPU are we executing on?
-extern int cpu_number();
+extern int cpu_number(void);
 
 // Invoke the kernel debugger
 extern void Debugger(const char *message);

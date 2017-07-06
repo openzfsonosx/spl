@@ -37,7 +37,6 @@
 //#include <vm/page.h>
 #include <sys/avl.h>
 #include <sys/list.h>
-#include <spl-bmalloc.h>
 
 #ifdef	__cplusplus
 extern "C" {

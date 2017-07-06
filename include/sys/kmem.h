@@ -71,15 +71,15 @@ extern uint64_t physmem;
     void zfs_kmem_free(void *buf, size_t size);
 
     void spl_kmem_init(uint64_t);
-    void spl_kmem_thread_init();
-	void spl_kmem_mp_init();
-	void spl_kmem_thread_fini();
-	void spl_kmem_fini();
+    void spl_kmem_thread_init(void);
+	void spl_kmem_mp_init(void);
+	void spl_kmem_thread_fini(void);
+	void spl_kmem_fini(void);
 
     size_t kmem_size(void);
     size_t kmem_used(void);
     int64_t kmem_avail(void);
-    size_t kmem_num_pages_wanted();
+    size_t kmem_num_pages_wanted(void);
 	int	spl_vm_pool_low(void);
   int32_t spl_minimal_physmem_p(void);
   int64_t spl_adjust_pressure(int64_t);

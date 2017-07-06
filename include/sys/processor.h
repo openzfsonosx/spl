@@ -4,7 +4,7 @@
 
 #include <sys/types.h>
 
-extern uint32_t getcpuid();
+extern uint32_t getcpuid(void);
 
 typedef int	processorid_t;
 
