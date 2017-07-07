@@ -1576,10 +1576,12 @@ vmem_xalloc(vmem_t *vmp, size_t size, size_t align_arg, size_t phase,
 			break;
 		mutex_exit(&vmp->vm_lock);
 
+#if 0
 		if (vmp->vm_cflags & VMC_IDENTIFIER)
 			kmem_reap_idspace();
 		else
 			kmem_reap();
+#endif
 
 		mutex_enter(&vmp->vm_lock);
 		if (vmflag & VM_NOSLEEP)
