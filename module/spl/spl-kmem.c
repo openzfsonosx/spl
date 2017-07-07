@@ -301,7 +301,7 @@ static uint32_t kmem_reaping_idspace;
 /*
  * kmem tunables
  */
-static struct timespec kmem_reap_interval = {5, 0};
+static struct timespec kmem_reap_interval = {15, 0};
 int kmem_depot_contention = 3;	/* max failed tryenters per real interval */
 pgcnt_t kmem_reapahead = 0;	/* start reaping N pages before pageout */
 int kmem_panic = 1;		/* whether to panic on error */
@@ -4367,6 +4367,13 @@ void
 spl_free_reap_caches(void)
 {
 	// note: this may take some time
+	static hrtime_t last_reap = 0;
+	const hrtime_t reap_after = SEC2NSEC(60);
+	const hrtime_t curtime = gethrtime();
+
+	if (curtime - last_reap < reap_after)
+		return;
+
 	vmem_qcache_reap(zio_arena_parent);
 	kmem_reap();
 	vmem_qcache_reap(kmem_va_arena);
