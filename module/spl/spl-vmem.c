@@ -1320,7 +1320,7 @@ spl_vmem_malloc_if_no_pressure(size_t size)
 	// The mutex serializes concurrent callers, providing time for
 	// the variables in spl_vmem_xnu_useful_bytes_free() to be updated.
 	mutex_enter(&vmem_xnu_alloc_lock);
-	if (spl_vmem_xnu_useful_bytes_free() > (MAX(size,16ULL*1024ULL*1024ULL))) {
+	if (spl_vmem_xnu_useful_bytes_free() > (MAX(size,1024ULL*1024ULL))) {
 		extern void *osif_malloc(uint64_t);
 		void *p = osif_malloc(size);
 		if (p != NULL) {
