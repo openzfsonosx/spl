@@ -59,6 +59,7 @@ spl_thread_create(
 		printf("Start thread pri %d by '%s':%d\n", pri,
 			   filename, line);
 #endif
+
         result= kernel_thread_start((thread_continue_t)proc, arg, &thread);
 
         if (result != KERN_SUCCESS)
@@ -67,13 +68,42 @@ spl_thread_create(
 		/* Improve the priority when asked to do so */
 		if (pri > minclsyspri) {
 			thread_precedence_policy_data_t policy;
-			policy.importance = pri - minclsyspri;
+
+			/* kernel priorities (osfmk/kern/sched.h)
+			 *
+			 * 96           Reserved (real-time)
+			 * 95           Kernel mode only
+			 *                              A
+			 *                              +
+			 *                      (16 levels)
+			 *                              +
+			 *                              V
+			 * 80           Kernel mode only
+			 * 79           System high priority
+			 *
+			 * spl/include/sys/sysmacros.h
+			 * #define maxclsyspri  89
+			 * #define minclsyspri  81  BASEPRI_KERNEL
+			 * #define defclsyspri  81  BASEPRI_KERNEL
+			 *
+			 * Calling policy.importance = 10 will create
+			 * a default pri (81) at pri (91).
+			 *
+			 * So asking for pri (85) we do 85-81 = 4.
+			 *
+q			 * IllumOS priorities are:
+			 * #define MAXCLSYSPRI     99
+			 * #define MINCLSYSPRI     60
+			 */
+
+			policy.importance = (pri - minclsyspri);
 
 			thread_policy_set(thread,
 							  THREAD_PRECEDENCE_POLICY,
 							  (thread_policy_t)&policy,
 							  THREAD_PRECEDENCE_POLICY_COUNT);
 		}
+
         thread_deallocate(thread);
 
         atomic_inc_64(&zfs_threads);

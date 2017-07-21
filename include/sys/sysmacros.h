@@ -105,7 +105,7 @@ extern unsigned int max_ncpus;
  */
 #define minclsyspri  81 /* BASEPRI_KERNEL */
 #define defclsyspri  81 /* BASEPRI_KERNEL */
-#define maxclsyspri  89
+#define maxclsyspri  95
 
 
 #define NICE_TO_PRIO(nice)		(MAX_RT_PRIO + (nice) + 20)
