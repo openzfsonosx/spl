@@ -57,109 +57,109 @@
 
 #include <spl-debug.h>
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+// VERIFY macros will always call panic
+extern void panic(const char *string, ...);
+#define	PANIC panic
+
+#define VERIFY(cond)									\
+	do {												\
+		if (unlikely(!(cond)))							\
+			PANIC("VERIFY(" #cond ") failed\n");		\
+	} while (0)
+
+#define VERIFY3_IMPL(LEFT, OP, RIGHT, TYPE, FMT, CAST)					\
+	do {																\
+		if (!((TYPE)(LEFT) OP (TYPE)(RIGHT)))							\
+			PANIC("VERIFY3( %s " #OP " %s ) "							\
+				"failed (" FMT " " #OP " " FMT ")\n",					\
+				#LEFT, #RIGHT,											\
+				CAST (LEFT), CAST (RIGHT));								\
+	} while (0)
+
+#define VERIFY3S(x,y,z)	VERIFY3_IMPL(x, y, z, int64_t, "%lld", (long long))
+#define VERIFY3U(x,y,z)	VERIFY3_IMPL(x, y, z, uint64_t, "%llu",	\
+		(unsigned long long))
+#define VERIFY3P(x,y,z)	VERIFY3_IMPL(x, y, z, uintptr_t, "%p", (void *))
+#define VERIFY0(x)	VERIFY3_IMPL(0, ==, x, int64_t, "%lld",	(long long))
+
+
+
 #ifndef DEBUG /* Debugging Disabled */
 
 /* Define SPL_DEBUG_STR to make clear which ASSERT definitions are used */
 #define SPL_DEBUG_STR	""
 
-#if 0
-#define PANIC(fmt, a...)						\
-do {									\
-	printk(KERN_EMERG fmt, ## a);					\
-	spl_debug_bug(__FILE__, __FUNCTION__, __LINE__, 0);		\
-} while (0)
-#endif
-
-extern void panic(const char *string, ...);
-#define	PANIC panic
-
-#define __ASSERT(x)			((void)0)
-#define ASSERT(x)			((void)0)
-#define ASSERTF(x, y, z...)		((void)0)
-#define ASSERTV(x)
-#define VERIFY(cond)							\
-do {									\
-	if (unlikely(!(cond)))						\
-		PANIC("VERIFY(" #cond ") failed\n");			\
-} while (0)
-
-#define VERIFY3_IMPL(LEFT, OP, RIGHT, TYPE, FMT, CAST)			\
-do {									\
-	if (!((TYPE)(LEFT) OP (TYPE)(RIGHT)))				\
-		PANIC("VERIFY3(" #LEFT " " #OP " " #RIGHT ") "		\
-		    "failed (" FMT " " #OP " " FMT ")\n",		\
-		    CAST (LEFT), CAST (RIGHT));				\
-} while (0)
-
-#define VERIFY3S(x,y,z)	VERIFY3_IMPL(x, y, z, int64_t, "%lld", (long long))
-#define VERIFY3U(x,y,z)	VERIFY3_IMPL(x, y, z, uint64_t, "%llu",		\
-				    (unsigned long long))
-#define VERIFY3P(x,y,z)	VERIFY3_IMPL(x, y, z, uintptr_t, "%p", (void *))
-#define VERIFY0(x)	VERIFY3_IMPL(0, ==, x, int64_t, "%lld",	(long long))
-
 #define ASSERT3S(x,y,z)	((void)0)
 #define ASSERT3U(x,y,z)	((void)0)
 #define ASSERT3P(x,y,z)	((void)0)
 #define ASSERT0(x)	((void)0)
+#define ASSERT(x)	((void)0)
+#define ASSERTV(x)
+
+#define IMPLY(A, B) ((void)0)
+#define EQUIV(A, B) ((void)0)
+
+
+
 
 #else /* Debugging Enabled */
+
+
+
 
 /* Define SPL_DEBUG_STR to make clear which ASSERT definitions are used */
 #define SPL_DEBUG_STR	" (DEBUG mode)"
 
-#define PANIC(fmt, a...)						\
-do {									\
-	printf(NULL, 0, 0,					\
-		   __FILE__, __FUNCTION__, __LINE__,	fmt, ## a); \
-} while (0)
+
+/* ASSERTION that will debug log used outside the debug system
+ * Change the #if if you want ASSERTs to also call panic. We call
+ * assfail() instead of printf() as to give a dtrace probe.
+ */
+extern int assfail(const char *str, const char *file, unsigned int line);
+
+#if 1
+#define PRINT printf
+#else
+#define PRINT panic
+#endif
+
+#define ASSERT(cond)												\
+	(void)(unlikely(!(cond)) && assfail(#cond,__FILE__,__LINE__) &&	\
+		PRINT("%s %s %d : %s\n", __FILE__, __FUNCTION__, __LINE__,	\
+			"ASSERTION(" #cond ") failed\n"))
+
+#define ASSERT3_IMPL(LEFT, OP, RIGHT, TYPE, FMT, CAST)				\
+	do {															\
+		if (!((TYPE)(LEFT) OP (TYPE)(RIGHT)) &&						\
+			assfail(#LEFT #OP #RIGHT, __FILE__, __LINE__))			\
+			PRINT("%s %s %d : ASSERT3( %s " #OP " %s) "				\
+				"failed (" FMT " " #OP " " FMT ")\n",				\
+				__FILE__, __FUNCTION__, __LINE__,					\
+				#LEFT,	#RIGHT,										\
+				CAST (LEFT), CAST (RIGHT));							\
+	} while (0)
 
 
-/* ASSERTION that is safe to use within the debug system */
-#define __ASSERT(cond)							\
-do {									\
-	if (unlikely(!(cond))) {					\
-	    printk(KERN_EMERG "ASSERTION(" #cond ") failed\n");		\
-	    BUG();							\
-	}								\
-} while (0)
-
-/* ASSERTION that will debug log used outside the debug sysytem */
-#define ASSERT(cond)                                                    \
-	(void)(unlikely(!(cond)) &&											\
-		   printf("%s %s %d : %s\n", __FILE__, __FUNCTION__, __LINE__,	\
-					 "ASSERTION(" #cond ") failed\n"))
+#define ASSERTF(cond, fmt, a...)								\
+	do {														\
+		if (unlikely(!(cond)))									\
+			panic("ASSERTION(" #cond ") failed: " fmt, ## a);	\
+	} while (0)
 
 
+#define ASSERT3S(x,y,z)	ASSERT3_IMPL(x, y, z, int64_t, "%lld", (long long))
+#define ASSERT3U(x,y,z)	ASSERT3_IMPL(x, y, z, uint64_t, "%llu",	(unsigned long long))
 
-#define ASSERTF(cond, fmt, a...)					\
-do {									\
-	if (unlikely(!(cond)))						\
-		PANIC("ASSERTION(" #cond ") failed: " fmt, ## a);	\
-} while (0)
-
-#define VERIFY3_IMPL(LEFT, OP, RIGHT, TYPE, FMT, CAST)			\
-do {									\
-	if (!((TYPE)(LEFT) OP (TYPE)(RIGHT)))				\
-		PANIC("VERIFY3(" #LEFT " " #OP " " #RIGHT ") "		\
-		    "failed (" FMT " " #OP " " FMT ")\n",		\
-		    CAST (LEFT), CAST (RIGHT));				\
-} while (0)
-
-#define VERIFY3S(x,y,z)	VERIFY3_IMPL(x, y, z, int64_t, "%lld", (long long))
-#define VERIFY3U(x,y,z)	VERIFY3_IMPL(x, y, z, uint64_t, "%llu",		\
-				    (unsigned long long))
-#define VERIFY3P(x,y,z)	VERIFY3_IMPL(x, y, z, uintptr_t, "%p", (void *))
-#define VERIFY0(x)	VERIFY3_IMPL(0, ==, x, int64_t, "%lld", (long long))
-
-#define ASSERT3S(x,y,z)	VERIFY3S(x, y, z)
-#define ASSERT3U(x,y,z)	VERIFY3U(x, y, z)
-#define ASSERT3P(x,y,z)	VERIFY3P(x, y, z)
-#define ASSERT0(x)	VERIFY0(x)
-
+#define ASSERT3P(x,y,z)	ASSERT3_IMPL(x, y, z, uintptr_t, "%p", (void *))
+#define ASSERT0(x)	ASSERT3_IMPL(0, ==, x, int64_t, "%lld", (long long))
 #define ASSERTV(x)	x
-#define VERIFY(x)	ASSERT(x)
 
-#endif /* NDEBUG */
 
 /*
  * IMPLY and EQUIV are assertions of the form:
@@ -168,17 +168,20 @@ do {									\
  * and
  *      if (a) then (b) *AND* if (b) then (a)
  */
-#if DEBAG
-#define IMPLY(A, B) \
-        ((void)(((!(A)) || (B)) || \
-            panic("(" #A ") implies (" #B ")", __FILE__, __LINE__)))
-#define EQUIV(A, B) \
-        ((void)((!!(A) == !!(B)) || \
-            panic("(" #A ") is equivalent to (" #B ")", __FILE__, __LINE__)))
-#else
-#define IMPLY(A, B) ((void)0)
-#define EQUIV(A, B) ((void)0)
-#endif
+#define IMPLY(A, B)														\
+	((void)(((!(A)) || (B)) ||											\
+		printf("%s:%d (" #A ") implies (" #B "): failed\n",				\
+			__FILE__, __LINE__)))
+
+#define EQUIV(A, B)														\
+	((void)((!!(A) == !!(B)) ||											\
+		printf("%s:%d (" #A ") is equivalent to (" #B "): failed\n",	\
+			__FILE__, __LINE__)))
+
+
+
+#endif /* NDEBUG */
+
 
 
 /*
@@ -190,5 +193,9 @@ do {									\
 #define	__CTASSERT(x, y)			\
 	typedef char __attribute__ ((unused))	\
 	__compile_time_assertion__ ## y[(x) ? 1 : -1]
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SPL_DEBUG_H */

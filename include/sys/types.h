@@ -29,9 +29,8 @@
 #ifndef _SPL_TYPES_H
 #define	_SPL_TYPES_H
 
-// Linux kernel optimization, ignore them for now on OSX.
-#define unlikely
-#define likely
+#define likely(x)      __builtin_expect(!!(x), 1)
+#define unlikely(x)    __builtin_expect(!!(x), 0)
 
 #include_next <sys/types.h>
 #include <string.h>
