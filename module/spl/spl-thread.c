@@ -143,3 +143,11 @@ timeout_generic(int type, void (*func)(void *), void *arg,
 	 */
 	return (callout_id_t)arg;
 }
+
+extern void throttle_set_thread_io_policy(int priority);
+
+void
+spl_throttle_set_thread_io_policy(int priority)
+{
+	throttle_set_thread_io_policy(priority);
+}
