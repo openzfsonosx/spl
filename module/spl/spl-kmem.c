@@ -26,6 +26,7 @@
  * Copyright (C) 2014 Brendon Humphrey <brendon.humphrey@mac.com>
  * Copyright (C) 2017 Sean Doran <smd@use.net>
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright (c) 2012, 2017 by Delphix.  All rights reserved.
  *
  */
 
@@ -429,10 +430,10 @@ static struct {
 #endif	/* KMEM_STATS */
 
 /* consolidator knobs */
-static boolean_t kmem_move_noreap;
-static boolean_t kmem_move_blocked;
-static boolean_t kmem_move_fulltilt;
-static boolean_t kmem_move_any_partial;
+boolean_t kmem_move_noreap;
+boolean_t kmem_move_blocked;
+boolean_t kmem_move_fulltilt;
+boolean_t kmem_move_any_partial;
 
 #ifdef	DEBUG
 /*
