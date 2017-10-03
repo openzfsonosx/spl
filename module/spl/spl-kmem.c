@@ -442,8 +442,8 @@ boolean_t kmem_move_any_partial;
  * caches are not fragmented (they may never be). These intervals are mean time
  * in cache maintenance intervals (kmem_cache_update).
  */
-uint32_t kmem_mtb_move = 20;	/* defrag 1 slab (~15min) */ // smd: 60=15m, 20=5min
-uint32_t kmem_mtb_reap = 240;	/* defrag all slabs (~7.5hrs) */ // 1800=7.5h, 720=3h, 240=1h
+uint32_t kmem_mtb_move = 60;	/* defrag 1 slab (~15min) */ // smd: 60=15m, 20=5min
+uint32_t kmem_mtb_reap = 1800;	/* defrag all slabs (~7.5hrs) */ // 1800=7.5h, 720=3h, 240=1h
 uint32_t kmem_mtb_reap_count = 0; // how many times have we done an mtb reap?
 #endif	/* DEBUG */
 
@@ -1863,6 +1863,45 @@ kmem_depot_ws_reap(kmem_cache_t *cp)
 	}
 }
 
+/*
+ * Reap all magazines if possible
+ */
+
+static void
+kmem_depot_full_reap(kmem_cache_t *cp)
+{
+	size_t bytes = 0;
+	long reap;
+	kmem_magazine_t *mp;
+
+	ASSERT(!list_link_active(&cp->cache_link) ||
+		   taskq_member(kmem_taskq, curthread));
+
+	reap = MIN(cp->cache_full.ml_reaplimit, cp->cache_full.ml_total);
+	while (reap-- &&
+	    (mp = kmem_depot_alloc(cp, &cp->cache_full)) != NULL) {
+		kmem_magazine_destroy(cp, mp, cp->cache_magtype->mt_magsize);
+		bytes += cp->cache_magtype->mt_magsize * cp->cache_bufsize;
+		if (bytes > kmem_reap_preempt_bytes) {
+			kpreempt(KPREEMPT_SYNC);
+			bytes = 0;
+		}
+	}
+
+	reap = MIN(cp->cache_empty.ml_reaplimit, cp->cache_empty.ml_total);
+	while (reap-- &&
+	    (mp = kmem_depot_alloc(cp, &cp->cache_empty)) != NULL) {
+		kmem_magazine_destroy(cp, mp, 0);
+		bytes += cp->cache_magtype->mt_magsize * cp->cache_bufsize;
+		if (bytes > kmem_reap_preempt_bytes) {
+			kpreempt(KPREEMPT_SYNC);
+			bytes = 0;
+		}
+	}
+}
+
+
+
 static void
 kmem_cpu_reload(kmem_cpu_cache_t *ccp, kmem_magazine_t *mp, int rounds)
 {
@@ -2951,7 +2990,7 @@ kmem_cache_magazine_purge(kmem_cache_t *cp)
 	}
 
 	kmem_depot_ws_zero(cp);
-	kmem_depot_ws_reap(cp);
+	kmem_depot_full_reap(cp);
 }
 
 /*
@@ -2994,16 +3033,28 @@ kmem_cache_magazine_disable(kmem_cache_t *cp)
 /*
  * Reap (almost) everything right now.
  */
-void
-kmem_cache_reap_now(kmem_cache_t *cp)
+static void
+kmem_cache_impl_reap_now(kmem_cache_t *cp, void (*func)(kmem_cache_t *))
 {
 	ASSERT(list_link_active(&cp->cache_link));
 
 	kmem_depot_ws_zero(cp);
 
 	(void) taskq_dispatch(kmem_taskq,
-						  (task_func_t *)kmem_depot_ws_reap, cp, TQ_SLEEP);
+						  (task_func_t *)func, cp, TQ_SLEEP);
 	taskq_wait(kmem_taskq);
+}
+
+void
+kmem_cache_ws_reap_now(kmem_cache_t *cp)
+{
+	kmem_cache_impl_reap_now(cp, kmem_depot_ws_reap);
+}
+
+void
+kmem_cache_full_reap_now(kmem_cache_t *cp)
+{
+	kmem_cache_impl_reap_now(cp, kmem_depot_full_reap);
 }
 
 /*
@@ -3280,7 +3331,10 @@ kmem_cache_kstat_update(kstat_t *ksp, int rw)
 		kmcp->kmc_move_slabs_freed.value.ui64	= 0;
 		kmcp->kmc_defrag.value.ui64		= 0;
 		kmcp->kmc_scan.value.ui64		= 0;
-		kmcp->kmc_move_reclaimable.value.ui64	= 0;
+
+		/* it's really "reapable" here */
+                uint64_t reclaimable = ((uint64_t)reap * cp->cache_magtype->mt_magsize);
+                kmcp->kmc_move_reclaimable.value.ui64   = reclaimable;
 	} else {
 		int64_t reclaimable;
 
