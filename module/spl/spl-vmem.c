@@ -3268,7 +3268,7 @@ vmem_init(const char *heap_name,
 		char *buf = vmem_alloc(spl_default_arena, VMEM_NAMELEN + 21, VM_SLEEP);
 		(void) snprintf(buf, VMEM_NAMELEN + 20, "%s_%llu",
 		    "bucket", bucket_largest_size);
-		printf("SPL: %s creating arena %s (i == %d)\n", __func__, buf, i);
+		dprintf("SPL: %s creating arena %s (i == %d)\n", __func__, buf, i);
 		switch (i) {
 		case 15:
 		case 16:
@@ -3328,7 +3328,7 @@ vmem_init(const char *heap_name,
 			    bucket_largest_size * 4);
 			break;
 		}
-		printf("SPL: %s setting bucket %d (%d) to size %llu\n",
+		dprintf("SPL: %s setting bucket %d (%d) to size %llu\n",
 		    __func__, i, (int)(1 << i), (uint64_t)minimum_allocsize);
 		const int bucket_number = i - VMEM_BUCKET_LOWBIT;
 		vmem_t *b = vmem_create(buf, NULL, 0, heap_quantum,

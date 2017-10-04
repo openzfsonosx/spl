@@ -3,7 +3,7 @@
 
 #include <sys/time.h>
 
-#define    hz   119  /* frequency when using gethrtime() >> 23 for lbolt */
+#define    hz   10  /* frequency when using gethrtime() >> 23 for lbolt */
 
 typedef enum {
         CV_DEFAULT,

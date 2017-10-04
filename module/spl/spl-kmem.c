@@ -329,7 +329,7 @@ size_t	kmem_max_cached = KMEM_BIG_MAXBUF;	/* maximum kmem_alloc cache */
 // can be 0 or KMF_LITE
 // or KMF_DEADBEEF | KMF_REDZONE | KMF_CONTENTS
 // with or without KMF_AUDIT
-int kmem_flags = KMF_DEADBEEF | KMF_REDZONE;
+int kmem_flags = KMF_DEADBEEF | KMF_REDZONE | KMF_LITE;
 #else
 int kmem_flags = 0;
 #endif
@@ -5002,7 +5002,7 @@ spl_kmem_init(uint64_t xtotal_memory)
 	int use_large_pages = 0;
 	size_t maxverify, minfirewall;
 
-	printf("SPL: Total memory %llu\n", xtotal_memory);
+	printf("SPL: KMEM starting. Total memory %llu\n", xtotal_memory);
 
 	sysctl_register_oid(&sysctl__spl);
 	sysctl_register_oid(&sysctl__spl_kext_version);
