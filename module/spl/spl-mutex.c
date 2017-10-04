@@ -195,7 +195,7 @@ void spl_mutex_subsystem_fini(void)
 	mutex_exit(&mutex_list_mutex);
 	printf("Dumped %llu leaked allocations. Wait for watchdog to exit..\n", total);
 
-	while(wdlist_exit != 2) delay(hz>>4);
+	while(wdlist_exit != 2) delay(2);
 
 	lck_mtx_destroy((lck_mtx_t *)&mutex_list_mutex.m_lock, zfs_mutex_group);
 	list_destroy(&mutex_list);
