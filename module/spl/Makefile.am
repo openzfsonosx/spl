@@ -8,6 +8,7 @@ SUBDIRS = KernelExports
 CFLAGS_KMOD = \
 	${AM_CFLAGS} \
 	-Wall \
+	-Wframe-larger-than=1024 \
 	-nostdinc \
 	-mkernel \
 	-fno-builtin-printf \
