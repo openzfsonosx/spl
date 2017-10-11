@@ -308,4 +308,6 @@ extern void spl_setrootvnode(struct vnode *vp);
 struct vnode *getrootdir(void);
 void spl_vfs_start(void);
 
+extern int spl_UBCINFOEXISTS(const struct vnode *vp);
+
 #endif /* SPL_VNODE_H */

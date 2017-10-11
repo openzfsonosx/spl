@@ -602,3 +602,10 @@ getrootdir(void)
 		vnode_put(rvnode);
 	return rvnode;
 }
+
+extern int UBCINFOEXISTS(const struct vnode * vp);
+int
+spl_UBCINFOEXISTS(const struct vnode *vp)
+{
+	return(UBCINFOEXISTS(vp));
+}
