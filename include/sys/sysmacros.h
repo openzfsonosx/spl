@@ -193,6 +193,32 @@ extern void spl_cleanup(void);
 #define P2BOUNDARY(off, len, align) \
 				(((off) ^ ((off) + (len) - 1)) > (align) - 1)
 
+// from osfmk/mach/i386/vm_param.h
+#define I386_PGBYTES            4096            /* bytes per 80386 page */
+#define I386_PGSHIFT            12              /* bitshift for pages */
+
+#define PAGE_SIZE               I386_PGBYTES
+#define PAGE_SHIFT              I386_PGSHIFT
+#define PAGE_MASK               (PAGE_SIZE - 1)
+
+// from osfmk/mach/vm_param.h
+#define PAGE_MAX_SHIFT          PAGE_SHIFT
+#define PAGE_MAX_SIZE           PAGE_SIZE
+#define PAGE_MAX_MASK           PAGE_MASK
+
+#define PAGE_SIZE_64 (unsigned long long)PAGE_SIZE              /* pagesize in addr units */
+#define PAGE_MASK_64 (unsigned long long)PAGE_MASK              /* mask for off in page */
+/*
+ *      Convert addresses to pages and vice versa.  No rounding is used.
+ *      The atop_32 and ptoa_32 macros should not be use on 64 bit types.
+ *      The round_page_64 and trunc_page_64 macros should be used instead.
+ */
+
+#define atop_32(x) ((uint32_t)(x) >> PAGE_SHIFT)
+#define ptoa_32(x) ((uint32_t)(x) << PAGE_SHIFT)
+#define atop_64(x) ((uint64_t)(x) >> PAGE_SHIFT)
+#define ptoa_64(x) ((uint64_t)(x) << PAGE_SHIFT)
+
 /*
  * Typed version of the P2* macros.  These macros should be used to ensure
  * that the result is correctly calculated based on the data type of (x),
