@@ -115,12 +115,15 @@ typedef uint_t				minor_t;
 //#define       FASYNC          O_SYNC
 #define FNOFOLLOW       O_NOFOLLOW
 
-#define FSYNC           0x10    /* file (data+inode) integrity while writing */
-#define FDSYNC          0x40    /* file data only integrity while writing */
+#ifdef __APPLE__
+#define FSYNC           O_SYNC  /* file (data+inode) integrity while writing */
+#define FDSYNC          O_DSYNC /* file data only integrity while writing */
+#else
 #define FRSYNC          0x8000  /* sync read operations at same level of */
                                 /* integrity as specified for writes by */
                                 /* FSYNC and FDSYNC flags */
 #define FOFFMAX         0x2000  /* large file */
+#endif
 
 #define EXPORT_SYMBOL(X)
 #define module_param(X,Y,Z)
