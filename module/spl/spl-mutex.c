@@ -229,6 +229,8 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 	atomic_inc_64(&zfs_active_mutex);
 
 #ifdef SPL_DEBUG_MUTEX
+	ASSERT3P(file, !=, NULL);
+	ASSERT3P(fn, !=, NULL);
 	//if (!mp->m_lock) panic("[SPL] Unable to allocate MUTEX\n");
 
 	struct leak *leak;
