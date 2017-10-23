@@ -75,11 +75,11 @@ extern volatile unsigned int vm_page_free_count; // will tend to vm_page_free_mi
 static kcondvar_t spl_free_thread_cv;
 static kmutex_t spl_free_thread_lock;
 static boolean_t spl_free_thread_exit;
-static volatile _Atomic int64_t spl_free;
+static _Atomic int64_t spl_free;
 int64_t spl_free_delta_ema;
 
-static volatile _Atomic int64_t spl_free_manual_pressure = 0;
-static volatile _Atomic boolean_t spl_free_fast_pressure = FALSE;
+static _Atomic int64_t spl_free_manual_pressure = 0;
+static _Atomic boolean_t spl_free_fast_pressure = FALSE;
 static _Atomic bool spl_free_maybe_reap_flag = false;
 static _Atomic uint64_t spl_free_last_pressure = 0;
 
@@ -4461,7 +4461,7 @@ spl_free_maybe_reap(void)
 boolean_t
 spl_maybe_send_large_pressure(uint64_t now, uint64_t minutes, boolean_t full)
 {
-	static volatile _Atomic uint64_t  spl_last_large_pressure = 0;
+	static _Atomic uint64_t  spl_last_large_pressure = 0;
 	const uint64_t interval_ticks = minutes * 60ULL * (uint64_t)hz;
 
 	if (spl_last_large_pressure + interval_ticks > now)
@@ -4914,7 +4914,7 @@ spl_free_thread()
 		// spl_free_lock is held.
 
 		if (spl_free_is_negative) {
-			static volatile _Atomic uint32_t negatives_since_last_kick = 0;
+			static _Atomic uint32_t negatives_since_last_kick = 0;
 
 			if (negatives_since_last_kick++ > 8) {
 				if (spl_maybe_send_large_pressure(time_now, 360, true) ||

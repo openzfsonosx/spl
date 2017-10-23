@@ -1273,7 +1273,7 @@ spl_vmem_xnu_useful_bytes_free(void)
 {
 	extern volatile unsigned int vm_page_free_wanted;
 	extern volatile unsigned int vm_page_free_count;
-	extern volatile unsigned int vm_page_free_min;
+	extern unsigned int vm_page_free_min; // rarely changes
 
 	if (vm_page_free_wanted > 0)
 		return (0);
@@ -2366,9 +2366,9 @@ xnu_alloc_throttled_bail(uint64_t now_ticks, vmem_t *calling_vmp, size_t size, i
 
 	const uint64_t bigtarget = MAX(size,16ULL*1024ULL*1024ULL);
 
-	static volatile _Atomic bool alloc_lock = false;
+	static _Atomic bool alloc_lock = false;
 
-	static volatile _Atomic uint64_t force_time = 0;
+	static _Atomic uint64_t force_time = 0;
 
 	uint64_t timeout_ticks = hz / 2;
 	if (vmflags & VM_PUSHPAGE)
@@ -2512,7 +2512,7 @@ xnu_alloc_throttled(vmem_t *bvmp, size_t size, int vmflag)
 
 	const uint32_t bucket_number = vmem_bucket_id_to_bucket_number[bvmp->vm_id];
 
-	static volatile _Atomic uint32_t waiters = 0;
+	static _Atomic uint32_t waiters = 0;
 
 	waiters++;
 
@@ -2623,10 +2623,10 @@ xnu_free_throttled(vmem_t *vmp, void *vaddr, size_t size)
 	// a_waiters gauges the loop exit checking and sleep duration;
 	// it is a count of the number of threads trying to do work
 	// in this function.
-	static volatile _Atomic uint32_t a_waiters = 0;
+	static _Atomic uint32_t a_waiters = 0;
 
 	// is_freeing protects the osif_free() call; see comment below
-	static volatile _Atomic bool is_freeing = false;
+	static _Atomic bool is_freeing = false;
 
 	a_waiters++; // generates "lock incl ..."
 
@@ -2670,7 +2670,7 @@ xnu_free_throttled(vmem_t *vmp, void *vaddr, size_t size)
 
 // return 0 if the bit was unset before the atomic OR.
 static inline bool
-vba_atomic_lock_bucket(volatile _Atomic uint16_t *bbap, uint16_t bucket_bit)
+vba_atomic_lock_bucket(_Atomic uint16_t *bbap, uint16_t bucket_bit)
 {
 
 	// We use a test-and-set of the appropriate bit
@@ -2700,7 +2700,7 @@ vmem_bucket_alloc(vmem_t *null_vmp, size_t size, const int vmflags)
 
 	vmem_t *calling_arena = spl_heap_arena;
 
-	static volatile _Atomic uint32_t hipriority_allocators = 0;
+	static _Atomic uint32_t hipriority_allocators = 0;
 	boolean_t local_hipriority_allocator = false;
 
 	if (0 != (vmflags & (VM_PUSHPAGE | VM_NOSLEEP | VM_PANIC | VM_ABORT))) {
@@ -2717,13 +2717,13 @@ vmem_bucket_alloc(vmem_t *null_vmp, size_t size, const int vmflags)
 	// a set of bits, where each bit corresponds to an in-progress
 	// vmem_alloc(bucket, ...) below.
 
-	static volatile _Atomic uint16_t buckets_busy_allocating = 0;
+	static _Atomic uint16_t buckets_busy_allocating = 0;
 	const uint16_t bucket_number = vmem_bucket_number(size);
 	const uint16_t bucket_bit = (uint16_t)1 << bucket_number;
 
 	spl_vba_threads[bucket_number]++;
 
-	static volatile _Atomic uint32_t waiters = 0;
+	static _Atomic uint32_t waiters = 0;
 
 	// First, if we are VM_SLEEP, check for memory, try some pressure,
 	// and if that doesn't work, force entry into the loop below.
