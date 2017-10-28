@@ -259,9 +259,29 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 
 void spl_mutex_destroy(kmutex_t *mp)
 {
+	ASSERT3P(mp, !=, NULL);
     if (!mp) return;
 
+#ifndef SPL_DEBUG_MUTEX
 	if (mp->m_owner != 0) panic("SPL: releasing held mutex");
+#else
+	if (mp->m_owner != NULL) {
+		lck_mtx_lock((lck_mtx_t *)&mutex_list_mutex.m_lock);
+		struct leak *l;
+		for (l = list_head(&mutex_list); l;
+		     l = list_next(&mutex_list, l)) {
+			if (mp->m_owner == NULL) {
+				panic("SPL: releasing held mutex, m_owner became NULL while searching");
+			}
+			if (l->mp == mp) {
+				panic("SPL: releasing held mutex, holder '%s':%llu",
+				    l->wdlist_file, l->wdlist_line);
+			}
+		}
+		panic("SPL: releasing held mutex, could not find holder");
+		lck_mtx_unlock((lck_mtx_t *)&mutex_list_mutex.m_lock);
+	}
+#endif
 
     //lck_mtx_free(mp->m_lock, zfs_mutex_group);
 	lck_mtx_destroy((lck_mtx_t *)&mp->m_lock, zfs_mutex_group);
