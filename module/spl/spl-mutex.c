@@ -265,21 +265,31 @@ void spl_mutex_destroy(kmutex_t *mp)
 #ifndef SPL_DEBUG_MUTEX
 	if (mp->m_owner != 0) panic("SPL: releasing held mutex");
 #else
-	if (mp->m_owner != NULL) {
+	const kmutex_t *c_mp = mp;
+	const thread_t *c_mo = mp->m_owner;
+        if (c_mp->m_owner != NULL) {
+		ASSERT3P(c_mo, ==, c_mp->m_owner);
 		lck_mtx_lock((lck_mtx_t *)&mutex_list_mutex.m_lock);
+		ASSERT3P(c_mo, ==, c_mp->m_owner);
+		boolean_t went_null = B_FALSE;
 		struct leak *l;
 		for (l = list_head(&mutex_list); l;
 		     l = list_next(&mutex_list, l)) {
-			if (mp->m_owner == NULL) {
-				panic("SPL: releasing held mutex, m_owner became NULL while searching");
+			if (c_mp->m_owner == NULL) {
+				printf("SPL: (race) m_owner went null during scan\n");
+				went_null = B_TRUE;
 			}
-			if (l->mp == mp) {
+			if (l->mp == c_mp) {
 				panic("SPL: releasing held mutex, holder '%s':%llu",
 				    l->wdlist_file, l->wdlist_line);
 			}
 		}
-		panic("SPL: releasing held mutex, could not find holder");
-		lck_mtx_unlock((lck_mtx_t *)&mutex_list_mutex.m_lock);
+		lck_mtx_unlock((lck_mtx_t *)&mutex_list_mutex.m_lock); // avoid double panic?
+		if (went_null == B_TRUE) {
+			panic("SPL: (race) m_owner went NULL during scan, no caller found\n");
+		} else {
+			panic("SPL: releasing held mutex, could not find holder");
+		}
 	}
 #endif
 
