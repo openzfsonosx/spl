@@ -275,11 +275,15 @@ void spl_mutex_destroy(kmutex_t *mp)
 		struct leak *l;
 		for (l = list_head(&mutex_list); l;
 		     l = list_next(&mutex_list, l)) {
-			if (c_mp->m_owner == NULL) {
+			if (c_mp->m_owner == NULL && went_null == B_FALSE) {
 				printf("SPL: (race) m_owner went null during scan\n");
 				went_null = B_TRUE;
 			}
 			if (l->mp == c_mp) {
+				printf("SPL: %s releasing held mutex, holder '%s':%llu",
+				    __func__, l->wdlist_file, l->wdlist_line);
+				extern void IODelay(unsigned microseconds);
+				delay(1000000);
 				panic("SPL: releasing held mutex, holder '%s':%llu",
 				    l->wdlist_file, l->wdlist_line);
 			}
