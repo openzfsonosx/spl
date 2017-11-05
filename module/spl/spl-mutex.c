@@ -272,23 +272,44 @@ void spl_mutex_destroy(kmutex_t *mp)
 	const thread_t *c_mo = mp->m_owner;
         if (c_mp->m_owner != NULL) {
 		ASSERT3P(c_mo, ==, c_mp->m_owner);
+		printf("SPL: %s releasing held mutex, searching", __func__);
 		lck_mtx_lock((lck_mtx_t *)&mutex_list_mutex.m_lock);
+		printf("SPL: %s scanning %llu locks\n", __func__, zfs_active_mutex);
 		ASSERT3P(c_mo, ==, c_mp->m_owner);
 		boolean_t went_null = B_FALSE;
+		uint64_t noe = gethrestime_sec();
+		uint64_t step = 0;
 		struct leak *l;
-		for (l = list_head(&mutex_list); l;
+		for (l = list_head(&mutex_list); l != NULL;
 		     l = list_next(&mutex_list, l)) {
-			if (c_mp->m_owner == NULL && went_null == B_FALSE) {
-				printf("SPL: (race) m_owner went null during scan\n");
-				went_null = B_TRUE;
-			}
+			step++;
 			if (l->mp == c_mp) {
 				printf("SPL: %s releasing held mutex, holder '%s':%llu",
 				    __func__, l->wdlist_file, l->wdlist_line);
+				lck_mtx_unlock((lck_mtx_t *)&mutex_list_mutex.m_lock);
 				extern void IODelay(unsigned microseconds);
 				delay(1000000);
 				panic("SPL: releasing held mutex, holder '%s':%llu",
 				    l->wdlist_file, l->wdlist_line);
+			}
+			if (l == list_tail(&mutex_list)) {
+				printf("SPL: (crashing) %s hit tail after %llu steps\n", __func__, step);
+				break;
+			}
+			if (step > zfs_active_mutex) {
+				printf("SPL: (crashing) %s more steps than active mutexes (step %llu)\n",
+				    __func__, step);
+				break;
+			}
+			if (c_mp->m_owner == NULL && went_null == B_FALSE) {
+				printf("SPL: (race) m_owner went null during scan\n");
+				went_null = B_TRUE;
+			}
+			uint64_t locktime = l->wdlist_locktime;
+			if ((locktime > 0) && (noe > locktime) &&
+			    noe - locktime >= SPL_MUTEX_WATCHDOG_TIMEOUT) {
+				printf("SPL: (crashing) mutex held for %llus by '%s':%llu\n",
+				    noe - l->wdlist_locktime, l->wdlist_file, l->wdlist_line);
 			}
 		}
 		lck_mtx_unlock((lck_mtx_t *)&mutex_list_mutex.m_lock); // avoid double panic?
@@ -390,6 +411,10 @@ int spl_mutex_tryenter(kmutex_t *mp)
 {
     int held;
 
+#ifdef SPL_DEBUG_MUTEX
+    VERIFY3S(mp->m_destroying, !=, B_TRUE);
+#endif
+
     if (mp->m_owner == current_thread())
         panic("mutex_tryenter: locking against myself!");
 
@@ -412,6 +437,9 @@ int spl_mutex_tryenter(kmutex_t *mp)
 
 int spl_mutex_owned(kmutex_t *mp)
 {
+#ifdef SPL_DEBUG_MUTEX
+	VERIFY3S(mp->m_destroying, !=, B_TRUE);
+#endif
     return (mp->m_owner == current_thread());
 }
 

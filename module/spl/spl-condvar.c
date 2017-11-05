@@ -68,12 +68,14 @@ spl_cv_wait(kcondvar_t *cvp, kmutex_t *mp, int flags, const char *msg)
         ++msg;  /* skip over '&' prefixes */
 
 #ifdef SPL_DEBUG_MUTEX
+    VERIFY3S(mp->m_destroying, !=, B_TRUE);
 	spl_wdlist_settime(mp->leak, 0);
 #endif
 	mp->m_owner = NULL;
     (void) msleep(cvp, (lck_mtx_t *)&mp->m_lock, flags, msg, 0);
     mp->m_owner = current_thread();
 #ifdef SPL_DEBUG_MUTEX
+    VERIFY3S(mp->m_destroying, !=, B_TRUE);
 	spl_wdlist_settime(mp->leak, gethrestime_sec());
 #endif
 }
@@ -113,12 +115,14 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, int flags,
 		ts.tv_sec = 5;
 	}
 #ifdef SPL_DEBUG_MUTEX
+    VERIFY3S(mp->m_destroying, !=, B_TRUE);
 	spl_wdlist_settime(mp->leak, 0);
 #endif
     mp->m_owner = NULL;
     result = msleep(cvp, (lck_mtx_t *)&mp->m_lock, flags, msg, &ts);
     mp->m_owner = current_thread();
 #ifdef SPL_DEBUG_MUTEX
+    VERIFY3S(mp->m_destroying, !=, B_TRUE);
 	spl_wdlist_settime(mp->leak, gethrestime_sec());
 #endif
     return (result == EWOULDBLOCK ? -1 : 0);
@@ -166,12 +170,14 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
 	}
 
 #ifdef SPL_DEBUG_MUTEX
+    VERIFY3S(mp->m_destroying, !=, B_TRUE);
 	spl_wdlist_settime(mp->leak, 0);
 #endif
     mp->m_owner = NULL;
     result = msleep(cvp, (lck_mtx_t *)&mp->m_lock, PRIBIO, "cv_timedwait_hires", &ts);
     mp->m_owner = current_thread();
 #ifdef SPL_DEBUG_MUTEX
+    VERIFY3S(mp->m_destroying, !=, B_TRUE);
 	spl_wdlist_settime(mp->leak, gethrestime_sec());
 #endif
 
