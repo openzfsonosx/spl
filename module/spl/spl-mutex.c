@@ -225,6 +225,9 @@ void spl_mutex_init(kmutex_t *mp, char *name, kmutex_type_t type, void *ibc)
 	lck_mtx_init((lck_mtx_t *)&mp->m_lock, zfs_mutex_group, zfs_lock_attr);
     //mp->m_lock = lck_mtx_alloc_init(zfs_mutex_group, zfs_lock_attr);
     mp->m_owner = NULL;
+#ifdef SPL_DEBUG_MUTEX
+    mp->m_destroying = B_FALSE;
+#endif
 
 	atomic_inc_64(&zfs_active_mutex);
 
@@ -261,10 +264,10 @@ void spl_mutex_destroy(kmutex_t *mp)
 {
 	ASSERT3P(mp, !=, NULL);
     if (!mp) return;
-
 #ifndef SPL_DEBUG_MUTEX
 	if (mp->m_owner != 0) panic("SPL: releasing held mutex");
 #else
+	mp->m_destroying = B_TRUE;
 	const kmutex_t *c_mp = mp;
 	const thread_t *c_mo = mp->m_owner;
         if (c_mp->m_owner != NULL) {
@@ -322,6 +325,10 @@ void spl_mutex_enter(kmutex_t *mp, char *file, int line)
 void spl_mutex_enter(kmutex_t *mp)
 #endif
 {
+#ifdef SPL_DEBUG_MUTEX
+	VERIFY3S(mp->m_destroying, !=, B_TRUE);
+#endif
+
     if (mp->m_owner == current_thread())
         panic("mutex_enter: locking against myself!");
 
@@ -347,6 +354,11 @@ void spl_mutex_enter(kmutex_t *mp)
 
 void spl_mutex_exit(kmutex_t *mp)
 {
+
+#ifdef SPL_DEBUG_MUTEX
+	VERIFY3S(mp->m_destroying, !=, B_TRUE);
+#endif
+
 #ifdef DEBUG
 	if (*((uint64_t *)mp) == 0xdeadbeefdeadbeef) {
 		panic("SPL: mutex_exit");

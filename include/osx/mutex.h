@@ -48,9 +48,9 @@ typedef struct {
 typedef struct kmutex {
     void           *m_owner;
 	mutex_t m_lock;
-
 #ifdef SPL_DEBUG_MUTEX
 	void *leak;
+	_Atomic boolean_t m_destroying;
 #endif
 
 } kmutex_t;
