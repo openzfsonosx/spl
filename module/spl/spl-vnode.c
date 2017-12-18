@@ -602,3 +602,73 @@ getrootdir(void)
 		vnode_put(rvnode);
 	return rvnode;
 }
+
+
+/*
+ * It is undesirable to shadow kernel structure here, but since the
+ * alloc calls decmpfs_cnode_alloc() and decmpfs_cnode_free() were not
+ * added until 10.12, we simplify the "zfs.export" files but doing this.
+ * Once we drop 10.11 support, we should change to calling those functions.
+ */
+#include <AvailabilityMacros.h>
+//#if (MAC_OS_X_VERSION_MIN_REQUIRED <= 1011)
+typedef struct decmpfs_cnode {
+    uint8_t cmp_state;
+    uint8_t cmp_minimal_xattr;       /* if non-zero, this file's com.apple.decmpfs xattr contained only the minimal decmpfs_disk_header */
+    uint32_t cmp_type;
+    uint32_t lockcount;
+    void    *lockowner;              /* cnode's lock owner (if a thread is currently holding an exclusive lock) */
+    uint64_t uncompressed_size __attribute__((aligned(8)));
+    uint64_t decompression_flags;
+    /*lck_rw_t compressed_data_lock;*/
+    uint32_t compressed_data_lock[4];
+} decmpfs_cnode;
+//#endif
+
+//struct decmpfs_cnode *decmpfs_cnode_alloc(void);
+struct decmpfs_cnode *spl_decmpfs_cnode_alloc(void)
+{
+//#if (MAC_OS_X_VERSION_MIN_REQUIRED <= 1011)
+	struct decmpfs_cnode *dp;
+	dp = kmem_alloc(sizeof(struct decmpfs_cnode), KM_SLEEP);
+	return dp;
+//#else
+//	return decmpfs_cnode_alloc();
+//#endif
+}
+
+//void decmpfs_cnode_free(struct decmpfs_cnode *dp);
+void spl_decmpfs_cnode_free(struct decmpfs_cnode *dp)
+{
+//#if (MAC_OS_X_VERSION_MIN_REQUIRED <= 1011)
+	kmem_free(dp, sizeof(struct decmpfs_cnode));
+//#else
+//	decmpfs_cnode_free(dp);
+//#endif
+}
+
+int decmpfs_decompress_file(struct vnode *vp, struct decmpfs_cnode *cp,
+	off_t toSize, int truncate_okay, int skiplock);
+int spl_decmpfs_decompress_file(struct vnode *vp, struct decmpfs_cnode *cp,
+	off_t toSize, int truncate_okay, int skiplock)
+{
+	return decmpfs_decompress_file(vp, cp, toSize, truncate_okay, skiplock);
+}
+
+int decmpfs_file_is_compressed(struct vnode *vp, struct decmpfs_cnode *cp);
+int spl_decmpfs_file_is_compressed(struct vnode *vp, struct decmpfs_cnode *cp)
+{
+	return decmpfs_file_is_compressed(vp, cp);
+}
+
+void decmpfs_cnode_init(struct decmpfs_cnode *cp);
+void spl_decmpfs_cnode_init(struct decmpfs_cnode *cp)
+{
+	decmpfs_cnode_init(cp);
+}
+
+void decmpfs_cnode_destroy(struct decmpfs_cnode *cp);
+void spl_decmpfs_cnode_destroy(struct decmpfs_cnode *cp)
+{
+	decmpfs_cnode_destroy(cp);
+}
