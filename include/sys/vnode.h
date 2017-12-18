@@ -310,4 +310,12 @@ void spl_vfs_start(void);
 
 extern int spl_UBCINFOEXISTS(const struct vnode *vp);
 
+struct decmpfs_cnode *spl_decmpfs_cnode_alloc(void);
+void spl_decmpfs_cnode_free(struct decmpfs_cnode *dp);
+int spl_decmpfs_decompress_file(struct vnode *vp, struct decmpfs_cnode *cp, off_t toSize, int truncate_okay, int skiplock);
+int spl_decmpfs_file_is_compressed(struct vnode *vp, struct decmpfs_cnode *cp);
+void spl_decmpfs_cnode_init(struct decmpfs_cnode *cp);
+void spl_decmpfs_cnode_destroy(struct decmpfs_cnode *cp);
+
+
 #endif /* SPL_VNODE_H */

@@ -609,3 +609,41 @@ spl_UBCINFOEXISTS(const struct vnode *vp)
 {
 	return(UBCINFOEXISTS(vp));
 }
+
+struct decmpfs_cnode *decmpfs_cnode_alloc(void);
+struct decmpfs_cnode *spl_decmpfs_cnode_alloc(void)
+{
+	return decmpfs_cnode_alloc();
+}
+
+void decmpfs_cnode_free(struct decmpfs_cnode *dp);
+void spl_decmpfs_cnode_free(struct decmpfs_cnode *dp)
+{
+	decmpfs_cnode_free(dp);
+}
+
+int decmpfs_decompress_file(struct vnode *vp, struct decmpfs_cnode *cp,
+	off_t toSize, int truncate_okay, int skiplock);
+int spl_decmpfs_decompress_file(struct vnode *vp, struct decmpfs_cnode *cp,
+	off_t toSize, int truncate_okay, int skiplock)
+{
+	return decmpfs_decompress_file(vp, cp, toSize, truncate_okay, skiplock);
+}
+
+int decmpfs_file_is_compressed(struct vnode *vp, struct decmpfs_cnode *cp);
+int spl_decmpfs_file_is_compressed(struct vnode *vp, struct decmpfs_cnode *cp)
+{
+	return decmpfs_file_is_compressed(vp, cp);
+}
+
+void decmpfs_cnode_init(struct decmpfs_cnode *cp);
+void spl_decmpfs_cnode_init(struct decmpfs_cnode *cp)
+{
+	decmpfs_cnode_init(cp);
+}
+
+void decmpfs_cnode_destroy(struct decmpfs_cnode *cp);
+void spl_decmpfs_cnode_destroy(struct decmpfs_cnode *cp)
+{
+	decmpfs_cnode_destroy(cp);
+}
