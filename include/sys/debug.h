@@ -82,6 +82,8 @@ extern void panic(const char *string, ...);
 				CAST (LEFT), CAST (RIGHT));								\
 	} while (0)
 
+
+#define VERIFY3B(x,y,z)	VERIFY3_IMPL(x, y, z, int64_t, "%u", (boolean_t))
 #define VERIFY3S(x,y,z)	VERIFY3_IMPL(x, y, z, int64_t, "%lld", (long long))
 #define VERIFY3U(x,y,z)	VERIFY3_IMPL(x, y, z, uint64_t, "%llu",	\
 		(unsigned long long))
@@ -95,6 +97,7 @@ extern void panic(const char *string, ...);
 /* Define SPL_DEBUG_STR to make clear which ASSERT definitions are used */
 #define SPL_DEBUG_STR	""
 
+#define ASSERT3B(x,y,z)	((void)0)
 #define ASSERT3S(x,y,z)	((void)0)
 #define ASSERT3U(x,y,z)	((void)0)
 #define ASSERT3P(x,y,z)	((void)0)
@@ -153,6 +156,7 @@ extern int assfail(const char *str, const char *file, unsigned int line);
 	} while (0)
 
 
+#define ASSERT3B(x,y,z)	ASSERT3_IMPL(x, y, z, int64_t, "%u", (boolean_t))
 #define ASSERT3S(x,y,z)	ASSERT3_IMPL(x, y, z, int64_t, "%lld", (long long))
 #define ASSERT3U(x,y,z)	ASSERT3_IMPL(x, y, z, uint64_t, "%llu",	(unsigned long long))
 

@@ -135,6 +135,7 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
 {
     struct timespec ts;
     int result;
+	hrtime_t time_left;
 
     if (res > 1) {
         /*
@@ -145,10 +146,12 @@ cv_timedwait_hires(kcondvar_t *cvp, kmutex_t *mp, hrtime_t tim,
         tim = (tim / res) * res;
     }
 
-	/*
-    if (!(flag & CALLOUT_FLAG_ABSOLUTE))
-        tim += gethrtime();
-	*/
+    if ((flag & CALLOUT_FLAG_ABSOLUTE)) {
+		time_left = tim - gethrtime();
+		if (time_left <= 0)
+			return (-1);
+		tim = time_left;
+	}
 
     ts.tv_sec = 0;
     ts.tv_nsec = tim;
