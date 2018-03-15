@@ -315,7 +315,6 @@ extern "C" {
 		uint64_t		kmd_later;			/* LATER responses */
 		uint64_t		kmd_dont_need;		/* DONT_NEED responses */
 		uint64_t		kmd_dont_know;		/* DONT_KNOW responses */
-		uint64_t		kmd_hunt_found;		/* DONT_KNOW: # found in mag */
 		uint64_t		kmd_slabs_freed;	/* slabs freed by moves */
 		uint64_t		kmd_defrags;		/* kmem_cache_defrag() */
 		uint64_t		kmd_scans;			/* kmem_cache_scan() */
