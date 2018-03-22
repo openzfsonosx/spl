@@ -75,11 +75,13 @@ extern void panic(const char *string, ...);
 
 #define VERIFY3_IMPL(LEFT, OP, RIGHT, TYPE, FMT, CAST)					\
 	do {																\
-		if (!((TYPE)(LEFT) OP (TYPE)(RIGHT)))							\
+		TYPE _verify3_left = (TYPE)(LEFT);								\
+		TYPE _verify3_right = (TYPE)(RIGHT);							\
+		if (!(_verify3_left OP _verify3_right))							\
 			PANIC("VERIFY3( %s " #OP " %s ) "							\
 				"failed (" FMT " " #OP " " FMT ")\n",					\
 				#LEFT, #RIGHT,											\
-				CAST (LEFT), CAST (RIGHT));								\
+				CAST (_verify3_left), CAST (_verify3_right));			\
 	} while (0)
 
 
