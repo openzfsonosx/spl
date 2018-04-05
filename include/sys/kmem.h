@@ -24,6 +24,7 @@
  * Copyright (C) 2008 MacZFS Project
  * Copyright (C) 2013 Jorgen Lundman <lundman@lundman.net>
  * Copyright (C) 2017 Sean Doran <smd@use.net>
+ * Copyright (c) 2018, Joyent, Inc.
  *
  */
 
@@ -125,7 +126,8 @@ extern uint64_t physmem;
     void *kmem_cache_alloc(kmem_cache_t *cache, int flags);
     void kmem_cache_free(kmem_cache_t *cache, void *buf);
     void kmem_cache_free_to_slab(kmem_cache_t *cache, void *buf);
-    void kmem_cache_reap_now(kmem_cache_t *cache);
+	boolean_t kmem_cache_reap_active(void);
+	void kmem_cache_reap_soon(kmem_cache_t *);
 	void kmem_depot_ws_zero(kmem_cache_t *cache);
     void kmem_reap(void);
 	void kmem_reap_idspace(void);

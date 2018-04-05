@@ -1392,6 +1392,22 @@ taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
 }
 
 /*
+ * Allow our caller to ask if there are tasks pending on the queue.
+ */
+boolean_t
+taskq_empty(taskq_t *tq)
+{
+	boolean_t rv;
+
+	ASSERT3P(tq, !=, curthread->t_taskq);
+	mutex_enter(&tq->tq_lock);
+	rv = (tq->tq_task.tqent_next == &tq->tq_task) && (tq->tq_active == 0);
+	mutex_exit(&tq->tq_lock);
+
+	return (rv);
+}
+
+/*
  * Wait for all pending tasks to complete.
  * Calling taskq_wait from a task will cause deadlock.
  */

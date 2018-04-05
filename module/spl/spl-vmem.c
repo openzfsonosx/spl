@@ -25,7 +25,7 @@
 
 /*
  * Copyright (c) 2012 by Delphix. All rights reserved.
- * Copyright (c) 2012, Joyent, Inc. All rights reserved.
+ * Copyright (c) 2018, Joyent, Inc.
  * Copyright (c) 2017 Sean Doran <smd@use.net>
  */
 
@@ -2300,7 +2300,7 @@ vmem_qcache_reap(vmem_t *vmp)
 	 */
 	for (i = 0; i < VMEM_NQCACHE_MAX; i++)
 		if (vmp->vm_qcache[i])
-			kmem_cache_reap_now(vmp->vm_qcache[i]);
+			kmem_cache_reap_soon(vmp->vm_qcache[i]);
 }
 
 /* given a size, return the appropriate vmem_bucket_arena[] entry */
