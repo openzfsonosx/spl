@@ -672,3 +672,15 @@ void spl_decmpfs_cnode_destroy(struct decmpfs_cnode *cp)
 {
 	decmpfs_cnode_destroy(cp);
 }
+
+void vnode_lock(struct vnode *);
+void spl_vnode_lock(struct vnode *vp)
+{
+	vnode_lock(vp);
+}
+
+void vnode_unlock(struct vnode *);
+void spl_vnode_unlock(struct vnode *vp)
+{
+	vnode_unlock(vp);
+}

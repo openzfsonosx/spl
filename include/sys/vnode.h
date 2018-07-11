@@ -314,5 +314,7 @@ int spl_decmpfs_decompress_file(struct vnode *vp, struct decmpfs_cnode *cp, off_
 int spl_decmpfs_file_is_compressed(struct vnode *vp, struct decmpfs_cnode *cp);
 void spl_decmpfs_cnode_init(struct decmpfs_cnode *cp);
 void spl_decmpfs_cnode_destroy(struct decmpfs_cnode *cp);
+void spl_vnode_lock(struct vnode *vp);
+void spl_vnode_unlock(struct vnode *vp);
 
 #endif /* SPL_VNODE_H */
