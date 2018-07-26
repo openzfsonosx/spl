@@ -447,6 +447,11 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 
     strlcpy(utsname.nodename, hostname, sizeof(utsname.nodename));
 
+	while(current_proc() == NULL) {
+		printf("SPL: waiting for kernel init...\n");
+		delay(hz>>1);
+	}
+
     spl_mutex_subsystem_init();
     spl_kmem_init(total_memory);
     spl_vnode_init();
