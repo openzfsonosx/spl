@@ -2568,7 +2568,13 @@ kmem_slab_prefill(kmem_cache_t *cp, kmem_slab_t *sp)
  * it will dump any remaining allocations.
  */
 
+/* Sizes up to and including 2048 are ok to set.
+ * 4096 is in large alloc, and will die.
+ */
 //#define KMEM_LEAK_SIZE 2048
+
+/* If you want to check leaks in 4096 or above, see XXXXKMEM_LEAK_SIZE */
+//#define XXXXKMEM_LEAK_SIZE
 
 #ifdef KMEM_LEAK_SIZE
 struct keep_struct {
@@ -2591,12 +2597,17 @@ zfs_kmem_zalloc(size_t size, int kmflag, char *file, int line)
 	int keep = 0;
 #endif
 
+#ifdef XXXXKMEM_LEAK_SIZE
+	if (size >= 4096 && size < 8192) {
+		buf = zfs_kmem_alloc(size, kmflag, file, line);
+		if (buf != NULL)
+			bzero(buf, size);
+		return buf;
+	}
+#endif
+
 	if ((index = ((size - 1) >> KMEM_ALIGN_SHIFT)) < KMEM_ALLOC_TABLE_MAX) {
 		kmem_cache_t *cp = kmem_alloc_table[index];
-		buf = kmem_cache_alloc(cp, kmflag);
-		if (buf != NULL) {
-			if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp)) {
-				kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
 
 #ifdef KMEM_LEAK_SIZE
 		if (cp->cache_bufsize == KMEM_LEAK_SIZE) {
@@ -2606,6 +2617,12 @@ zfs_kmem_zalloc(size_t size, int kmflag, char *file, int line)
 			keep = 1;
 		}
 #endif
+
+		buf = kmem_cache_alloc(cp, kmflag);
+		if (buf != NULL) {
+			if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp)) {
+				kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
+
 				((uint8_t *)buf)[size] = KMEM_REDZONE_BYTE;
 				((uint32_t *)btp)[1] = KMEM_SIZE_ENCODE(size);
 
@@ -2617,7 +2634,7 @@ zfs_kmem_zalloc(size_t size, int kmflag, char *file, int line)
 			bzero(buf, size);
 		}
 	} else {
-		buf = zfs_kmem_alloc(size, kmflag);
+		buf = zfs_kmem_alloc(size, kmflag, file, line);
 		if (buf != NULL)
 			bzero(buf, size);
 	}
@@ -2647,6 +2664,17 @@ zfs_kmem_alloc(size_t size, int kmflag, char *file, int line)
 	size_t index;
 	kmem_cache_t *cp;
 	void *buf;
+#ifdef KMEM_LEAK_SIZE
+	char *r;
+	int keep = 0;
+#endif
+
+#ifdef XXXXKMEM_LEAK_SIZE
+	if (size >= 4096 && size < 8192) {
+		size += sizeof(keep_t);
+		keep = 1;
+	}
+#endif
 
 	if ((index = ((size - 1) >> KMEM_ALIGN_SHIFT)) < KMEM_ALLOC_TABLE_MAX) {
 		cp = kmem_alloc_table[index];
@@ -2672,12 +2700,23 @@ zfs_kmem_alloc(size_t size, int kmflag, char *file, int line)
 			if (size > kmem_dump_oversize_max)
 				kmem_dump_oversize_max = size;
 		}
+#ifdef XXXXKMEM_LEAK_SIZE
+		if (keep) {
+		keep_t *kp;
+		kp = &buf[size - sizeof(keep_t)];
+		strlcpy(kp->file, (r = strrchr(file, '/')) ? r+1 : file,
+			sizeof(kp->file));
+		kp->line = line;
+		list_link_init(&kp->node);
+		mutex_enter(&keep_lock);
+		list_insert_head(&keep_list, kp);
+		mutex_exit(&keep_lock);
+	}
+#endif
 		return (buf);
 	}
 
 #ifdef KMEM_LEAK_SIZE
-	int keep = 0;
-	char *r;
 	/* Move size 24 to + 20 to fit filename and line */
 	if (cp->cache_bufsize == KMEM_LEAK_SIZE) {
 		size += sizeof(keep_t);
@@ -2720,6 +2759,19 @@ zfs_kmem_free(void *buf, size_t size)
 	size_t index;
 	kmem_cache_t *cp;
 
+#ifdef XXXXKMEM_LEAK_SIZE
+		if (size >= 4096 && size < 8192) {
+
+		keep_t *kp;
+		kp = &buf[size];
+
+		size += sizeof(keep_t);
+		mutex_enter(&keep_lock);
+		list_remove(&keep_list, kp);
+		mutex_exit(&keep_lock);
+	}
+#endif
+
 	if ((index = (size - 1) >> KMEM_ALIGN_SHIFT) < KMEM_ALLOC_TABLE_MAX) {
 		cp = kmem_alloc_table[index];
 		/* fall through to kmem_cache_free() */
@@ -2732,6 +2784,7 @@ zfs_kmem_free(void *buf, size_t size)
 	} else {
 		if (buf == NULL && size == 0)
 			return;
+
 		vmem_free(kmem_oversize_arena, buf, size);
 		return;
 	}
@@ -2801,7 +2854,7 @@ kmem_alloc_tryhard(size_t size, size_t *asize, int kmflag)
 	} while (*asize <= PAGESIZE);
 
 	*asize = P2ROUNDUP(size, KMEM_ALIGN);
-	return (zfs_kmem_alloc(*asize, kmflag));
+	return (kmem_alloc(*asize, kmflag));
 }
 
 /*
@@ -6082,7 +6135,7 @@ kmem_cache_move_notify(kmem_cache_t *cp, void *buf)
 {
 	kmem_move_notify_args_t *args;
 
-	args = zfs_kmem_alloc(sizeof (kmem_move_notify_args_t), KM_NOSLEEP);
+	args = kmem_alloc(sizeof (kmem_move_notify_args_t), KM_NOSLEEP);
 	if (args != NULL) {
 		args->kmna_cache = cp;
 		args->kmna_buf = buf;
@@ -6316,7 +6369,7 @@ kvasprintf(const char *fmt, va_list ap)
 	va_copy(aq, ap);
 	len = vsnprintf(NULL, 0, fmt, aq);
 	va_end(aq);
-	p = zfs_kmem_alloc(len+1, KM_SLEEP);
+	p = kmem_alloc(len+1, KM_SLEEP);
 	if (!p)
 		return (NULL);
 
