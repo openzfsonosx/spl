@@ -2571,7 +2571,7 @@ kmem_slab_prefill(kmem_cache_t *cp, kmem_slab_t *sp)
 /* Sizes up to and including 2048 are ok to set.
  * 4096 is in large alloc, and will die.
  */
-//#define KMEM_LEAK_SIZE 2048
+#define KMEM_LEAK_SIZE 96
 
 /* If you want to check leaks in 4096 or above, see XXXXKMEM_LEAK_SIZE */
 //#define XXXXKMEM_LEAK_SIZE
@@ -2623,14 +2623,6 @@ zfs_kmem_zalloc(size_t size, int kmflag, char *file, int line)
 			if ((cp->cache_flags & KMF_BUFTAG) && !KMEM_DUMP(cp)) {
 				kmem_buftag_t *btp = KMEM_BUFTAG(cp, buf);
 
-#ifdef KMEM_LEAK_SIZE
-		if (cp->cache_bufsize == KMEM_LEAK_SIZE) {
-			size += sizeof(keep_t);
-			index = (((size - 1) >> KMEM_ALIGN_SHIFT));
-			cp = kmem_alloc_table[index];
-			keep = 1;
-		}
-#endif
 				((uint8_t *)buf)[size] = KMEM_REDZONE_BYTE;
 				((uint32_t *)btp)[1] = KMEM_SIZE_ENCODE(size);
 
@@ -2725,8 +2717,6 @@ zfs_kmem_alloc(size_t size, int kmflag, char *file, int line)
 	}
 
 #ifdef KMEM_LEAK_SIZE
-	int keep = 0;
-	char *r;
 	/* Move size 24 to + 20 to fit filename and line */
 	if (cp->cache_bufsize == KMEM_LEAK_SIZE) {
 		size += sizeof(keep_t);
