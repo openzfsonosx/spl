@@ -35,6 +35,14 @@
 #include_next <sys/types.h>
 #include <string.h>
 #include <sys/sysmacros.h>
+
+#ifdef     __cplusplus
+/* Avoid kcdata.h header error */
+extern "C" {
+	extern unsigned long  strnlen(const char *, unsigned long);
+}
+#endif
+
 #include <libkern/libkern.h>
 
 
