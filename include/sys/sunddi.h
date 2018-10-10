@@ -56,6 +56,23 @@ typedef int ddi_devid_t;
 #define	ddi_prop_free(x)			(void)0
 #define	ddi_root_node()				(void)0
 
+#define isalnum(ch)     (isalpha(ch) || isdigit(ch))
+#define isalpha(ch)     (isupper(ch) || islower(ch))
+#define isdigit(ch)     ((ch) >= '0' && (ch) <= '9')
+#define islower(ch)     ((ch) >= 'a' && (ch) <= 'z')
+#define isspace(ch)     (((ch) == ' ') || ((ch) == '\r') || ((ch) == '\n') || \
+                        ((ch) == '\t') || ((ch) == '\f'))
+#define isupper(ch)     ((ch) >= 'A' && (ch) <= 'Z')
+#define isxdigit(ch)    (isdigit(ch) || ((ch) >= 'a' && (ch) <= 'f') || \
+                        ((ch) >= 'A' && (ch) <= 'F'))
+#define tolower(C)      (((C) >= 'A' && (C) <= 'Z') ? (C) - 'A' + 'a' : (C))
+#define toupper(C)      (((C) >= 'a' && (C) <= 'z') ? (C) - 'a' + 'A': (C))
+#define isgraph(C)      ((C) >= 0x21 && (C) <= 0x7E)
+#define ispunct(C)      (((C) >= 0x21 && (C) <= 0x2F) || \
+    ((C) >= 0x3A && (C) <= 0x40) || \
+    ((C) >= 0x5B && (C) <= 0x60) || \
+    ((C) >= 0x7B && (C) <= 0x7E))
+
 //extern int ddi_strtoul(const char *, char **, int, unsigned long *);
 //extern int ddi_strtol(const char *, char **, int, long *);
 //extern int ddi_strtoull(const char *, char **, int, unsigned long long *);
@@ -93,6 +110,17 @@ static inline int
 ddi_strtoull(const char *str, char **nptr, int base, unsigned long long *result)
  {
      *result = (unsigned long long)strtouq(str, nptr, base);
+     if (*result == 0)
+         return (EINVAL);
+     else if (*result == ULLONG_MAX)
+         return (ERANGE);
+     return (0);
+ }
+
+static inline int
+ddi_strtoll(const char *str, char **nptr, int base, long long *result)
+ {
+     *result = (unsigned long long)strtoq(str, nptr, base);
      if (*result == 0)
          return (EINVAL);
      else if (*result == ULLONG_MAX)

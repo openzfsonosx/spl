@@ -356,3 +356,18 @@ ddi_remove_minor_node(dev_info_t *dip, char *name)
         dip->devb = NULL;
     }
 }
+
+int
+strspn(char    *string,
+	register char   *charset)
+{
+	register char *p, *q;
+
+	for(q=string; *q != '\0'; ++q) {
+		for(p=charset; *p != '\0' && *p != *q; ++p)
+			;
+		if(*p == '\0')
+			break;
+	}
+	return(q-string);
+}
