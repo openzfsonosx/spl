@@ -226,7 +226,7 @@ VOP_CLOSE(struct vnode *vp, int flag, int count, offset_t off, void *cr, void *)
 extern int
 VOP_FSYNC(struct vnode *vp, int flags, void* unused, void *);
 extern int
-VOP_SPACE(struct vnode *vp, int cmd, void *fl, int flags, offset_t off,
+VOP_SPACE(struct vnode *vp, int cmd, struct flock *fl, int flags, offset_t off,
           cred_t *cr, void *ctx);
 
 extern int VOP_GETATTR(struct vnode *vp, vattr_t *vap, int flags, void *x3, void *x4);

@@ -400,6 +400,14 @@ kstat_create(char *ks_module, int ks_instance, char *ks_name, char *ks_class,
 	e->e_oid.oid_fmt = "N";
 	e->e_oid.oid_arg1 = (void*)(&e->e_children);
 
+	/* If VIRTUAL we allocate memory to store data */
+	if (ks_flags & KSTAT_FLAG_VIRTUAL)
+		ksp->ks_data    = NULL;
+	else
+		ksp->ks_data    = (void *)kmem_zalloc(
+			sizeof(kstat_named_t) * ks_ndata, KM_SLEEP);
+
+
 	sysctl_register_oid(&e->e_oid);
 
     return (ksp);
@@ -522,7 +530,7 @@ kstat_install(kstat_t *ksp)
                 val->l_oid_registered = 0;
             }
         }
-    }
+	}
 
     ksp->ks_flags &= ~KSTAT_FLAG_INVALID;
 }
@@ -572,12 +580,15 @@ kstat_delete(kstat_t *ksp)
 		}
     }
 
-
 	sysctl_unregister_oid(&e->e_oid);
 
 	if (e->e_vals) {
 		kfree(e->e_vals, sizeof(sysctl_leaf_t) * e->e_num_vals);
 	}
+
+	if (!(ksp->ks_flags & KSTAT_FLAG_VIRTUAL))
+		kmem_free(ksp->ks_data, sizeof(kstat_named_t) * ksp->ks_ndata);
+
     cv_destroy(&e->e_cv);
 	kfree(e, e->e_size);
 }

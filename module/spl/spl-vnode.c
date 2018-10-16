@@ -31,6 +31,7 @@
 #include <sys/malloc.h>
 #include <sys/list.h>
 #include <sys/file.h>
+#include <sys/fcntl.h>
 #include <IOKit/IOLib.h>
 
 #include <sys/taskq.h>
@@ -175,10 +176,23 @@ int zfs_vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base, ssize_t len,
 
 
 int
-VOP_SPACE(struct vnode *vp, int cmd, void *fl, int flags, offset_t off,
+VOP_SPACE(struct vnode *vp, int cmd, struct flock *fl, int flags, offset_t off,
           cred_t *cr, void *ctx)
 {
-    return (0);
+	int error = 0;
+#ifdef F_PUNCHHOLE
+	if (cmd == F_FREESP) {
+		fpunchhole_t fpht;
+		fpht.fp_flags = 0;
+		fpht.fp_offset = fl->l_start;
+		fpht.fp_length = fl->l_len;
+		if (vnode_getwithref(vp) == 0) {
+			error = VNOP_IOCTL(vp, F_PUNCHHOLE, (caddr_t)&fpht, 0, ctx);
+			(void)vnode_put(vp);
+		}
+	}
+#endif
+    return (error);
 }
 
 int
