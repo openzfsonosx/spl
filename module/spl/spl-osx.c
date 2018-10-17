@@ -51,6 +51,9 @@ unsigned int max_ncpus = 0;
 uint64_t  total_memory = 0;
 uint64_t  real_total_memory = 0;
 
+uint64_t spl_initialised = 0;
+
+
 #include <sys/types.h>
 #include <sys/sysctl.h>
 /* protect against:
@@ -405,13 +408,15 @@ int ddi_copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done)
 	return ret;
 }
 
+static void spl_start_continue(void *ignored);
+
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
     //max_ncpus = processor_avail_count;
     int ncpus;
     size_t len = sizeof(ncpus);
 
-	printf("SPL: start\n");
+	printf("SPL: loading\n");
 
     sysctlbyname("hw.logicalcpu_max", &max_ncpus, &len, NULL, 0);
 	if (!max_ncpus) max_ncpus = 1;
@@ -447,6 +452,14 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 
     strlcpy(utsname.nodename, hostname, sizeof(utsname.nodename));
 
+	(void)thread_create(NULL, 0, spl_start_continue, 0, 0, 0, 0, 92);
+
+	return KERN_SUCCESS;
+}
+
+static void spl_start_continue(void *ignored)
+{
+
 	while(current_proc() == NULL) {
 		printf("SPL: waiting for kernel init...\n");
 		delay(hz>>1);
@@ -458,12 +471,14 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
 	spl_kmem_thread_init();
 	spl_kmem_mp_init();
 
+	spl_initialised = 1;
+
     IOLog("SPL: Loaded module v%s-%s%s, "
           "(ncpu %d, memsize %llu, pages %llu)\n",
           SPL_META_VERSION, SPL_META_RELEASE, SPL_DEBUG_STR,
 		  max_ncpus, total_memory, physmem);
 
-	return KERN_SUCCESS;
+	thread_exit();
 }
 
 kern_return_t spl_stop (kmod_info_t * ki, void * d)
