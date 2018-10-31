@@ -412,17 +412,34 @@ static void spl_start_continue(void *ignored);
 
 kern_return_t spl_start (kmod_info_t * ki, void * d)
 {
-    //max_ncpus = processor_avail_count;
+	printf("SPL: loading\n");
+
+	(void)thread_create(NULL, 0, spl_start_continue, 0, 0, 0, 0, 92);
+
+	return KERN_SUCCESS;
+}
+
+static void spl_start_continue(void *ignored)
+{
     int ncpus;
     size_t len = sizeof(ncpus);
 
-	printf("SPL: loading\n");
+	while(current_proc() == NULL) {
+		printf("SPL: waiting for kernel init...\n");
+		delay(hz>>1);
+	}
 
-    sysctlbyname("hw.logicalcpu_max", &max_ncpus, &len, NULL, 0);
+	while (1) {
+		len = sizeof(total_memory);
+		sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
+		if (total_memory != 0) break;
+
+		printf("SPL: waiting for sysctl...\n");
+		delay(hz>>1);
+	}
+
+	sysctlbyname("hw.logicalcpu_max", &max_ncpus, &len, NULL, 0);
 	if (!max_ncpus) max_ncpus = 1;
-
-	len = sizeof(total_memory);
-    sysctlbyname("hw.memsize", &total_memory, &len, NULL, 0);
 
 	/*
 	 * Setting the total memory to physmem * 80% here, since kmem is
@@ -451,19 +468,6 @@ kern_return_t spl_start (kmod_info_t * ki, void * d)
     sysctlbyname("kern.version", &utsname.version, &len, NULL, 0);
 
     strlcpy(utsname.nodename, hostname, sizeof(utsname.nodename));
-
-	(void)thread_create(NULL, 0, spl_start_continue, 0, 0, 0, 0, 92);
-
-	return KERN_SUCCESS;
-}
-
-static void spl_start_continue(void *ignored)
-{
-
-	while(current_proc() == NULL) {
-		printf("SPL: waiting for kernel init...\n");
-		delay(hz>>1);
-	}
 
     spl_mutex_subsystem_init();
     spl_kmem_init(total_memory);
