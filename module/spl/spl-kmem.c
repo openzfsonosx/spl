@@ -2599,6 +2599,10 @@ zfs_kmem_alloc(size_t size, int kmflag)
 	kmem_cache_t *cp;
 	void *buf;
 
+	/* If flag KM_SLEEP was used, we must not return NULL so adjust size */
+	if (size == 0)
+		size = 1;
+
 	if ((index = ((size - 1) >> KMEM_ALIGN_SHIFT)) < KMEM_ALLOC_TABLE_MAX) {
 		cp = kmem_alloc_table[index];
 		/* fall through to kmem_cache_alloc() */
@@ -2609,8 +2613,6 @@ zfs_kmem_alloc(size_t size, int kmflag)
 		/* fall through to kmem_cache_alloc() */
 
 	} else {
-		if (size == 0)
-			return (NULL);
 
 		buf = vmem_alloc(kmem_oversize_arena, size,
 						 kmflag & KM_VMFLAGS);
@@ -2645,6 +2647,9 @@ zfs_kmem_free(void *buf, size_t size)
 	size_t index;
 	kmem_cache_t *cp;
 
+	if (size == 0)
+		size = 1;
+
 	if ((index = (size - 1) >> KMEM_ALIGN_SHIFT) < KMEM_ALLOC_TABLE_MAX) {
 		cp = kmem_alloc_table[index];
 		/* fall through to kmem_cache_free() */
@@ -2655,8 +2660,6 @@ zfs_kmem_free(void *buf, size_t size)
 		/* fall through to kmem_cache_free() */
 
 	} else {
-		if (buf == NULL && size == 0)
-			return;
 		vmem_free(kmem_oversize_arena, buf, size);
 		return;
 	}
