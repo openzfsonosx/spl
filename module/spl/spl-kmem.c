@@ -2647,7 +2647,9 @@ zfs_kmem_free(void *buf, size_t size)
 	size_t index;
 	kmem_cache_t *cp;
 
-	if (size == 0)
+	if (size == 0 && buf == NULL)
+		return;
+	else if (size == 0)
 		size = 1;
 
 	if ((index = (size - 1) >> KMEM_ALIGN_SHIFT) < KMEM_ALLOC_TABLE_MAX) {
