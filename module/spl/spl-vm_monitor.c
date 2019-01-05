@@ -86,6 +86,10 @@ vm_monitor_dispatch_callouts(int all)
 static void 
 vm_monitor_pressure_cb(int all, void *context)
 {
+	// Take a look at the state of the vm
+	extern void kmem_manage_memory(void);
+	kmem_manage_memory();
+	
 	// Notify application layer of need to memory to be released
 	vm_monitor_dispatch_callouts(all);
 

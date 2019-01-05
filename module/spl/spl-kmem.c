@@ -4359,6 +4359,454 @@ spl_maybe_send_large_pressure(uint64_t now, uint64_t minutes, boolean_t full)
 	return(true);
 }
 
+void kmem_manage_memory(void)
+{
+	callb_cpr_t cpr;
+	uint64_t last_update = zfs_lbolt();
+	int64_t last_spl_free;
+	double ema_new = 0;
+	double ema_old = 0;
+	double alpha;
+	
+	CALLB_CPR_INIT(&cpr, &spl_free_thread_lock, callb_generic_cpr, FTAG);
+	
+	spl_free = (int64_t)PAGESIZE *
+	(int64_t)(vm_page_free_count - vm_page_free_min);
+	
+	
+	uint64_t recent_lowmem = 0;
+	uint64_t last_disequilibrium = 0;
+	
+	boolean_t lowmem = false;
+	boolean_t emergency_lowmem = false;
+	int64_t base;
+	int64_t new_spl_free = 0LL;
+	
+	spl_stats.spl_free_wake_count.value.ui64++;
+	
+	if (spl_free_maybe_reap_flag == true) {
+		spl_free_maybe_reap_flag = false;
+		spl_free_reap_caches();
+	}
+	
+	uint64_t time_now = zfs_lbolt();
+	uint64_t time_now_seconds = 0;
+	if (time_now > hz)
+		time_now_seconds = time_now / hz;
+	
+	last_spl_free = spl_free;
+	
+	new_spl_free = 0LL;
+	
+	// if there is pressure that has not yet reached arc_reclaim_thread()
+	// then start with a negative new_spl_free
+	if (spl_free_manual_pressure > 0) {
+		int64_t old_pressure = spl_free_manual_pressure;
+		new_spl_free -= old_pressure * 2LL;
+		lowmem = true;
+		if (spl_free_fast_pressure) {
+			emergency_lowmem = true;
+			new_spl_free -= old_pressure * 4LL;
+		}
+	}
+	
+	// can we allocate at least a 64 MiB segment from spl_heap_arena?
+	// this probes the reserve and also the largest imported spans,
+	// which vmem_alloc can fragment if needed.
+	
+	boolean_t reserve_low = false;
+	extern vmem_t *spl_heap_arena;
+	const uint64_t sixtyfour = 64ULL*1024ULL*1024ULL;
+	const uint64_t rvallones = (sixtyfour << 1ULL) - 1ULL;
+	const uint64_t rvmask = ~rvallones;
+	uint64_t rvfreebits = spl_heap_arena->vm_freemap;
+	
+	if ((rvfreebits & rvmask) == 0) {
+		reserve_low = true;
+	} else {
+		new_spl_free += (int64_t) sixtyfour;
+	}
+	
+	// do we have lots of memory in the spl_heap_arena ?
+	
+	boolean_t early_lots_free = false;
+	const uint64_t onetwentyeight = 128ULL*1024ULL*1024ULL;
+	const uint64_t sixteen = 16ULL*1024ULL*1024ULL;
+	if (!reserve_low) {
+		early_lots_free = true;
+	} else if (vmem_size_semi_atomic(spl_heap_arena, VMEM_FREE) > onetwentyeight) {
+		early_lots_free = true;
+		new_spl_free += (int64_t) sixteen;
+	}
+	
+	// do we have lots of memory in the bucket_arenas ?
+	
+	extern int64_t vmem_buckets_size(int); // non-locking
+	int64_t buckets_free = vmem_buckets_size(VMEM_FREE);
+	if ((uint64_t)buckets_free != spl_buckets_mem_free)
+		spl_buckets_mem_free = (uint64_t) buckets_free;
+	
+	if (buckets_free >= 512LL*1024LL*1024LL) {
+		early_lots_free = true;
+		new_spl_free += (int64_t) sixteen;
+	}
+	if (buckets_free >= 1024LL*1024LL*1024LL) {
+		reserve_low = false;
+		new_spl_free += (int64_t) sixteen;
+	}
+	
+	// if we have neither alloced or freed in several minutes,
+	// then we do not need to shrink back if there is a momentary
+	// transient memory spike (i.e., one that lasts less than a second)
+	
+	boolean_t memory_equilibrium = false;
+	const uint64_t five_minutes = 300ULL;
+	const uint64_t one_minute = 60ULL;
+	uint64_t last_xat_alloc_seconds = spl_xat_lastalloc;
+	uint64_t last_xat_free_seconds = spl_xat_lastfree;
+	
+	if (last_xat_alloc_seconds + five_minutes > time_now_seconds &&
+		last_xat_free_seconds + five_minutes > time_now_seconds) {
+		if (last_disequilibrium + one_minute > time_now_seconds) {
+			memory_equilibrium = true;
+			last_disequilibrium = 0;
+		}
+	} else {
+		last_disequilibrium = time_now_seconds;
+	}
+	
+	boolean_t just_alloced = false;
+	if (last_xat_alloc_seconds + 1 > time_now_seconds)
+		just_alloced = true;
+	
+	// this is a sign of a period of time of low system memory, however
+	// XNU's generation of this variable is not very predictable,
+	// but generally it should be taken seriously when it's positive
+	// (it is often falsely 0)
+	
+	if ((vm_page_free_wanted > 0 && reserve_low && !early_lots_free &&
+		 !memory_equilibrium && !just_alloced) ||
+		vm_page_free_wanted >= 1024) {
+		int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -16LL;
+		if (bminus > -16LL*1024LL*1024LL)
+			bminus = -16LL*1024LL*1024LL;
+		new_spl_free += bminus;
+		lowmem = true;
+		emergency_lowmem = true;
+		// atomic swaps to set these variables used in .../zfs/arc.c
+		int64_t previous_highest_pressure = 0;
+		int64_t new_p = -bminus;
+		previous_highest_pressure = spl_free_manual_pressure;
+		if (new_p > previous_highest_pressure || new_p <= 0) {
+			boolean_t fast = FALSE;
+			if (vm_page_free_wanted > vm_page_free_min / 8)
+				fast = TRUE;
+			spl_free_set_pressure_both(-16LL * new_spl_free, fast);
+		}
+		last_disequilibrium = time_now_seconds;
+	} else if (vm_page_free_wanted > 0) {
+		int64_t bytes_wanted = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE;
+		new_spl_free -= bytes_wanted;
+		if (reserve_low && !early_lots_free) {
+			lowmem = true;
+			if (recent_lowmem == 0) {
+				recent_lowmem = time_now;
+			}
+			if (!memory_equilibrium) {
+				last_disequilibrium = time_now_seconds;
+			}
+		}
+	}
+	
+	// these variables are reliably maintained by XNU
+	// if vm_page_free_count > vm_page_free_min, then XNU
+	// is scanning pages and we may want to try to free some memory up
+	
+	int64_t above_min_free_pages = (int64_t)vm_page_free_count - (int64_t)vm_page_free_min;
+	int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
+	
+	// vm_page_free_min normally 3500, page free target normally 4000 but not exported
+	// so we are not scanning if we are 500 pages above vm_page_free_min.
+	
+	// even if we're scanning we may have plenty of space in the reserve arena,
+	// in which case we should not react too strongly
+	
+	// if we have been in memory equilibrium, also don't react too strongly
+	
+	if (above_min_free_bytes < (int64_t)PAGESIZE * 500LL && reserve_low
+		&& !early_lots_free && !memory_equilibrium) {
+		// trigger a reap below
+		lowmem = true;
+	}
+	extern volatile unsigned int vm_page_speculative_count;
+	if ((above_min_free_bytes < 0LL && reserve_low && !early_lots_free &&
+		 !memory_equilibrium && !just_alloced) ||
+		above_min_free_bytes <= -4LL*1024LL*1024LL) {
+		int64_t new_p = -1LL * above_min_free_bytes;
+		boolean_t fast = FALSE;
+		emergency_lowmem = true;
+		lowmem = true;
+		recent_lowmem = time_now;
+		last_disequilibrium = time_now_seconds;
+		int64_t spec_bytes = (int64_t)vm_page_speculative_count * (int64_t)PAGESIZE;
+		if (vm_page_free_wanted > 0 || new_p > spec_bytes) {
+			// force a stronger reaction from ARC if we are also low on
+			// speculative pages (xnu prefetched file blocks with no clients yet)
+			fast = TRUE;
+		}
+		spl_free_set_pressure_both(new_p, fast);
+	} else if (above_min_free_bytes < 0LL && !early_lots_free) {
+		lowmem = true;
+		if (recent_lowmem == 0)
+			recent_lowmem = time_now;
+		if (!memory_equilibrium)
+			last_disequilibrium = time_now_seconds;
+	}
+	
+	new_spl_free += above_min_free_bytes;
+	
+	// If we have already detected a  memory shortage and we
+	// have not reaped in a while (a short while for emergency_lowmem),
+	// then do a kmem_reap() now.
+	// See http://comments.gmane.org/gmane.os.illumos.devel/22552
+	// (notably Richard Elling's "A kernel module can call kmem_reap() whenever
+	// it wishes and some modules, like zfs, do so."
+	// If we reap, stop processing spl_free on this pass, to
+	// let the reaps (and arc, if pressure has been set above)
+	// do their job for a few milliseconds.
+	if (emergency_lowmem || lowmem) {
+		static uint64_t last_reap = 0;
+		uint64_t now = time_now;
+		uint64_t elapsed = 60*hz;
+		if (emergency_lowmem)
+			elapsed = 15*hz; // minimum frequency from kmem_reap_interval
+		if (now - last_reap > elapsed) {
+			last_reap = now;
+			// spl_free_reap_caches() calls functions that will
+			// acquire locks and can take a while
+			// so set spl_free to a small positive value
+			// to stop arc shrinking too much during this period
+			// when we expect to be freeing up arc-usable memory,
+			// but low enough that arc_no_grow likely will be set.
+			const int64_t two_spamax = 32LL * 1024LL * 1024LL;
+			if (spl_free < two_spamax)
+				spl_free = two_spamax; // atomic!
+			spl_free_reap_caches();
+			// we do not have any lock now, so we can jump
+			// to just before the thread-suspending code
+			return; //goto justwait;
+		}
+	}
+	
+	// a number or exceptions to reverse the lowmem / emergency_lowmem states
+	// if we have recently reaped.  we also take the strong reaction sting
+	// out of the set pressure by turning off spl_free_fast_pressure, since
+	// that automatically provokes an arc shrink and arc reap
+	
+	if (!reserve_low || early_lots_free || memory_equilibrium || just_alloced) {
+		lowmem = false;
+		emergency_lowmem = false;
+		spl_free_fast_pressure = FALSE;
+	}
+	
+	if (vm_page_speculative_count > 0) {
+		// speculative memory can be squeezed a bit; it is file blocks  that
+		// have been prefetched by xnu but are not (yet) in use by any
+		// consumer
+		if (vm_page_speculative_count / 4 + vm_page_free_count > vm_page_free_min) {
+			emergency_lowmem = false;
+			spl_free_fast_pressure = FALSE;
+		}
+		if (vm_page_speculative_count / 2 + vm_page_free_count > vm_page_free_min) {
+			lowmem = false;
+			spl_free_fast_pressure = FALSE;
+		}
+	}
+	
+	// Stay in a low memory condition for several seconds after we
+	// first detect that we are in it, giving the system (arc, xnu and userland)
+	// time to adapt
+	
+	if (!lowmem && recent_lowmem > 0) {
+		if (recent_lowmem + 4*hz < time_now)
+			lowmem = true;
+		else
+			recent_lowmem = 0;
+	}
+	
+	// if we are in a lowmem "hangover", cure it with pressure, then wait
+	// for the pressure to take effect in arc.c code
+	
+	// triggered when we have had at least one lowmem in the previous
+	// few seconds -- possibly two (one that causes a reap, one
+	// that falls through to the 4 second hold above).
+	
+	if (recent_lowmem == time_now && early_lots_free && reserve_low) {
+		// we can't grab 64 MiB as a single segment,
+		// but otherwise have ample memory brought in from xnu,
+		// but recently we had lowmem... and still have lowmem.
+		// cure this condition with a dose of pressure.
+		if (above_min_free_bytes < 0) {
+			int64_t old_p = spl_free_manual_pressure;
+			if (old_p <= -above_min_free_bytes) {
+				recent_lowmem = 0;
+				spl_free_manual_pressure = -above_min_free_bytes;
+				return; //goto justwait;
+			}
+		}
+	}
+	
+	base = new_spl_free;
+	
+	// adjust for available memory in spl_heap_arena
+	// cf arc_available_memory()
+	if (!emergency_lowmem) {
+		extern vmem_t *spl_default_arena;
+		int64_t heap_free = (int64_t)vmem_size_semi_atomic(spl_heap_arena, VMEM_FREE);
+		// grabbed buckets_free up above; we are OK with change to it in the meanwhile,
+		// it'll get an update on the next run.
+		int64_t combined_free = heap_free + buckets_free;
+		
+		if (combined_free != 0) {
+			const int64_t mb = 1024*1024;
+			if (!lowmem && above_min_free_bytes > (int64_t)PAGESIZE * 10000LL) {
+				if (above_min_free_bytes < 64LL * mb)
+					new_spl_free += combined_free / 16;
+				else if (above_min_free_bytes < 128LL * mb)
+					new_spl_free += combined_free / 8;
+				else if (above_min_free_bytes < 256LL * mb)
+					new_spl_free += combined_free / 4;
+				else
+					new_spl_free += combined_free / 2;
+			} else {
+				new_spl_free -= 16LL * mb;
+			}
+		}
+		
+		// memory footprint has gotten really big, decrease spl_free substantially
+		int64_t total_mem_used = (int64_t) segkmem_total_mem_allocated;
+		if ((segkmem_total_mem_allocated * 100LL / real_total_memory) > 70) {
+			new_spl_free -= total_mem_used / 64;
+		} else if ((segkmem_total_mem_allocated * 100LL / real_total_memory) > 75) {
+			new_spl_free -= total_mem_used / 32;
+			lowmem = true;
+		}
+	}
+	
+	// Adjust in the face of a large ARC.
+	// We don't treat (zfs) metadata and non-metadata
+	// differently here, and leave policy with respect
+	// to the relative value of each up to arc.c.
+	// O3X arc.c does not (yet) take these arena sizes into
+	// account like Illumos's does.
+	uint64_t zio_size = vmem_size_semi_atomic(zio_arena_parent, VMEM_ALLOC | VMEM_FREE);
+	// wrap this in a basic block for lexical scope SSA convenience
+	if (zio_size > 0) {
+		static uint64_t zio_last_too_big = 0;
+		static int64_t imposed_cap = 75;
+		const uint64_t seconds_of_lower_cap = 10*hz;
+		uint64_t now = time_now;
+		uint32_t zio_pct = (uint32_t)(zio_size * 100ULL / real_total_memory);
+		// if not hungry for memory, shrink towards a
+		// 75% total memory cap on zfs_file_data
+		if (!lowmem && !emergency_lowmem && zio_pct > 75 &&
+			(now > zio_last_too_big + seconds_of_lower_cap)) {
+			new_spl_free -= zio_size / 64;
+			zio_last_too_big = now;
+			imposed_cap = 75;
+		} else if (lowmem || emergency_lowmem) {
+			// shrink towards stricter caps if we are hungry for memory
+			const uint32_t lowmem_cap = 25;
+			const uint32_t emergency_lowmem_cap = 5;
+			// we don't want the lowest cap to be so low that
+			// we will not make any use of the fixed size reserve
+			if (lowmem && zio_pct > lowmem_cap) {
+				new_spl_free -= zio_size / 32;
+				zio_last_too_big = now;
+				imposed_cap = lowmem_cap;
+			}
+			if (emergency_lowmem && zio_pct > emergency_lowmem_cap) {
+				new_spl_free -= zio_size / 8;
+				zio_last_too_big = now;
+				imposed_cap = emergency_lowmem_cap;
+			}
+		}
+		if (zio_last_too_big != now &&
+			now < zio_last_too_big + seconds_of_lower_cap &&
+			zio_pct > imposed_cap) {
+			new_spl_free -= zio_size / 64;
+		}
+	}
+	
+	// try to get 1/64 of spl_heap_arena freed up
+	if (emergency_lowmem && new_spl_free >= 0LL) {
+		extern vmem_t *spl_root_arena;
+		uint64_t root_size = vmem_size_semi_atomic(spl_heap_arena, VMEM_ALLOC | VMEM_FREE);
+		uint64_t root_free = vmem_size_semi_atomic(spl_heap_arena, VMEM_FREE);
+		int64_t difference = root_size - root_free;
+		int64_t target = root_size / 64;
+		if (difference < target) {
+			new_spl_free -= target;
+		}
+		// and we should definitely not be returning positive now
+		if (new_spl_free >= 0LL)
+			new_spl_free = -1024LL;
+	}
+	
+	double delta = (double)new_spl_free - (double)last_spl_free;
+	
+	boolean_t spl_free_is_negative = false;
+	
+	if (new_spl_free < 0LL) {
+		spl_stats.spl_spl_free_negative_count.value.ui64++;
+		spl_free_is_negative = true;
+	}
+	
+	// NOW set spl_free from calculated new_spl_free
+	spl_free = new_spl_free;
+	// the direct equivalent of :
+	// __c11_atomic_store(&spl_free, new_spl_free, __ATOMIC_SEQ_CST);
+	
+	
+	// Because we're already negative, arc is likely to have been
+	// signalled already. We can rely on the _maybe_ in
+	// spl-vmem.c:xnu_alloc_throttled() [XAT] to try to give arc a
+	// kick with greater probability.
+	// However, if we've gone negative several times, and have not
+	// tried a full kick in a long time, do so now; if the full kick
+	// is refused because there has been a kick too few minutes ago,
+	// try a gentler kick.
+	// We do this outside the lock, as spl_maybe_send_large_pressure
+	// may need to take a mutex, and we forbid further mutex entry when
+	// spl_free_lock is held.
+	
+	if (spl_free_is_negative) {
+		static volatile _Atomic uint32_t negatives_since_last_kick = 0;
+		
+		if (negatives_since_last_kick++ > 8) {
+			if (spl_maybe_send_large_pressure(time_now, 360, true) ||
+				spl_maybe_send_large_pressure(time_now, 60, false)) {
+				negatives_since_last_kick = 0;
+			}
+		}
+	}
+	
+	if (lowmem)
+		recent_lowmem = time_now;
+	
+	// maintain an exponential moving average for the ema kstat
+	if (last_update > hz)
+		alpha = 1.0;
+	else {
+		double td_tick  = (double)(time_now - last_update);
+		alpha = td_tick / (double)(hz*50.0); // roughly 0.02
+	}
+	
+	ema_new = (alpha * delta) + (1.0 - alpha)*ema_old;
+	spl_free_delta_ema = ema_new;
+	ema_old = ema_new;
+}
+
 static void
 spl_free_thread()
 {
@@ -4384,434 +4832,8 @@ spl_free_thread()
 
 	while (!spl_free_thread_exit) {
 		mutex_exit(&spl_free_thread_lock);
-		boolean_t lowmem = false;
-		boolean_t emergency_lowmem = false;
-		int64_t base;
-		int64_t new_spl_free = 0LL;
-
-		spl_stats.spl_free_wake_count.value.ui64++;
-
-		if (spl_free_maybe_reap_flag == true) {
-			spl_free_maybe_reap_flag = false;
-			spl_free_reap_caches();
-		}
-
-		uint64_t time_now = zfs_lbolt();
-		uint64_t time_now_seconds = 0;
-		if (time_now > hz)
-			time_now_seconds = time_now / hz;
-
-		last_spl_free = spl_free;
-
-		new_spl_free = 0LL;
-
-		// if there is pressure that has not yet reached arc_reclaim_thread()
-		// then start with a negative new_spl_free
-		if (spl_free_manual_pressure > 0) {
-			int64_t old_pressure = spl_free_manual_pressure;
-			new_spl_free -= old_pressure * 2LL;
-			lowmem = true;
-			if (spl_free_fast_pressure) {
-				emergency_lowmem = true;
-				new_spl_free -= old_pressure * 4LL;
-			}
-		}
-
-		// can we allocate at least a 64 MiB segment from spl_heap_arena?
-		// this probes the reserve and also the largest imported spans,
-		// which vmem_alloc can fragment if needed.
-
-		boolean_t reserve_low = false;
-		extern vmem_t *spl_heap_arena;
-		const uint64_t sixtyfour = 64ULL*1024ULL*1024ULL;
-		const uint64_t rvallones = (sixtyfour << 1ULL) - 1ULL;
-		const uint64_t rvmask = ~rvallones;
-		uint64_t rvfreebits = spl_heap_arena->vm_freemap;
-
-		if ((rvfreebits & rvmask) == 0) {
-			reserve_low = true;
-		} else {
-			new_spl_free += (int64_t) sixtyfour;
-		}
-
-		// do we have lots of memory in the spl_heap_arena ?
-
-		boolean_t early_lots_free = false;
-		const uint64_t onetwentyeight = 128ULL*1024ULL*1024ULL;
-		const uint64_t sixteen = 16ULL*1024ULL*1024ULL;
-		if (!reserve_low) {
-			early_lots_free = true;
-		} else if (vmem_size_semi_atomic(spl_heap_arena, VMEM_FREE) > onetwentyeight) {
-			early_lots_free = true;
-			new_spl_free += (int64_t) sixteen;
-		}
-
-		// do we have lots of memory in the bucket_arenas ?
-
-		extern int64_t vmem_buckets_size(int); // non-locking
-		int64_t buckets_free = vmem_buckets_size(VMEM_FREE);
-		if ((uint64_t)buckets_free != spl_buckets_mem_free)
-			spl_buckets_mem_free = (uint64_t) buckets_free;
-
-		if (buckets_free >= 512LL*1024LL*1024LL) {
-			early_lots_free = true;
-			new_spl_free += (int64_t) sixteen;
-		}
-		if (buckets_free >= 1024LL*1024LL*1024LL) {
-			reserve_low = false;
-			new_spl_free += (int64_t) sixteen;
-		}
-
-		// if we have neither alloced or freed in several minutes,
-		// then we do not need to shrink back if there is a momentary
-		// transient memory spike (i.e., one that lasts less than a second)
-
-		boolean_t memory_equilibrium = false;
-		const uint64_t five_minutes = 300ULL;
-		const uint64_t one_minute = 60ULL;
-		uint64_t last_xat_alloc_seconds = spl_xat_lastalloc;
-		uint64_t last_xat_free_seconds = spl_xat_lastfree;
-
-		if (last_xat_alloc_seconds + five_minutes > time_now_seconds &&
-		    last_xat_free_seconds + five_minutes > time_now_seconds) {
-			if (last_disequilibrium + one_minute > time_now_seconds) {
-				memory_equilibrium = true;
-				last_disequilibrium = 0;
-			}
-		} else {
-			last_disequilibrium = time_now_seconds;
-		}
-
-		boolean_t just_alloced = false;
-		if (last_xat_alloc_seconds + 1 > time_now_seconds)
-			just_alloced = true;
-
-		// this is a sign of a period of time of low system memory, however
-		// XNU's generation of this variable is not very predictable,
-		// but generally it should be taken seriously when it's positive
-		// (it is often falsely 0)
-
-		if ((vm_page_free_wanted > 0 && reserve_low && !early_lots_free &&
-			!memory_equilibrium && !just_alloced) ||
-		    vm_page_free_wanted >= 1024) {
-			int64_t bminus = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE * -16LL;
-			if (bminus > -16LL*1024LL*1024LL)
-				bminus = -16LL*1024LL*1024LL;
-			new_spl_free += bminus;
-			lowmem = true;
-			emergency_lowmem = true;
-			// atomic swaps to set these variables used in .../zfs/arc.c
-			int64_t previous_highest_pressure = 0;
-			int64_t new_p = -bminus;
-			previous_highest_pressure = spl_free_manual_pressure;
-			if (new_p > previous_highest_pressure || new_p <= 0) {
-				boolean_t fast = FALSE;
-				if (vm_page_free_wanted > vm_page_free_min / 8)
-					fast = TRUE;
-				spl_free_set_pressure_both(-16LL * new_spl_free, fast);
-			}
-			last_disequilibrium = time_now_seconds;
-		} else if (vm_page_free_wanted > 0) {
-			int64_t bytes_wanted = (int64_t)vm_page_free_wanted * (int64_t)PAGESIZE;
-			new_spl_free -= bytes_wanted;
-                        if (reserve_low && !early_lots_free) {
-                                lowmem = true;
-                                if (recent_lowmem == 0) {
-                                        recent_lowmem = time_now;
-				}
-				if (!memory_equilibrium) {
-					last_disequilibrium = time_now_seconds;
-				}
-			}
-		}
-
-		// these variables are reliably maintained by XNU
-		// if vm_page_free_count > vm_page_free_min, then XNU
-		// is scanning pages and we may want to try to free some memory up
-
-		int64_t above_min_free_pages = (int64_t)vm_page_free_count - (int64_t)vm_page_free_min;
-		int64_t above_min_free_bytes = (int64_t)PAGESIZE * above_min_free_pages;
-
-		// vm_page_free_min normally 3500, page free target normally 4000 but not exported
-		// so we are not scanning if we are 500 pages above vm_page_free_min.
-
-		// even if we're scanning we may have plenty of space in the reserve arena,
-		// in which case we should not react too strongly
-
-		// if we have been in memory equilibrium, also don't react too strongly
-
-                if (above_min_free_bytes < (int64_t)PAGESIZE * 500LL && reserve_low
-		    && !early_lots_free && !memory_equilibrium) {
-			// trigger a reap below
-			lowmem = true;
-		}
-		extern volatile unsigned int vm_page_speculative_count;
-		if ((above_min_free_bytes < 0LL && reserve_low && !early_lots_free &&
-			!memory_equilibrium && !just_alloced) ||
-		    above_min_free_bytes <= -4LL*1024LL*1024LL) {
-			int64_t new_p = -1LL * above_min_free_bytes;
-			boolean_t fast = FALSE;
-			emergency_lowmem = true;
-			lowmem = true;
-			recent_lowmem = time_now;
-			last_disequilibrium = time_now_seconds;
-			int64_t spec_bytes = (int64_t)vm_page_speculative_count * (int64_t)PAGESIZE;
-			if (vm_page_free_wanted > 0 || new_p > spec_bytes) {
-				// force a stronger reaction from ARC if we are also low on
-				// speculative pages (xnu prefetched file blocks with no clients yet)
-				fast = TRUE;
-			}
-			spl_free_set_pressure_both(new_p, fast);
-		} else if (above_min_free_bytes < 0LL && !early_lots_free) {
-			lowmem = true;
-			if (recent_lowmem == 0)
-				recent_lowmem = time_now;
-			if (!memory_equilibrium)
-				last_disequilibrium = time_now_seconds;
-		}
-
-		new_spl_free += above_min_free_bytes;
-
-		// If we have already detected a  memory shortage and we
-		// have not reaped in a while (a short while for emergency_lowmem),
-		// then do a kmem_reap() now.
-		// See http://comments.gmane.org/gmane.os.illumos.devel/22552
-		// (notably Richard Elling's "A kernel module can call kmem_reap() whenever
-		// it wishes and some modules, like zfs, do so."
-		// If we reap, stop processing spl_free on this pass, to
-		// let the reaps (and arc, if pressure has been set above)
-		// do their job for a few milliseconds.
-		if (emergency_lowmem || lowmem) {
-			static uint64_t last_reap = 0;
-			uint64_t now = time_now;
-			uint64_t elapsed = 60*hz;
-			if (emergency_lowmem)
-				elapsed = 15*hz; // minimum frequency from kmem_reap_interval
-			if (now - last_reap > elapsed) {
-				last_reap = now;
-				// spl_free_reap_caches() calls functions that will
-				// acquire locks and can take a while
-				// so set spl_free to a small positive value
-				// to stop arc shrinking too much during this period
-				// when we expect to be freeing up arc-usable memory,
-				// but low enough that arc_no_grow likely will be set.
-				const int64_t two_spamax = 32LL * 1024LL * 1024LL;
-				if (spl_free < two_spamax)
-					spl_free = two_spamax; // atomic!
-				spl_free_reap_caches();
-				// we do not have any lock now, so we can jump
-				// to just before the thread-suspending code
-				goto justwait;
-			}
-		}
-
-		// a number or exceptions to reverse the lowmem / emergency_lowmem states
-		// if we have recently reaped.  we also take the strong reaction sting
-		// out of the set pressure by turning off spl_free_fast_pressure, since
-		// that automatically provokes an arc shrink and arc reap
-
-		if (!reserve_low || early_lots_free || memory_equilibrium || just_alloced) {
-			lowmem = false;
-			emergency_lowmem = false;
-			spl_free_fast_pressure = FALSE;
-		}
-
-		if (vm_page_speculative_count > 0) {
-			// speculative memory can be squeezed a bit; it is file blocks  that
-			// have been prefetched by xnu but are not (yet) in use by any
-			// consumer
-			if (vm_page_speculative_count / 4 + vm_page_free_count > vm_page_free_min) {
-				emergency_lowmem = false;
-				spl_free_fast_pressure = FALSE;
-			}
-			if (vm_page_speculative_count / 2 + vm_page_free_count > vm_page_free_min) {
-				lowmem = false;
-				spl_free_fast_pressure = FALSE;
-			}
-		}
-
-		// Stay in a low memory condition for several seconds after we
-		// first detect that we are in it, giving the system (arc, xnu and userland)
-		// time to adapt
-
-		if (!lowmem && recent_lowmem > 0) {
-			if (recent_lowmem + 4*hz < time_now)
-				lowmem = true;
-			else
-				recent_lowmem = 0;
-		}
-
-		// if we are in a lowmem "hangover", cure it with pressure, then wait
-		// for the pressure to take effect in arc.c code
-
-		// triggered when we have had at least one lowmem in the previous
-		// few seconds -- possibly two (one that causes a reap, one
-		// that falls through to the 4 second hold above).
-
-		if (recent_lowmem == time_now && early_lots_free && reserve_low) {
-			// we can't grab 64 MiB as a single segment,
-			// but otherwise have ample memory brought in from xnu,
-			// but recently we had lowmem... and still have lowmem.
-			// cure this condition with a dose of pressure.
-			if (above_min_free_bytes < 0) {
-				int64_t old_p = spl_free_manual_pressure;
-				if (old_p <= -above_min_free_bytes) {
-					recent_lowmem = 0;
-					spl_free_manual_pressure = -above_min_free_bytes;
-					goto justwait;
-				}
-			}
-		}
-
-		base = new_spl_free;
-
-		// adjust for available memory in spl_heap_arena
-		// cf arc_available_memory()
-		if (!emergency_lowmem) {
-			extern vmem_t *spl_default_arena;
-			int64_t heap_free = (int64_t)vmem_size_semi_atomic(spl_heap_arena, VMEM_FREE);
-			// grabbed buckets_free up above; we are OK with change to it in the meanwhile,
-			// it'll get an update on the next run.
-			int64_t combined_free = heap_free + buckets_free;
-
-			if (combined_free != 0) {
-				const int64_t mb = 1024*1024;
-				if (!lowmem && above_min_free_bytes > (int64_t)PAGESIZE * 10000LL) {
-					if (above_min_free_bytes < 64LL * mb)
-						new_spl_free += combined_free / 16;
-					else if (above_min_free_bytes < 128LL * mb)
-						new_spl_free += combined_free / 8;
-					else if (above_min_free_bytes < 256LL * mb)
-						new_spl_free += combined_free / 4;
-					else
-						new_spl_free += combined_free / 2;
-				} else {
-					new_spl_free -= 16LL * mb;
-				}
-			}
-
-			// memory footprint has gotten really big, decrease spl_free substantially
-			int64_t total_mem_used = (int64_t) segkmem_total_mem_allocated;
-			if ((segkmem_total_mem_allocated * 100LL / real_total_memory) > 70) {
-				new_spl_free -= total_mem_used / 64;
-			} else if ((segkmem_total_mem_allocated * 100LL / real_total_memory) > 75) {
-				new_spl_free -= total_mem_used / 32;
-				lowmem = true;
-			}
-		}
-
-		// Adjust in the face of a large ARC.
-		// We don't treat (zfs) metadata and non-metadata
-		// differently here, and leave policy with respect
-		// to the relative value of each up to arc.c.
-		// O3X arc.c does not (yet) take these arena sizes into
-		// account like Illumos's does.
-		uint64_t zio_size = vmem_size_semi_atomic(zio_arena_parent, VMEM_ALLOC | VMEM_FREE);
-		// wrap this in a basic block for lexical scope SSA convenience
-		if (zio_size > 0) {
-			static uint64_t zio_last_too_big = 0;
-			static int64_t imposed_cap = 75;
-			const uint64_t seconds_of_lower_cap = 10*hz;
-			uint64_t now = time_now;
-			uint32_t zio_pct = (uint32_t)(zio_size * 100ULL / real_total_memory);
-			// if not hungry for memory, shrink towards a
-			// 75% total memory cap on zfs_file_data
-			if (!lowmem && !emergency_lowmem && zio_pct > 75 &&
-			    (now > zio_last_too_big + seconds_of_lower_cap)) {
-				new_spl_free -= zio_size / 64;
-				zio_last_too_big = now;
-				imposed_cap = 75;
-			} else if (lowmem || emergency_lowmem) {
-				// shrink towards stricter caps if we are hungry for memory
-				const uint32_t lowmem_cap = 25;
-				const uint32_t emergency_lowmem_cap = 5;
-				// we don't want the lowest cap to be so low that
-				// we will not make any use of the fixed size reserve
-				if (lowmem && zio_pct > lowmem_cap) {
-					new_spl_free -= zio_size / 32;
-					zio_last_too_big = now;
-					imposed_cap = lowmem_cap;
-				}
-				if (emergency_lowmem && zio_pct > emergency_lowmem_cap) {
-					new_spl_free -= zio_size / 8;
-					zio_last_too_big = now;
-					imposed_cap = emergency_lowmem_cap;
-				}
-			}
-			if (zio_last_too_big != now &&
-			    now < zio_last_too_big + seconds_of_lower_cap &&
-			    zio_pct > imposed_cap) {
-				new_spl_free -= zio_size / 64;
-			}
-		}
-
-		// try to get 1/64 of spl_heap_arena freed up
-		if (emergency_lowmem && new_spl_free >= 0LL) {
-			extern vmem_t *spl_root_arena;
-			uint64_t root_size = vmem_size_semi_atomic(spl_heap_arena, VMEM_ALLOC | VMEM_FREE);
-			uint64_t root_free = vmem_size_semi_atomic(spl_heap_arena, VMEM_FREE);
-			int64_t difference = root_size - root_free;
-			int64_t target = root_size / 64;
-			if (difference < target) {
-				new_spl_free -= target;
-			}
-			// and we should definitely not be returning positive now
-			if (new_spl_free >= 0LL)
-				new_spl_free = -1024LL;
-		}
-
-		double delta = (double)new_spl_free - (double)last_spl_free;
-
-		boolean_t spl_free_is_negative = false;
-
- 		if (new_spl_free < 0LL) {
-			spl_stats.spl_spl_free_negative_count.value.ui64++;
-			spl_free_is_negative = true;
-		}
-
-		// NOW set spl_free from calculated new_spl_free
-                spl_free = new_spl_free;
-		// the direct equivalent of :
-		// __c11_atomic_store(&spl_free, new_spl_free, __ATOMIC_SEQ_CST);
-
-
-		// Because we're already negative, arc is likely to have been
-		// signalled already. We can rely on the _maybe_ in
-		// spl-vmem.c:xnu_alloc_throttled() [XAT] to try to give arc a
-		// kick with greater probability.
-		// However, if we've gone negative several times, and have not
-		// tried a full kick in a long time, do so now; if the full kick
-		// is refused because there has been a kick too few minutes ago,
-		// try a gentler kick.
-		// We do this outside the lock, as spl_maybe_send_large_pressure
-		// may need to take a mutex, and we forbid further mutex entry when
-		// spl_free_lock is held.
-
-		if (spl_free_is_negative) {
-			static volatile _Atomic uint32_t negatives_since_last_kick = 0;
-
-			if (negatives_since_last_kick++ > 8) {
-				if (spl_maybe_send_large_pressure(time_now, 360, true) ||
-				    spl_maybe_send_large_pressure(time_now, 60, false)) {
-					negatives_since_last_kick = 0;
-				}
-			}
-		}
-
-		if (lowmem)
-			recent_lowmem = time_now;
-
-		// maintain an exponential moving average for the ema kstat
-		if (last_update > hz)
-			alpha = 1.0;
-		else {
-			double td_tick  = (double)(time_now - last_update);
-			alpha = td_tick / (double)(hz*50.0); // roughly 0.02
-		}
-
-		ema_new = (alpha * delta) + (1.0 - alpha)*ema_old;
-		spl_free_delta_ema = ema_new;
-		ema_old = ema_new;
+		
+		kmem_manage_memory();
 
 	justwait:
 		mutex_enter(&spl_free_thread_lock);
@@ -4829,7 +4851,6 @@ spl_free_thread()
 	printf("SPL: %s thread_exit\n", __func__);
 	thread_exit();
 }
-
 
 static int
 spl_kstat_update(kstat_t *ksp, int rw)
@@ -5220,7 +5241,8 @@ spl_kmem_thread_init(void)
 							  300, INT_MAX, TASKQ_PREPOPULATE);
 
 	spl_free_thread_exit = FALSE;
-	(void) thread_create(NULL, 0, spl_free_thread, 0, 0, 0, 0, 92);
+	// BGH turn off free thread, rely on notifications from kernel
+	// (void) thread_create(NULL, 0, spl_free_thread, 0, 0, 0, 0, 92);
 	(void) cv_init(&spl_free_thread_cv, NULL, CV_DEFAULT, NULL);
 }
 
@@ -5229,19 +5251,20 @@ spl_kmem_thread_fini(void)
 {
 	shutting_down = 1;
 
-	printf("SPL: stop spl_free_thread\n");
-	mutex_enter(&spl_free_thread_lock);
-	printf("SPL: stop spl_free_thread, lock acquired, setting exit variable and waiting\n");
-	spl_free_thread_exit = TRUE;
-	while (spl_free_thread_exit) {
-		cv_signal(&spl_free_thread_cv);
-		cv_wait(&spl_free_thread_cv, &spl_free_thread_lock);
-	}
-	printf("SPL: spl_free_thread stop: while loop ended, dropping mutex\n");
-	mutex_exit(&spl_free_thread_lock);
-	printf("SPL: spl_free_thread stop: destroying cv and mutex\n");
-	cv_destroy(&spl_free_thread_cv);
-	mutex_destroy(&spl_free_thread_lock);
+	// BGH - thread not in use on this branch
+	//printf("SPL: stop spl_free_thread\n");
+	//mutex_enter(&spl_free_thread_lock);
+	//printf("SPL: stop spl_free_thread, lock acquired, setting exit variable and waiting\n");
+	//spl_free_thread_exit = TRUE;
+	//while (spl_free_thread_exit) {
+	//	cv_signal(&spl_free_thread_cv);
+	//	cv_wait(&spl_free_thread_cv, &spl_free_thread_lock);
+	//}
+	//printf("SPL: spl_free_thread stop: while loop ended, dropping mutex\n");
+	//mutex_exit(&spl_free_thread_lock);
+	//printf("SPL: spl_free_thread stop: destroying cv and mutex\n");
+	//cv_destroy(&spl_free_thread_cv);
+	//mutex_destroy(&spl_free_thread_lock);
 
 	printf("SPL: bsd_untimeout\n");
 	bsd_untimeout(kmem_update,  0);
