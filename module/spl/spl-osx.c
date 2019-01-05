@@ -37,6 +37,8 @@
 #include <sys/utsname.h>
 #include <sys/ioctl.h>
 #include <sys/taskq.h>
+#include <vm/vm_monitor.h>
+
 //#define MACH_KERNEL_PRIVATE
 
 #include <kern/processor.h>
@@ -474,6 +476,7 @@ static void spl_start_continue(void *ignored)
     spl_vnode_init();
 	spl_kmem_thread_init();
 	spl_kmem_mp_init();
+	vm_monitor_init();
 
 	spl_initialised = 1;
 
@@ -487,6 +490,7 @@ static void spl_start_continue(void *ignored)
 
 kern_return_t spl_stop (kmod_info_t * ki, void * d)
 {
+	vm_monitor_fini();
 	spl_kmem_thread_fini();
     spl_vnode_fini();
     spl_taskq_fini();
