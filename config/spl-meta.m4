@@ -37,7 +37,7 @@ AC_DEFUN([SPL_AC_META], [
 		SPL_META_RELEASE=_SPL_AC_META_GETVAL([RELEASE]);
 		if git rev-parse --git-dir > /dev/null 2>&1; then
 			_match="${SPL_META_NAME}-${SPL_META_VERSION}*"
-			_alias=$(git describe --match=${_match} 2>/dev/null)
+			_alias=$(git describe --tags --match=${_match} 2>/dev/null)
 			_release=$(echo ${_alias}|cut -f3- -d'-')
 			if test -n "${_release}"; then
 				SPL_META_RELEASE=${_release}
