@@ -29,6 +29,13 @@
 #include <sys/types.h>
 #include <kern/locks.h>
 
+
+/*
+ * Define to track the allocs looking for leaks. It is expensive
+ * so use it when unloading SPL reports leaks.
+ */
+//#define SPL_DEBUG_RWLOCK
+
 typedef enum {
         RW_DRIVER  = 2,
         RW_DEFAULT = 4
@@ -45,13 +52,22 @@ struct krwlock {
     void       *rw_owner;    /* writer (exclusive) lock only */
     int        rw_readers;   /* reader lock only */
     int        rw_pad;       /* */
+#ifdef SPL_DEBUG_RWLOCK
+	void *leak;
+#endif
 };
 typedef struct krwlock  krwlock_t;
 
 #define RW_WRITE_HELD(x)        (rw_write_held((x)))
 #define RW_LOCK_HELD(x)         (rw_lock_held((x)))
 
+#ifdef SPL_DEBUG_RWLOCK
+#define rw_init(A, B, C, D) rw_initx(A,B,C,D,__FILE__,__FUNCTION__,__LINE__)
+extern  void  rw_initx(krwlock_t *, char *, krw_type_t, void *,
+	const char *, const char *, int);
+#else
 extern  void  rw_init(krwlock_t *, char *, krw_type_t, void *);
+#endif
 extern  void  rw_destroy(krwlock_t *);
 extern  void  rw_enter(krwlock_t *, krw_t);
 extern  int   rw_tryenter(krwlock_t *, krw_t);
