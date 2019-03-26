@@ -118,6 +118,8 @@ typedef uint_t				minor_t;
 #ifdef __APPLE__
 #define FSYNC           O_SYNC  /* file (data+inode) integrity while writing */
 #define FDSYNC          O_DSYNC /* file data only integrity while writing */
+#define FOFFMAX         0x0000  /* not used */
+#define FRSYNC          0x0000  /* not used */
 #else
 #define FRSYNC          0x8000  /* sync read operations at same level of */
                                 /* integrity as specified for writes by */
