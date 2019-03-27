@@ -62,9 +62,20 @@ extern uint64_t physmem;
 	 */
 
 // Work around symbol collisions in XNU
+#define MEMLEAK
+
+#ifdef MEMLEAK
+    void* leak_zfs_kmem_alloc(size_t size, int kmflags, char *, int);
+    void* leak_zfs_kmem_zalloc(size_t size, int kmflags, char *t, int);
+    void leak_zfs_kmem_free(void *buf, size_t size, char *, int);
+#define kmem_alloc(size, kmflags)   leak_zfs_kmem_alloc((size), (kmflags), __FILE__, __LINE__)
+#define kmem_zalloc(size, kmflags)  leak_zfs_kmem_zalloc((size), (kmflags), __FILE__, __LINE__)
+#define kmem_free(buf, size)        leak_zfs_kmem_free((buf), (size), __FILE__, __LINE__)
+#else
 #define kmem_alloc(size, kmflags)   zfs_kmem_alloc((size), (kmflags))
 #define kmem_zalloc(size, kmflags)  zfs_kmem_zalloc((size), (kmflags))
 #define kmem_free(buf, size)        zfs_kmem_free((buf), (size))
+#endif
 
     void* zfs_kmem_alloc(size_t size, int kmflags);
     void* zfs_kmem_zalloc(size_t size, int kmflags);

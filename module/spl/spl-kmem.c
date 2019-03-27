@@ -639,7 +639,7 @@ caller()
 void *
 calloc(size_t n, size_t s)
 {
-	return (zfs_kmem_zalloc(n * s, KM_NOSLEEP));
+	return (kmem_zalloc(n * s, KM_NOSLEEP));
 }
 
 #define	IS_DIGIT(c)	((c) >= '0' && (c) <= '9')
@@ -1878,14 +1878,14 @@ void
 kmem_dump_init(size_t size)
 {
 	if (kmem_dump_start != NULL)
-		zfs_kmem_free(kmem_dump_start, kmem_dump_size);
+		kmem_free(kmem_dump_start, kmem_dump_size);
 
 	if (kmem_dump_log == NULL)
 		kmem_dump_log =
-			(kmem_dump_log_t *)zfs_kmem_zalloc(
+			(kmem_dump_log_t *)kmem_zalloc(
 				KMEM_DUMP_LOGS * sizeof (kmem_dump_log_t), KM_SLEEP);
 
-	kmem_dump_start = zfs_kmem_alloc(size, KM_SLEEP);
+	kmem_dump_start = kmem_alloc(size, KM_SLEEP);
 
 	if (kmem_dump_start != NULL) {
 		kmem_dump_size = size;
@@ -2562,6 +2562,125 @@ kmem_slab_prefill(kmem_cache_t *cp, kmem_slab_t *sp)
 	mutex_enter(&cp->cache_lock);
 }
 
+#ifdef MEMLEAK
+
+// We allocate externally to SPL, for the leak nodes.
+extern void *kalloc(vm_size_t size);
+extern void kfree(void *data, vm_size_t size);
+
+#define MEMLEAK_LOW  32  /* Inclusive */
+#define MEMLEAK_HIGH 64  /* Exclusive */
+typedef struct memleak {
+	void *addr;
+	uint64_t size;
+	char file[20];
+	unsigned int line;
+	avl_node_t avlnode;
+} memleak_t;
+static avl_tree_t memleak_tree;
+static kmutex_t memleak_lock;
+
+static int memleak_compare(const void *arg1, const void *arg2)
+{
+	const memleak_t *node1 = arg1;
+	const memleak_t *node2 = arg2;
+	if (node1->addr > node2->addr)
+		return 1;
+	if (node1->addr < node2->addr)
+		return -1;
+	return 0;
+}
+
+
+static inline void leak_add(void *ptr, size_t size, char *file, int line)
+{
+	if (size == 0) printf("SPL: alloc size zero from %s:%u\n",
+		file, line);
+
+	if (size >= MEMLEAK_LOW && size < MEMLEAK_HIGH) {
+		memleak_t search, *ml = NULL;
+		avl_index_t loc;
+
+		search.addr = ptr;
+		mutex_enter(&memleak_lock);
+		ml = avl_find(&memleak_tree, &search, &loc);
+		mutex_exit(&memleak_lock);
+
+		if (ml) {
+			printf("SPL: leak %p exists %s:%u ml->size %llu, called %lu from %s:%u\n",
+				ptr, ml->file, ml->line,
+				ml->size, size, file, line);
+			return;
+		}
+
+		ml = kalloc(sizeof(*ml));
+		if (ml) {
+			char *r;
+			strlcpy(ml->file, (r = strrchr(file, '/')) ? r+1 : file,
+				sizeof(ml->file));
+			ml->line = line;
+			ml->addr = ptr;
+			ml->size = size;
+			mutex_enter(&memleak_lock);
+			avl_add(&memleak_tree, ml);
+			mutex_exit(&memleak_lock);
+		}
+	}
+}
+
+
+void *
+leak_zfs_kmem_zalloc(size_t size, int kmflag, char *file, int line)
+{
+	void *ptr;
+	ptr = zfs_kmem_zalloc(size, kmflag);
+	leak_add(ptr, size, file, line);
+	return ptr;
+}
+
+void *
+leak_zfs_kmem_alloc(size_t size, int kmflag, char *file, int line)
+{
+	void *ptr;
+	ptr = zfs_kmem_alloc(size, kmflag);
+	leak_add(ptr, size, file, line);
+	return ptr;
+}
+
+void
+leak_zfs_kmem_free(void *buf, size_t size, char *file, int line)
+{
+	memleak_t search, *ml = NULL;
+	avl_index_t loc;
+
+	if (buf == NULL) printf("SPL: kmem_free(NULL) from %s:%u\n",
+		file, line);
+
+	if (size >= MEMLEAK_LOW && size < MEMLEAK_HIGH) {
+		search.addr = buf;
+
+		mutex_enter(&memleak_lock);
+		ml = avl_find(&memleak_tree, &search, &loc);
+		if (ml)
+			avl_remove(&memleak_tree, ml);
+		mutex_exit(&memleak_lock);
+
+		if (ml) {
+			if (ml->size != size)
+				printf("SPL: leak free of %p different size %llu != %lu from %s:%u\n",
+					ml->addr, ml->size, size, ml->file, ml->line);
+			kfree(ml, sizeof(*ml));
+			ml = NULL;
+		} else {
+			printf("SPL: leak free of %p:%lu not in memleak_tree %s:%u\n",
+				buf, size, file, line);
+		}
+	}
+
+	zfs_kmem_free(buf, size);
+}
+#endif
+
 void *
 zfs_kmem_zalloc(size_t size, int kmflag)
 {
@@ -2710,7 +2829,7 @@ kmem_alloc_tryhard(size_t size, size_t *asize, int kmflag)
 	} while (*asize <= PAGESIZE);
 
 	*asize = P2ROUNDUP(size, KMEM_ALIGN);
-	return (zfs_kmem_alloc(*asize, kmflag));
+	return (kmem_alloc(*asize, kmflag));
 }
 
 /*
@@ -5057,6 +5176,14 @@ spl_kmem_init(uint64_t xtotal_memory)
 
 	kmem_slab_log = kmem_log_init(kmem_slab_log_size);
 
+#ifdef MEMLEAK
+	mutex_init(&memleak_lock, NULL, MUTEX_DEFAULT, NULL);
+	avl_create(&memleak_tree, memleak_compare,
+		sizeof (memleak_t), offsetof(memleak_t, avlnode));
+	printf("SPL: Looking for leaks in %u >= size < %u \n",
+		MEMLEAK_LOW, MEMLEAK_HIGH);
+#endif
+
 	spl_tsd_init();
 	spl_rwlock_init();
 	spl_taskq_init();
@@ -5107,11 +5234,29 @@ spl_kmem_init(uint64_t xtotal_memory)
 		spl_ksp->ks_update = spl_kstat_update;
 		kstat_install(spl_ksp);
 	}
+
 }
 
 void
 spl_kmem_fini(void)
 {
+
+#ifdef MEMLEAK
+	memleak_t *ml;
+	void *cookie = NULL;
+	printf("SPL: Leaks, numnodes %lu\n", avl_numnodes(&memleak_tree));
+	mutex_enter(&memleak_lock);
+	while((ml = avl_destroy_nodes(&memleak_tree, &cookie))) {
+		printf("SPL: memleak %p:%llu from %s:%u\n",
+			ml->addr, ml->size, ml->file, ml->line);
+		kfree(ml, sizeof(*ml));
+	}
+	printf("SPL: End of leaks (if any)\n");
+	avl_destroy(&memleak_tree);
+	mutex_exit(&memleak_lock);
+	mutex_destroy(&memleak_lock);
+#endif
+
 	sysctl_unregister_oid(&sysctl__spl_kext_version);
 	sysctl_unregister_oid(&sysctl__spl);
 
@@ -5898,7 +6043,7 @@ kmem_cache_move_notify_task(void *arg)
 	ASSERT(taskq_member(kmem_taskq, curthread));
 	ASSERT(list_link_active(&cp->cache_link));
 
-	zfs_kmem_free(args, sizeof (kmem_move_notify_args_t));
+	kmem_free(args, sizeof (kmem_move_notify_args_t));
 	mutex_enter(&cp->cache_lock);
 	sp = kmem_slab_allocated(cp, NULL, buf);
 
@@ -5958,14 +6103,14 @@ kmem_cache_move_notify(kmem_cache_t *cp, void *buf)
 {
 	kmem_move_notify_args_t *args;
 
-	args = zfs_kmem_alloc(sizeof (kmem_move_notify_args_t), KM_NOSLEEP);
+	args = kmem_alloc(sizeof (kmem_move_notify_args_t), KM_NOSLEEP);
 	if (args != NULL) {
 		args->kmna_cache = cp;
 		args->kmna_buf = buf;
 		if (!taskq_dispatch(kmem_taskq,
 							(task_func_t *)kmem_cache_move_notify_task, args,
 							TQ_NOSLEEP))
-			zfs_kmem_free(args, sizeof (kmem_move_notify_args_t));
+			kmem_free(args, sizeof (kmem_move_notify_args_t));
 	}
 }
 
@@ -6179,7 +6324,7 @@ spl_vm_pool_low(void)
 void
 strfree(char *str)
 {
-	zfs_kmem_free(str, strlen(str) + 1);
+	kmem_free(str, strlen(str) + 1);
 }
 
 char *
@@ -6192,7 +6337,7 @@ kvasprintf(const char *fmt, va_list ap)
 	va_copy(aq, ap);
 	len = vsnprintf(NULL, 0, fmt, aq);
 	va_end(aq);
-	p = zfs_kmem_alloc(len+1, KM_SLEEP);
+	p = kmem_alloc(len+1, KM_SLEEP);
 	if (!p)
 		return (NULL);
 
