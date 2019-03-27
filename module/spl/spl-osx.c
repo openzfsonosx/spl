@@ -309,9 +309,9 @@ void spl_backtrace(char *thesignal)
 			printf("SPL: No mapping exists for frame pointer\n");
 			break;
 		}
-		printf("SPL: %p : 0x%lx ", frame, frame->caller);
+		//printf("SPL: %p : 0x%lx ", frame, frame->caller);
 		panic_print_symbol_name((vm_address_t)frame->caller);
-		printf("\n");
+		//printf("\n");
 		frame = frame->prev;
 	}
 
@@ -362,9 +362,9 @@ void
 print_symbol(uintptr_t symbol)
 {
 #ifdef DEBUG
-    printf("SPL: ");
+    //printf("SPL: ");
     panic_print_symbol_name((vm_address_t)(symbol));
-    printf("\n");
+    //printf("\n");
 #endif
 }
 
