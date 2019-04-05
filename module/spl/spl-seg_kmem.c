@@ -247,9 +247,14 @@ segkmem_zio_init()
 
 	extern vmem_t *spl_heap_arena;
 
+	/* Commented out the 16 * 1024 as it looks like memory leak
+	 * due to the extra kmem_caches not getting released, as
+	 * it panics in vmem_destroy for us. Possibly they are released
+	 * some other way on this platform?
+	 */
 	zio_arena_parent = vmem_create("zfs_qcache", NULL, 0,
 	    PAGESIZE, vmem_alloc, vmem_free, spl_heap_arena,
-	    16 * 1024, VM_SLEEP | VMC_TIMEFREE);
+	    0 /* 16 * 1024*/ , VM_SLEEP | VMC_TIMEFREE);
 
 	ASSERT(zio_arena_parent != NULL);
 
