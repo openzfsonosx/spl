@@ -2036,16 +2036,16 @@ vmem_create_common(const char *name, void *base, size_t size, size_t quantum,
 		for (i = 0; i < nqcache; i++) {
 			char buf[VMEM_NAMELEN + 21];
 			(void) snprintf(buf, VMEM_NAMELEN + 20, "%s_%lu", vmp->vm_name,
-							(i + 1) * quantum);
+			    (i + 1) * quantum);
 			vmp->vm_qcache[i] = kmem_cache_create(buf,
-												  (i + 1) * quantum, quantum, NULL, NULL, NULL,
-												  NULL, vmp, KMC_QCACHE | KMC_NOTOUCH);
+			    (i + 1) * quantum, quantum, NULL, NULL, NULL,
+			    NULL, vmp, KMC_QCACHE | KMC_NOTOUCH);
 		}
 	}
 
 	if ((vmp->vm_ksp = kstat_create("vmem", vmp->vm_id, vmp->vm_name,
-									"vmem", KSTAT_TYPE_NAMED, sizeof (vmem_kstat_t) /
-									sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL)) != NULL) {
+	    "vmem", KSTAT_TYPE_NAMED, sizeof (vmem_kstat_t) /
+	    sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL)) != NULL) {
 		vmp->vm_ksp->ks_data = &vmp->vm_kstat;
 		kstat_install(vmp->vm_ksp);
 	}
@@ -2115,6 +2115,17 @@ vmem_destroy(vmem_t *vmp)
 		vmpp = &cur->vm_next;
 	*vmpp = vmp->vm_next;
 	mutex_exit(&vmem_list_lock);
+
+#ifdef sun
+	// This should remove the kmem_caches that vmem_create will
+	// setup if it is given a qcache_max. (See zfs_qcache_) but
+	// this dies hard on OsX. We use
+	// kmem_destroy_cache_by_name(const char *substr)
+	// later on to destroy them.
+	for (int i = 0; i < VMEM_NQCACHE_MAX; i++)
+		if (vmp->vm_qcache[i])
+			kmem_cache_destroy(vmp->vm_qcache[i]);
+#endif
 
 	leaked = vmem_size(vmp, VMEM_ALLOC);
 	if (leaked != 0)
