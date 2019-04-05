@@ -2599,9 +2599,7 @@ zfs_kmem_alloc(size_t size, int kmflag)
 	kmem_cache_t *cp;
 	void *buf;
 
-	/* If flag KM_SLEEP was used, we must not return NULL so adjust size */
-	if (size == 0)
-		size = 1;
+	if (size == 0) return KMEM_ZERO_SIZE_PTR;
 
 	if ((index = ((size - 1) >> KMEM_ALIGN_SHIFT)) < KMEM_ALLOC_TABLE_MAX) {
 		cp = kmem_alloc_table[index];
@@ -2647,10 +2645,8 @@ zfs_kmem_free(void *buf, size_t size)
 	size_t index;
 	kmem_cache_t *cp;
 
-	if (size == 0 && buf == NULL)
+	if (size == 0 || buf == KMEM_ZERO_SIZE_PTR || buf == NULL)
 		return;
-	else if (size == 0)
-		size = 1;
 
 	if ((index = (size - 1) >> KMEM_ALIGN_SHIFT) < KMEM_ALLOC_TABLE_MAX) {
 		cp = kmem_alloc_table[index];
