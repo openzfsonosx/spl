@@ -1420,6 +1420,17 @@ taskq_wait(taskq_t *tq)
 }
 
 /*
+ * ZOL implements taskq_wait_id() that can wait for a specific
+ * taskq to finish, rather than all active taskqs. Until it is
+ * implemented, we wait for all to complete.
+ */
+void
+taskq_wait_id(taskq_t *tq, taskqid_t id)
+{
+	return taskq_wait(tq);
+}
+
+/*
  * Suspend execution of tasks.
  *
  * Tasks in the queue part will be suspended immediately upon return from this
