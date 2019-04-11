@@ -92,6 +92,10 @@ rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
 {
     ASSERT(type != RW_DRIVER);
 
+#ifdef DEBUG
+	VERIFY3U(rwlp->rw_pad, !=, 0x012345678);
+#endif
+
     lck_rw_init((lck_rw_t *)&rwlp->rw_lock[0],
                 zfs_rwlock_group, zfs_rwlock_attr);
     rwlp->rw_owner = NULL;
@@ -129,6 +133,10 @@ rw_init(krwlock_t *rwlp, char *name, krw_type_t type, __unused void *arg)
 void
 rw_destroy(krwlock_t *rwlp)
 {
+#ifdef DEBUG
+	VERIFY3U(rwlp->rw_pad, ==, 0x012345678);
+#endif
+
     lck_rw_destroy((lck_rw_t *)&rwlp->rw_lock[0], zfs_rwlock_group);
 #ifdef DEBUG
 	rwlp->rw_pad = 0x99;
