@@ -31,3 +31,4 @@ _decmpfs_decompress_file
 _decmpfs_file_is_compressed
 _decmpfs_cnode_init
 _decmpfs_cnode_destroy
+_cpuid_info
