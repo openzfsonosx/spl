@@ -88,20 +88,27 @@ static inline uint64_t xgetbv(uint32_t c) {
         return ((uint64_t) mask_hi<<32) + (uint64_t) mask_lo;
 }
 
+#endif
+
+extern uint64_t spl_cpuid_features(void);
+extern uint64_t spl_cpuid_leaf7_features(void);
+
+#define	ZFS_ASM_BUG()	{ ASSERT(0); } break
+
+#endif
+
 #define kfpu_begin()  ((void)0)
 #define kfpu_end()    ((void)0)
-
-#endif
-
-extern unsigned long long spl_cpuid_features(void);
-
-#endif
 
 /*
  * CPUID feature tests for user-space. Linux kernel provides an interface for
  * CPU feature testing.
  */
 #if !defined(_KERNEL)
+
+#include <assert.h>
+
+#define	ZFS_ASM_BUG()	{ assert(0); } break
 
 /*
  * x86 registers used implicitly by CPUID
@@ -280,9 +287,6 @@ __simd_state_enabled(const uint64_t state)
 #elif !defined(_KERNEL)
 	has_osxsave = __cpuid_has_osxsave();
 #endif
-
-	printf("%s: roger %d\n", __func__, has_osxsave);
-
 	if (!has_osxsave)
 		return (B_FALSE);
 
