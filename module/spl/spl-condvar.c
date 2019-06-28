@@ -100,16 +100,17 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, int flags,
 
 	// Check for events already in the past
 	if (tim < timenow)
-		tim = timenow;
+		return -1; // timedout
 
-    ts.tv_sec = MAX(1, (tim - timenow) / hz);
-    ts.tv_nsec = 0;
-#if 1
-    if (ts.tv_sec < 1)
-        ts.tv_nsec = 100;
-#endif
+	// Compute the delta
+	tim = tim - timenow;
+
+	// figure out sec and nsec
+	ts.tv_sec = (tim / hz);
+    ts.tv_nsec = (tim % hz) * NSEC_PER_SEC / hz;
+
     if (ts.tv_sec > 400) {
-        printf("cv_timedwait: would wait %lds\n", ts.tv_sec);
+        printf("cv_timedwait: would have waited %lds\n", ts.tv_sec);
 		ts.tv_sec = 5;
 	}
 #ifdef SPL_DEBUG_MUTEX
@@ -117,12 +118,14 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, int flags,
 #endif
     mp->m_owner = NULL;
     result = msleep(cvp, (lck_mtx_t *)&mp->m_lock, flags, msg, &ts);
-    mp->m_owner = current_thread();
+
+	// msleep grabs the mutex, even if timeout/signal
+	mp->m_owner = current_thread();
+
 #ifdef SPL_DEBUG_MUTEX
 	spl_wdlist_settime(mp->leak, gethrestime_sec());
 #endif
-    return (result == EWOULDBLOCK ? -1 : 0);
-
+	return (result == EWOULDBLOCK ? -1 : 0);
 }
 
 
