@@ -109,6 +109,12 @@ spl_cv_timedwait(kcondvar_t *cvp, kmutex_t *mp, clock_t tim, int flags,
 	ts.tv_sec = (tim / hz);
     ts.tv_nsec = (tim % hz) * NSEC_PER_SEC / hz;
 
+	// Both sec and nsec zero is a blocking call. (Not poll)
+	if (ts.tv_sec == 0 &&
+		ts.tv_nsec == 0)
+		ts.tv_nsec = 1000;
+
+	// Sanity check
     if (ts.tv_sec > 400) {
         printf("cv_timedwait: would have waited %lds\n", ts.tv_sec);
 		ts.tv_sec = 5;
