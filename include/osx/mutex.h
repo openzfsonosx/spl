@@ -13,6 +13,9 @@
 #include <kern/thread.h>
 #include <sys/proc.h>
 
+#ifdef     __cplusplus
+extern "C" {
+#endif
 
 typedef enum {
     MUTEX_ADAPTIVE = 0,     /* spin if owner is running, otherwise block */
@@ -100,5 +103,8 @@ void spl_mutex_subsystem_fini(void);
 
 #endif
 
+#ifdef     __cplusplus
+}
+#endif
 
 #endif

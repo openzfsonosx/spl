@@ -36,10 +36,14 @@
 #include <string.h>
 #include <sys/sysmacros.h>
 
-#ifdef     __cplusplus
 /* Avoid kcdata.h header error */
+#ifdef     __cplusplus
 extern "C" {
-	extern unsigned long  strnlen(const char *, unsigned long);
+#endif
+
+  extern unsigned long  strnlen(const char *, unsigned long);
+
+#ifdef     __cplusplus
 }
 #endif
 

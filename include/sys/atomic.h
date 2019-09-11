@@ -30,8 +30,9 @@
 #ifndef _SPL_ATOMIC_H
 #define _SPL_ATOMIC_H
 
-#include <libkern/OSAtomic.h>
 #include <sys/types.h>
+#include <string.h>
+#include <libkern/OSAtomic.h>
 #include <osx/atomic.h>
 
 #ifdef	__cplusplus

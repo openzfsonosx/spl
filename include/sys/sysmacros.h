@@ -28,11 +28,17 @@
 #ifndef _SPL_SYSMACROS_H
 #define _SPL_SYSMACROS_H
 
+#include <sys/types.h>
+#include <string.h>
 #include <spl-debug.h>
 #include <sys/varargs.h>
 #include <sys/zone.h>
 #include <sys/signal.h>
 #include <sys/param.h>
+
+#ifdef     __cplusplus
+extern "C" {
+#endif
 
 #ifndef _KERNEL
 #define _KERNEL				__KERNEL__
@@ -254,4 +260,8 @@ extern void spl_cleanup(void);
 
 #define SET_ERROR(X) (X)
 
+#ifdef     __cplusplus
+}
+#endif
+  
 #endif  /* _SPL_SYSMACROS_H */

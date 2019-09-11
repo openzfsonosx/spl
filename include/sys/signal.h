@@ -45,6 +45,7 @@
 #include <sys/vm.h>
 #include <sys/proc.h>
 #include_next <sys/signal.h>
+#include <kern/thread.h>
 
 #define	FORREAL		0	/* Usual side-effects */
 #define	JUSTLOOKING	1	/* Don't stop the process */

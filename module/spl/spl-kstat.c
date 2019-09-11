@@ -214,7 +214,7 @@ static int kstat_handle_i64 SYSCTL_HANDLER_ARGS
         }
 
         /* Copy the new value from user space */
-		copyin(req->newptr, &named->value.i64, sizeof(named->value.i64));
+	(void)copyin(req->newptr, &named->value.i64, sizeof(named->value.i64));
 
         /* and invoke the update operation */
         if (ksp->ks_update) {
@@ -261,7 +261,7 @@ static int kstat_handle_ui64 SYSCTL_HANDLER_ARGS
         }
 
         /* Copy the new value from user space */
-		copyin(req->newptr, &named->value.ui64, sizeof(named->value.ui64));
+	(void)copyin(req->newptr, &named->value.ui64, sizeof(named->value.ui64));
 
         /* and invoke the update operation */
         if (ksp->ks_update) {

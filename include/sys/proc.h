@@ -3,6 +3,7 @@
 #define _SPL_PROC_H
 
 #include <sys/ucred.h>
+#include <i386/locks.h>
 #include_next <sys/proc.h>
 #include <sys/kernel_types.h>
 
