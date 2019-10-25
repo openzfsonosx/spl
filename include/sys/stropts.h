@@ -29,6 +29,9 @@
 #ifndef _SPL_STROPTS_H
 #define _SPL_STROPTS_H
 
+#define LOCORE
+#include <sys/syslimits.h>
+#include <sys/param.h>
 #include <sys/types.h>
 #include <string.h>
 
@@ -108,10 +111,10 @@ static inline int
 lowbit(unsigned long long i)
 {
 	register int h = 1;
-		
+
 	if (i == 0)
 		return (0);
-		
+
 	if (!(i & 0xffffffff)) {
 		h += 32; i >>= 32;
 	}
@@ -132,7 +135,7 @@ lowbit(unsigned long long i)
 	}
 	return (h);
 }
-	
+
 static inline int
 isdigit(char c)
 {
