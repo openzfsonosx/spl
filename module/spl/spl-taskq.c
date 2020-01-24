@@ -570,7 +570,7 @@ int taskq_search_depth = TASKQ_SEARCH_DEPTH;
  * condition.
  */
 #ifdef __APPLE__
-#define	ENOUGH_MEMORY() (spl_vm_pool_low())
+#define	ENOUGH_MEMORY() (!spl_vm_pool_low())
 #else
 #define	ENOUGH_MEMORY() (freemem > throttlefree)
 #endif
